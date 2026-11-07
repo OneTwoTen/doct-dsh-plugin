@@ -19,9 +19,9 @@ const HELP_TEXT = [
   'Gửi tin nhắn văn bản để chuyển thành prompt cho phiên DSH đang gắn với chat này.',
   '',
   '/new [thư-mục] – tạo phiên mới (mặc định dùng workspace hoặc thư mục đang chọn)',
-  '/workspaces – liệt kê workspace của DSH',
+  '/workspaces – liệt kê workspace (có nút bấm để chọn)',
   '/workspace <số|id|đường-dẫn> – chọn workspace cho phiên mới',
-  '/models – liệt kê provider và model đang dùng được',
+  '/models – liệt kê provider và model (có nút bấm để chọn)',
   '/model <số|provider/model[@effort]> – đổi model cho phiên này',
   '/status – phiên đang gắn, workspace, model, trạng thái chạy',
   '/cancel – dừng lượt đang chạy',
@@ -50,9 +50,8 @@ export function mountTelegramRemote(ctx, config, deps) {
     allowedChatIds: [],
     bindings: {},
     prefs: {},
+    lists: {},
   })
-  /** Last numbered listing per chat, so `/workspace 2` and `/model 3` resolve. */
-  const listings = new Map()
 
   const controller = new AbortController()
   const chatQueues = new Map()
@@ -160,15 +159,64 @@ export function mountTelegramRemote(ctx, config, deps) {
   }
 
   async function reply(api, chatId, text, options = {}) {
-    for (const chunk of chunkText(text)) {
-      await api.sendMessage(chatId, chunk, options)
+    const { keyboard, ...rest } = options
+    const chunks = chunkText(text)
+    for (let index = 0; index < chunks.length; index += 1) {
+      const isLast = index === chunks.length - 1
+      await api.sendMessage(chatId, chunks[index], isLast && keyboard ? { ...rest, keyboard } : rest)
     }
   }
 
+  /** Last listing sent to this chat, so numbered replies and buttons resolve after a restart. */
+  function cachedList(chatId, kind) {
+    return store.state.lists?.[chatId]?.[kind] ?? []
+  }
+
+  async function saveListing(chatId, kind, items) {
+    await store.update((state) => {
+      const lists = state.lists ?? {}
+      state.lists = { ...lists, [chatId]: { ...(lists[chatId] ?? {}), [kind]: items } }
+    })
+  }
+
+  function shorten(value, max) {
+    const text = String(value ?? '')
+    return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+  }
+
+  function workspaceKeyboard(chatId, workspaces) {
+    const chosen = preferencesOf(chatId).workspaceId
+    return {
+      inline_keyboard: workspaces.map((workspace, index) => [{
+        text: `${workspace.id === chosen ? '✅ ' : ''}${index + 1}. ${shorten(workspace.title, 44)}`,
+        callback_data: `w:${index}`,
+      }]),
+    }
+  }
+
+  function modelKeyboard(chatId, models) {
+    const current = preferencesOf(chatId).model
+    const rows = []
+    let row = []
+    models.forEach((entry, index) => {
+      const chosen = current?.provider === entry.provider && current?.model === entry.model
+      row.push({
+        text: `${chosen ? '✅ ' : ''}${shorten(`${entry.provider} · ${entry.model}`, 46)}`,
+        callback_data: `m:${index}`,
+      })
+      if (row.length === 2) {
+        rows.push(row)
+        row = []
+      }
+    })
+    if (row.length > 0) rows.push(row)
+    return { inline_keyboard: rows }
+  }
+
   /** Edit one message, tolerating "message is not modified" and rate limits. */
-  async function editQuietly(api, chatId, messageId, text) {
+  async function editQuietly(api, chatId, messageId, text, options = {}) {
     try {
-      await api.editMessageText(chatId, messageId, text)
+      await api.editMessageText(chatId, messageId, text, options)
     } catch (error) {
       if (error instanceof TelegramError) {
         if (error.status === 400 && /not modified/i.test(error.description)) return
@@ -307,8 +355,8 @@ export function mountTelegramRemote(ctx, config, deps) {
     const all = listWorkspaces()
     const value = argument.trim()
     if (/^\d+$/.test(value)) {
-      const cached = listings.get(chatId)?.workspaces
-      const pool = cached && cached.length > 0 ? cached : all
+      const cached = cachedList(chatId, 'workspaces')
+      const pool = cached.length > 0 ? cached : all
       return pool[Number(value) - 1]
     }
     const lowered = value.toLowerCase()
@@ -324,8 +372,8 @@ export function mountTelegramRemote(ctx, config, deps) {
     const value = argument.trim()
     const flat = flattenModels(catalog)
     if (/^\d+$/.test(value)) {
-      const cached = listings.get(chatId)?.models
-      const pool = cached && cached.length > 0 ? cached : flat
+      const cached = cachedList(chatId, 'models')
+      const pool = cached.length > 0 ? cached : flat
       return pool[Number(value) - 1]
     }
     const at = value.indexOf('@')
@@ -489,7 +537,7 @@ export function mountTelegramRemote(ctx, config, deps) {
       }
       case 'workspaces': {
         const workspaces = listWorkspaces()
-        listings.set(chatId, { workspaces })
+        await saveListing(chatId, 'workspaces', workspaces)
         if (workspaces.length === 0) {
           await reply(api, chatId, 'DSH chưa có workspace nào. Dùng /new <thư-mục> để mở phiên trong một thư mục.')
           return
@@ -500,8 +548,8 @@ export function mountTelegramRemote(ctx, config, deps) {
           const mark = workspace.id === chosen ? ' ✅' : ''
           lines.push(`${index + 1}. ${workspace.title} — ${workspace.path}${mark}`)
         })
-        lines.push('', 'Chọn: /workspace <số|id|đường-dẫn>')
-        await reply(api, chatId, lines.join('\n'))
+        lines.push('', 'Chạm nút bên dưới để chọn, hoặc gõ /workspace <số|id|đường-dẫn>.')
+        await reply(api, chatId, lines.join('\n'), { keyboard: workspaceKeyboard(chatId, workspaces) })
         return
       }
       case 'workspace': {
@@ -528,7 +576,7 @@ export function mountTelegramRemote(ctx, config, deps) {
       case 'models': {
         const catalog = await loadModelCatalog()
         const flat = flattenModels(catalog)
-        listings.set(chatId, { models: flat })
+        await saveListing(chatId, 'models', flat)
         if (flat.length === 0) {
           await reply(api, chatId, 'Không đọc được model nào đang dùng được. Kiểm tra provider trong DSH.')
           return
@@ -551,8 +599,8 @@ export function mountTelegramRemote(ctx, config, deps) {
         for (const failure of catalog.failures ?? []) {
           lines.push(`⚠ ${failure.name ?? failure.id}: ${failure.message}`)
         }
-        lines.push('', 'Chọn: /model <số> hoặc /model provider/model[@effort]')
-        await reply(api, chatId, lines.join('\n'))
+        lines.push('', 'Chạm nút bên dưới để chọn, hoặc gõ /model <số> hay /model provider/model[@effort].')
+        await reply(api, chatId, lines.join('\n'), { keyboard: modelKeyboard(chatId, flat) })
         return
       }
       case 'model': {
@@ -685,6 +733,82 @@ export function mountTelegramRemote(ctx, config, deps) {
     })
   }
 
+  /** Apply a tapped inline button: a workspace choice or a model choice. */
+  async function handleCallback(api, query) {
+    const message = query?.message
+    const chatId = message?.chat ? String(message.chat.id) : undefined
+    const data = typeof query?.data === 'string' ? query.data : ''
+    const answer = async (text, showAlert = false) => {
+      try {
+        await api.answerCallbackQuery(query.id, text ? { text, showAlert } : {})
+      } catch (error) {
+        logger.warn('telegram-remote: answerCallbackQuery failed: %s', errorMessage(error))
+      }
+    }
+    if (!chatId) return
+
+    if (message.chat.type !== 'private' || !isAllowed(chatId)) {
+      await answer('Chat này chưa được ghép nối với DSH.')
+      return
+    }
+
+    const match = /^([wm]):(\d+)$/.exec(data)
+    if (!match) {
+      await answer()
+      return
+    }
+    const index = Number(match[2])
+    const messageId = message.message_id
+
+    if (match[1] === 'w') {
+      const target = cachedList(chatId, 'workspaces')[index]
+      if (!target) {
+        await answer('Danh sách đã cũ, gửi /workspaces lại nhé.', true)
+        return
+      }
+      await savePreferences(chatId, { workspaceId: target.id })
+      await answer('Đã chọn workspace')
+      await editQuietly(api, chatId, messageId, [
+        `🗂 Đã chọn workspace: ${target.title} — ${target.path}`,
+        `Id: ${target.id}`,
+        'Phiên hiện tại không đổi; gửi /new để mở phiên trong workspace này.',
+      ].join('\n'), { keyboard: { inline_keyboard: [] } })
+      return
+    }
+
+    const entry = cachedList(chatId, 'models')[index]
+    if (!entry) {
+      await answer('Danh sách đã cũ, gửi /models lại nhé.', true)
+      return
+    }
+
+    const binding = store.state.bindings?.[chatId]
+    const selection = { provider: entry.provider, model: entry.model }
+    let applied = selection
+    if (binding?.sessionId) {
+      try {
+        applied = await applyModel(binding.sessionId, selection)
+      } catch (error) {
+        await answer(`Không đổi được: ${errorMessage(error)}`, true)
+        return
+      }
+    }
+    await savePreferences(chatId, { model: applied })
+    if (binding?.sessionId) {
+      await store.update((state) => {
+        state.bindings = { ...(state.bindings ?? {}), [chatId]: { ...binding, model: applied } }
+      })
+    }
+    await answer('Đã chọn model')
+    await editQuietly(
+      api,
+      chatId,
+      messageId,
+      `🤖 Đã chọn ${modelLabel(applied)}${binding?.sessionId ? '' : ' cho phiên kế tiếp'}`,
+      { keyboard: { inline_keyboard: [] } },
+    )
+  }
+
   function enqueue(chatId, task) {
     const previous = chatQueues.get(chatId) ?? Promise.resolve()
     const next = previous.then(task, task)
@@ -779,6 +903,12 @@ export function mountTelegramRemote(ctx, config, deps) {
           await store.update((state) => {
             state.offset = update.update_id + 1
           })
+          if (update.callback_query) {
+            void handleCallback(api, update.callback_query).catch((error) => {
+              logger.error('telegram-remote: callback failed: %s', errorMessage(error))
+            })
+            continue
+          }
           void handleMessage(api, update.message).catch((error) => {
             logger.error('telegram-remote: update failed: %s', errorMessage(error))
           })

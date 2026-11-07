@@ -84,7 +84,7 @@ export class TelegramApi {
    * @param {{ offset?: number, timeoutSeconds?: number, allowedUpdates?: string[] }} options
    */
   getUpdates(options = {}, signal) {
-    const { offset, timeoutSeconds = 25, allowedUpdates = ['message'] } = options
+    const { offset, timeoutSeconds = 25, allowedUpdates = ['message', 'callback_query'] } = options
     return this.#call('getUpdates', {
       offset,
       timeout: timeoutSeconds,
@@ -93,22 +93,34 @@ export class TelegramApi {
   }
 
   sendMessage(chatId, text, options = {}, signal) {
-    const { replyToMessageId, disablePreview = true } = options
+    const { replyToMessageId, disablePreview = true, keyboard } = options
     return this.#call('sendMessage', {
       chat_id: chatId,
       text,
       disable_web_page_preview: disablePreview,
       ...(replyToMessageId === undefined ? {} : { reply_to_message_id: replyToMessageId }),
+      ...(keyboard === undefined ? {} : { reply_markup: keyboard }),
     }, signal)
   }
 
   editMessageText(chatId, messageId, text, options = {}, signal) {
-    const { disablePreview = true } = options
+    const { disablePreview = true, keyboard } = options
     return this.#call('editMessageText', {
       chat_id: chatId,
       message_id: messageId,
       text,
       disable_web_page_preview: disablePreview,
+      ...(keyboard === undefined ? {} : { reply_markup: keyboard }),
+    }, signal)
+  }
+
+  /** Acknowledge a tapped inline button; the tap keeps spinning until this answers. */
+  answerCallbackQuery(callbackQueryId, options = {}, signal) {
+    const { text, showAlert = false } = options
+    return this.#call('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(text === undefined ? {} : { text }),
+      ...(showAlert ? { show_alert: true } : {}),
     }, signal)
   }
 

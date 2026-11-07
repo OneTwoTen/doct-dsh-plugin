@@ -55,10 +55,10 @@ telegram:
 | Lệnh | Tác dụng |
 |---|---|
 | `/new [thư-mục]` | Tạo phiên mới và gắn với chat |
-| `/workspaces` | Liệt kê workspace của DSH (đánh số) |
-| `/workspace <số\|id\|đường-dẫn>` | Chọn workspace cho phiên mới |
-| `/models` | Liệt kê provider và model đang dùng được (đánh số) |
-| `/model <số\|provider/model[@effort]>` | Đổi model cho phiên hiện tại (và ghi nhớ cho phiên sau) |
+| `/workspaces` | Liệt kê workspace của DSH, kèm nút bấm để chọn |
+| `/workspace <số\|id\|đường-dẫn>` | Chọn workspace cho phiên mới (dùng khi không bấm nút) |
+| `/models` | Liệt kê provider và model đang dùng được, kèm nút bấm để chọn |
+| `/model <số\|provider/model[@effort]>` | Đổi model cho phiên hiện tại (dùng khi không bấm nút) |
 | `/status` | Phiên đang gắn, thư mục/workspace, model, đang chạy, hàng đợi, chờ phê duyệt |
 | `/cancel` | Dừng lượt đang chạy |
 | `/unbind` | Bỏ gắn phiên (giữ workspace và model đã chọn) |

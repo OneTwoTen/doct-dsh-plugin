@@ -106,6 +106,7 @@ function createTelegram() {
     updates: [],
     sent: [],
     edits: [],
+    answers: [],
     commands: [],
     me: { id: 42, username: 'personal_hub_bot' },
   }
@@ -120,13 +121,22 @@ function createTelegram() {
     }
     if (method === 'getMe') return ok(state.me)
     if (method === 'sendMessage') {
-      const message = { message_id: state.sent.length + 1, chat: { id: body.chat_id }, text: body.text }
+      const message = {
+        message_id: state.sent.length + 1,
+        chat: { id: body.chat_id },
+        text: body.text,
+        keyboard: body.reply_markup,
+      }
       state.sent.push(message)
       return ok(message)
     }
     if (method === 'editMessageText') {
-      state.edits.push(body)
+      state.edits.push({ ...body, keyboard: body.reply_markup })
       return ok({ message_id: body.message_id })
+    }
+    if (method === 'answerCallbackQuery') {
+      state.answers.push(body)
+      return ok(true)
     }
     if (method === 'setMyCommands') {
       state.commands = body.commands
@@ -368,6 +378,72 @@ test('accepts provider/model with a reasoning effort for the next session', asyn
       model: 'second-model',
       reasoningEffort: 'high',
     })
+  } finally {
+    await feature.dispose()
+  }
+})
+
+/** Build one inline-button tap. */
+function tap(updateId, data, messageId) {
+  return {
+    update_id: updateId,
+    callback_query: {
+      id: `cb-${updateId}`,
+      data,
+      message: { message_id: messageId, chat: { id: CHAT, type: 'private' } },
+    },
+  }
+}
+
+test('workspace buttons choose a workspace without typing', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, '/workspaces'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.keyboard !== undefined))
+    const listing = feature.telegram.state.sent.find((message) => message.keyboard !== undefined)
+    const buttons = listing.keyboard.inline_keyboard.flat()
+    assert.equal(buttons.length, 2)
+    assert.equal(buttons[1].callback_data, 'w:1')
+
+    feature.telegram.push(tap(3, 'w:1', listing.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã chọn workspace/.test(edit.text)))
+    assert.equal(feature.telegram.state.answers.length > 0, true)
+
+    feature.telegram.push(update(4, '/new'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên mới/.test(message.text)))
+    assert.equal(feature.sessions.bag.created.at(-1).workspaceId, 'ws-2')
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('model buttons switch the bound session model', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, 'chào'))
+    await waitFor(() => feature.telegram.state.edits.length > 0)
+
+    feature.telegram.push(update(3, '/models'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.keyboard !== undefined))
+    const listing = feature.telegram.state.sent.find((message) => message.keyboard !== undefined)
+    const buttons = listing.keyboard.inline_keyboard.flat()
+    assert.equal(buttons.length, 3)
+    assert.deepEqual(buttons.map((button) => button.callback_data), ['m:0', 'm:1', 'm:2'])
+
+    feature.telegram.push(tap(4, 'm:2', listing.message_id))
+    await waitFor(() => feature.sessions.bag.selected.length > 0)
+    assert.deepEqual(feature.sessions.bag.selected[0], {
+      sessionId: 'session-fake-1',
+      provider: 'second',
+      model: 'second-model',
+    })
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã chọn second\/second-model/.test(edit.text)))
   } finally {
     await feature.dispose()
   }
