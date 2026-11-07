@@ -5,3 +5,7 @@
         telegram:
           enabled: true
           allowedChatIds: []
+        git:
+          enabled: true
+          forge: auto
+          refreshMs: 30000

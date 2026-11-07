@@ -5,20 +5,31 @@ import { join } from 'node:path'
 import { expandHome, pluginDataDir } from '../lib/paths.js'
 import { JsonStateStore, writeJsonFile } from '../lib/state-store.js'
 import { TelegramApi, TelegramError, isTokenFailure } from '../lib/telegram-api.js'
-import { chunkText, parseCommand, withSuffix } from '../lib/text.js'
+import { chunkText, parseCommand } from '../lib/text.js'
+import { createTurnReporter, FINAL_LABEL } from '../lib/turn-report.js'
+
+export { assistantText } from '../lib/turn-report.js'
 
 /** Data directory name under the DeepSeek Harness home. */
 const DATA_DIR_NAME = 'personal-hub'
 const TELEGRAM_DATA_DIR = 'telegram-remote'
 const PLACEHOLDER = '⏳ Đang xử lý…'
+/** One page of the session picker; keeps the message and keyboard readable. */
+const SESSION_PAGE_SIZE = 8
 /** Credential reference the settings card writes and this feature resolves. */
 const TOKEN_CREDENTIAL_REF = 'DSH_TELEGRAM_BOT_TOKEN'
 const HELP_TEXT = [
   'Điều khiển DeepSeek Harness từ xa.',
   '',
   'Gửi tin nhắn văn bản để chuyển thành prompt cho phiên DSH đang gắn với chat này.',
+  'Mỗi lượt trả lời được đẩy về chat thành nhiều tin: 💬 phản hồi trung gian, 🔧 thay đổi chính, ✅ phản hồi cuối.',
   '',
   '/new [thư-mục] – tạo phiên mới (mặc định dùng workspace hoặc thư mục đang chọn)',
+  '/sessions [trang] – liệt kê phiên gần đây, chạm để gắn hoặc lưu trữ',
+  '/session <số|sessionId> – gắn chat này vào một phiên có sẵn',
+  '/archived [trang] – phiên đã lưu trữ, chạm để khôi phục',
+  '/archive [số|sessionId] – lưu trữ phiên (mặc định phiên đang gắn)',
+  '/restore <số|sessionId> – khôi phục phiên đã lưu trữ',
   '/workspaces – liệt kê workspace (có nút bấm để chọn)',
   '/workspace <số|id|đường-dẫn> – chọn workspace cho phiên mới',
   '/models – liệt kê provider và model (có nút bấm để chọn)',
@@ -56,6 +67,8 @@ export function mountTelegramRemote(ctx, config, deps) {
   const controller = new AbortController()
   const chatQueues = new Map()
   const activeTurns = new Map()
+  const turnSinks = new Map()
+  let observeSessionEvents = typeof ctx.on === 'function'
   const fetchImpl = deps.fetchImpl
   const sessionController = ctx.get('sessionController')
   const clientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -72,6 +85,25 @@ export function mountTelegramRemote(ctx, config, deps) {
   let lastPollAt = 0
 
   logger.info('telegram-remote: mounted, data directory %s', dataDir)
+
+  // Committed Session events feed an active turn directly, so the chat shows
+  // narration, tool changes, and the changed-files event as they happen
+  // instead of re-reading history pages every poll.
+  let detachSessionEvents
+  if (observeSessionEvents) {
+    try {
+      detachSessionEvents = ctx.on('session/event', (session, event) => {
+        const sessionId = session?.id
+        if (typeof sessionId !== 'string' || !event || typeof event.seq !== 'number') return
+        const sinks = turnSinks.get(sessionId)
+        if (!sinks || sinks.size === 0) return
+        for (const sink of [...sinks]) enqueueSinkEvent(sink, event)
+      })
+    } catch (error) {
+      observeSessionEvents = false
+      logger.warn('telegram-remote: cannot observe session events, falling back to polling: %s', errorMessage(error))
+    }
+  }
 
   /** Publish observable runtime status for the user and for debugging. */
   async function publishStatus(patch) {
@@ -251,6 +283,252 @@ export function mountTelegramRemote(ctx, config, deps) {
     }
   }
 
+  /** The archive surface is optional: older Host builds may not expose it. */
+  function archiveRegistry() {
+    const registry = ctx.get('workspaceRegistry')
+    if (!registry) return undefined
+    if (typeof registry.archiveSession !== 'function' || typeof registry.unarchiveSession !== 'function') return undefined
+    return registry
+  }
+
+  function canArchiveSessions() {
+    return archiveRegistry() !== undefined
+  }
+
+  /** Session ids the Workspace registry hides from its grouping surfaces. */
+  function archivedSessionIds() {
+    const registry = ctx.get('workspaceRegistry')
+    const ids = registry?.archivedSessionIds
+    return new Set(Array.isArray(ids) ? ids.map((id) => String(id)) : [])
+  }
+
+  function shortSessionId(value) {
+    const id = String(value ?? '')
+    return id.length <= 12 ? id : `#${id.slice(-8)}`
+  }
+
+  function fallbackSessionTitle(cwd, sessionId) {
+    if (typeof cwd === 'string' && cwd.length > 0) {
+      const base = cwd.split(/[\\/]+/).filter((part) => part.length > 0).at(-1)
+      if (base) return `Phiên ở ${base}`
+    }
+    return `Phiên ${shortSessionId(sessionId)}`
+  }
+
+  /** Turn one Host SessionSummary into the small row this chat needs. */
+  function sessionItemOf(summary) {
+    const sessionId = String(summary.sessionId)
+    const projected = summary.projections?.values?.title
+    const title = typeof projected === 'string' ? projected.replace(/\s+/g, ' ').trim() : ''
+    const cwd = typeof summary.cwd === 'string' ? summary.cwd : ''
+    return {
+      sessionId,
+      title: title || fallbackSessionTitle(cwd, sessionId),
+      cwd,
+      updatedAt: Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0,
+      running: summary.running === true,
+      blank: summary.blank === true,
+    }
+  }
+
+  /** Every ordinary Session the Host lists, newest first, archived included. */
+  async function loadSessionIndex() {
+    if (typeof sessionController.list !== 'function') {
+      throw new Error('Bản DSH này không hỗ trợ liệt kê phiên.')
+    }
+    let value
+    try {
+      value = await sessionController.list({}, controller.signal)
+    } catch (error) {
+      throw new Error(`Không đọc được danh sách phiên: ${errorMessage(error)}`)
+    }
+    const rows = Array.isArray(value?.items) ? value.items : []
+    return rows
+      .filter((summary) => summary && String(summary.sessionId ?? '').length > 0 && summary.origin !== 'subagent')
+      .map((summary) => sessionItemOf(summary))
+  }
+
+  function formatSessionWhen(ms) {
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return ''
+    try {
+      return new Intl.DateTimeFormat('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: clientTimeZone,
+      }).format(new Date(ms))
+    } catch {
+      return new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+    }
+  }
+
+  function sessionPage(items, wanted) {
+    const total = Math.max(1, Math.ceil(items.length / SESSION_PAGE_SIZE))
+    const current = Math.min(Math.max(1, Number(wanted) || 1), total)
+    const offset = (current - 1) * SESSION_PAGE_SIZE
+    return { current, total, offset, entries: items.slice(offset, offset + SESSION_PAGE_SIZE) }
+  }
+
+  async function sendOrEdit(api, chatId, text, keyboard, editMessageId) {
+    if (editMessageId !== undefined) {
+      await editQuietly(api, chatId, editMessageId, text, { keyboard: keyboard ?? { inline_keyboard: [] } })
+      return
+    }
+    await reply(api, chatId, text, keyboard ? { keyboard } : {})
+  }
+
+  function sessionRowKeyboard(chatId, entries, offset) {
+    const bound = store.state.bindings?.[chatId]?.sessionId
+    const archive = canArchiveSessions()
+    return entries.map((item, index) => {
+      const globalIndex = offset + index
+      const marks = `${item.sessionId === bound ? '✅ ' : ''}${item.running ? '▶️ ' : ''}`
+      const row = [{
+        text: `${marks}${globalIndex + 1}. ${shorten(item.title, 32)}`,
+        callback_data: `s:${globalIndex}`,
+      }]
+      if (archive) row.push({ text: '📦', callback_data: `x:${globalIndex}` })
+      return row
+    })
+  }
+
+  /** Render one page of the Session picker. */
+  async function showSessionList(api, chatId, wantedPage = 1, options = {}) {
+    const all = Array.isArray(options.items) ? options.items : cachedList(chatId, 'sessions')
+    if (all.length === 0) {
+      await sendOrEdit(
+        api,
+        chatId,
+        'Chưa có phiên DSH nào. Gửi một tin nhắn hoặc /new để tạo phiên mới.',
+        undefined,
+        options.editMessageId,
+      )
+      return
+    }
+
+    const page = sessionPage(all, wantedPage)
+    const bound = store.state.bindings?.[chatId]?.sessionId
+    const lines = [`🗂 Phiên DSH (trang ${page.current}/${page.total}, ${all.length} phiên):`, '']
+    page.entries.forEach((item, index) => {
+      const globalIndex = page.offset + index
+      const marks = []
+      if (item.sessionId === bound) marks.push('✅ đang gắn')
+      if (item.running) marks.push('▶️ đang chạy')
+      if (item.blank) marks.push('trống')
+      const suffix = marks.length > 0 ? ` · ${marks.join(' · ')}` : ''
+      lines.push(`${globalIndex + 1}. ${shorten(item.title, 64)}${suffix}`)
+      const when = formatSessionWhen(item.updatedAt)
+      lines.push(`   ${shortSessionId(item.sessionId)}${when ? ` · ${when}` : ''}`)
+    })
+    lines.push('', 'Chạm số để gắn phiên này; 📦 để lưu trữ.')
+    if (!canArchiveSessions()) lines.push('Bản DSH này không hỗ trợ lưu trữ phiên.')
+
+    const rows = sessionRowKeyboard(chatId, page.entries, page.offset)
+    const navigation = []
+    if (page.current > 1) navigation.push({ text: '◀️ Trang trước', callback_data: `p:${page.current - 1}` })
+    if (page.current < page.total) navigation.push({ text: 'Trang sau ▶️', callback_data: `p:${page.current + 1}` })
+    if (navigation.length > 0) rows.push(navigation)
+
+    await sendOrEdit(api, chatId, lines.join('\n'), { inline_keyboard: rows }, options.editMessageId)
+  }
+
+  /** Render one page of the archived Session picker. */
+  async function showArchivedList(api, chatId, wantedPage = 1, options = {}) {
+    const all = Array.isArray(options.items) ? options.items : cachedList(chatId, 'archived')
+    if (all.length === 0) {
+      await sendOrEdit(api, chatId, '📦 Không có phiên nào đã lưu trữ.', undefined, options.editMessageId)
+      return
+    }
+
+    const page = sessionPage(all, wantedPage)
+    const lines = [`📦 Phiên đã lưu trữ (trang ${page.current}/${page.total}, ${all.length} phiên):`, '']
+    const rows = []
+    page.entries.forEach((item, index) => {
+      const globalIndex = page.offset + index
+      lines.push(`${globalIndex + 1}. ${shorten(item.title, 64)}`)
+      const when = formatSessionWhen(item.updatedAt)
+      lines.push(`   ${shortSessionId(item.sessionId)}${when ? ` · ${when}` : ''}`)
+      rows.push([{
+        text: `♻️ ${globalIndex + 1}. ${shorten(item.title, 32)}`,
+        callback_data: `u:${globalIndex}`,
+      }])
+    })
+    lines.push('', 'Chạm một phiên để khôi phục.')
+    if (!canArchiveSessions()) lines.push('Bản DSH này không hỗ trợ khôi phục phiên.')
+
+    const navigation = []
+    if (page.current > 1) navigation.push({ text: '◀️ Trang trước', callback_data: `P:${page.current - 1}` })
+    if (page.current < page.total) navigation.push({ text: 'Trang sau ▶️', callback_data: `P:${page.current + 1}` })
+    if (navigation.length > 0) rows.push(navigation)
+
+    await sendOrEdit(api, chatId, lines.join('\n'), { inline_keyboard: rows }, options.editMessageId)
+  }
+
+  /** Bind the chat, refusing archived Sessions and validating the live Session. */
+  async function bindSession(chatId, target) {
+    if (archivedSessionIds().has(target.sessionId)) {
+      throw new Error('Phiên này đang được lưu trữ. Gửi /archived rồi chạm để khôi phục trước.')
+    }
+    await readSessionState(target.sessionId)
+    await store.update((state) => {
+      state.bindings = {
+        ...(state.bindings ?? {}),
+        [chatId]: {
+          sessionId: target.sessionId,
+          ...(target.cwd ? { cwd: target.cwd } : {}),
+          createdAt: Date.now(),
+        },
+      }
+    })
+  }
+
+  /** Resolve `/session`, `/archive`, or `/restore` arguments against a cached listing. */
+  function resolveSessionArgument(chatId, argument, kind) {
+    const value = String(argument ?? '').trim()
+    if (value.length === 0) return undefined
+    if (/^\d+$/.test(value)) return cachedList(chatId, kind)[Number(value) - 1]
+    const normalized = value.replace(/^#/, '')
+    const bySuffix = cachedList(chatId, kind).find((item) => item.sessionId.endsWith(normalized))
+    return bySuffix ?? { sessionId: value.split(/\s+/)[0], title: '', cwd: '' }
+  }
+
+  async function archiveSessionById(sessionId) {
+    const registry = archiveRegistry()
+    if (!registry) throw new Error('Bản DSH này không hỗ trợ lưu trữ phiên.')
+    try {
+      await registry.archiveSession(sessionId)
+    } catch (error) {
+      if (error?.name === 'WorkspaceActiveSessionError' || /session is active/i.test(errorMessage(error))) {
+        throw new Error('Phiên đang chạy. Gửi /cancel rồi thử lại, hoặc đợi lượt hiện tại xong.')
+      }
+      if (error?.name === 'WorkspaceUnknownSessionError') {
+        throw new Error('Không tìm thấy phiên này trong DSH (có thể phiên đã bị xoá).')
+      }
+      throw error
+    }
+  }
+
+  async function unarchiveSessionById(sessionId) {
+    const registry = archiveRegistry()
+    if (!registry) throw new Error('Bản DSH này không hỗ trợ khôi phục phiên.')
+    await registry.unarchiveSession(sessionId)
+  }
+
+  async function dropFromListing(chatId, kind, sessionId) {
+    await store.update((state) => {
+      const current = state.lists?.[chatId]?.[kind]
+      if (!Array.isArray(current)) return
+      const remaining = current.filter((item) => item?.sessionId !== sessionId)
+      if (remaining.length === current.length) return
+      const lists = state.lists ?? {}
+      state.lists = {
+        ...lists,
+        [chatId]: { ...(lists[chatId] ?? {}), [kind]: remaining },
+      }
+    })
+  }
+
   function preferencesOf(chatId) {
     return store.state.prefs?.[chatId] ?? {}
   }
@@ -396,6 +674,40 @@ export function mountTelegramRemote(ctx, config, deps) {
     }
   }
 
+  /** Register one turn's reporter so committed events feed it in order. */
+  function beginTurn(sessionId, startSeq, reporter) {
+    const sink = { startSeq, reporter, chain: Promise.resolve(), seen: new Set(), closed: false }
+    if (observeSessionEvents) {
+      const sinks = turnSinks.get(sessionId) ?? new Set()
+      sinks.add(sink)
+      turnSinks.set(sessionId, sinks)
+    }
+    return sink
+  }
+
+  /** Stop routing events to a finished turn and wait for its queue to drain. */
+  async function endTurn(sessionId, sink) {
+    sink.closed = true
+    const sinks = turnSinks.get(sessionId)
+    if (sinks) {
+      sinks.delete(sink)
+      if (sinks.size === 0) turnSinks.delete(sessionId)
+    }
+    await sink.chain
+  }
+
+  /** Queue one committed event on a turn's serial chain. */
+  function enqueueSinkEvent(sink, event) {
+    if (sink.closed || event.seq <= sink.startSeq || sink.seen.has(event.seq)) return
+    sink.seen.add(event.seq)
+    sink.chain = sink.chain
+      .then(async () => {
+        await sink.reporter.handle(event)
+        await sink.reporter.tick()
+      })
+      .catch((error) => logger.warn('telegram-remote: cannot report session event: %s', errorMessage(error)))
+  }
+
   /** Run one prompt and stream the assistant's answer back into the chat. */
   async function runPrompt(api, chatId, text) {
     let binding = store.state.bindings?.[chatId]
@@ -417,65 +729,138 @@ export function mountTelegramRemote(ctx, config, deps) {
 
     const placeholder = await api.sendMessage(chatId, PLACEHOLDER)
     activeTurns.set(chatId, sessionId)
+    const reporter = createTurnReporter({
+      send: (text) => reply(api, chatId, text),
+      updateStatus: (text) => editQuietly(api, chatId, placeholder.message_id, text),
+      resolveChanges: (seq) => {
+        const changes = ctx.get('workspaceChanges')
+        return typeof changes?.summary === 'function' ? changes.summary(sessionId, seq) : undefined
+      },
+      config,
+      placeholder: PLACEHOLDER,
+      cwd: binding.cwd ?? '',
+      onError: (error) => logger.warn('telegram-remote: cannot push turn message: %s', errorMessage(error)),
+    })
+    const sink = beginTurn(sessionId, before.cursor, reporter)
     try {
-      await api.sendChatAction(chatId, 'typing').catch(() => {})
-      await sessionController.prompt({
-        requestId: randomUUID(),
-        sessionId,
-        mode: 'queue',
-        content: [{ type: 'text', text }],
-        clientTimeZone,
-      }, controller.signal)
+      try {
+        await api.sendChatAction(chatId, 'typing').catch(() => {})
+        await sessionController.prompt({
+          requestId: randomUUID(),
+          sessionId,
+          mode: 'queue',
+          content: [{ type: 'text', text }],
+          clientTimeZone,
+        }, controller.signal)
 
-      const outcome = await pump(api, chatId, sessionId, before.cursor, placeholder.message_id, deadline)
-      await finishTurn(api, chatId, placeholder.message_id, outcome)
+        const outcome = await pump(sessionId, before.cursor, deadline, reporter, sink)
+        await endTurn(sessionId, sink)
+        await finishTurn(api, chatId, placeholder.message_id, outcome)
+      } catch (error) {
+        await endTurn(sessionId, sink)
+        await retirePlaceholder(api, chatId, placeholder.message_id)
+        throw error
+      }
     } finally {
       activeTurns.delete(chatId)
     }
   }
 
   /** Follow the turn until the session is quiescent or the deadline passes. */
-  async function pump(api, chatId, sessionId, startSeq, placeholderId, deadline) {
-    const parts = []
-    let lastSeq = startSeq
-    let lastEditAt = 0
-    let lastPreview = ''
+  async function pump(sessionId, startSeq, deadline, reporter, sink) {
+    let afterSeq = startSeq
 
     while (!controller.signal.aborted) {
       const remaining = deadline - Date.now()
-      if (remaining <= 0) return { parts, pendingInput: [], timedOut: true }
+      if (remaining <= 0) return { reporter, pendingInput: [], timedOut: true }
 
       const wait = await sessionController.wait({
         sessionId,
         timeoutMs: Math.min(15000, Math.max(1000, remaining)),
-        afterSeq: lastSeq,
+        afterSeq,
         maxMessages: 50,
       }, controller.signal)
 
-      for (const record of wait.output?.records ?? []) {
-        const event = record?.event
-        if (!event) continue
-        if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq
-        if (event.type === 'assistant/message') {
-          const text = assistantText(event)
-          if (text.length > 0) parts.push(text)
+      if (observeSessionEvents) {
+        // The Session event listener is the primary path; `wait` output is a
+        // safety net for an assistant message the listener has not queued.
+        await sink.chain
+        for (const record of [...(wait.output?.records ?? [])].reverse()) {
+          if (record?.event) enqueueSinkEvent(sink, record.event)
+        }
+        await sink.chain
+      } else {
+        // Older Host builds expose only the assistant messages carried by `wait`.
+        const events = await readEventsSince(sessionId, afterSeq, wait.state?.cursor)
+        if (events === undefined) {
+          const records = [...(wait.output?.records ?? [])].reverse()
+          for (const record of records) {
+            const event = record?.event
+            if (!event || typeof event.seq !== 'number' || event.seq <= afterSeq) continue
+            afterSeq = event.seq
+            await reporter.handle(event)
+          }
+        } else {
+          for (const record of events) {
+            const event = record?.event
+            if (!event || typeof event.seq !== 'number' || event.seq <= afterSeq) continue
+            afterSeq = event.seq
+            await reporter.handle(event)
+          }
         }
       }
 
-      if (parts.length > 0 && Date.now() - lastEditAt > config.progressIntervalMs) {
-        const preview = withSuffix(parts.join('\n\n'), '…')
-        if (preview !== lastPreview) {
-          await editQuietly(api, chatId, placeholderId, `${PLACEHOLDER}\n\n${preview}`)
-          lastPreview = preview
-          lastEditAt = Date.now()
-        }
-      }
+      await reporter.tick()
+      if (typeof wait.state?.cursor === 'number') afterSeq = wait.state.cursor
 
       const pendingInput = wait.state?.pendingInput ?? []
-      if (wait.reason === 'idle') return { parts, pendingInput, timedOut: false }
-      if (wait.reason === 'input-required') return { parts, pendingInput, timedOut: false }
+      if (wait.reason === 'idle') return { reporter, pendingInput, timedOut: false }
+      if (wait.reason === 'input-required') return { reporter, pendingInput, timedOut: false }
     }
-    return { parts, pendingInput: [], timedOut: true }
+    return { reporter, pendingInput: [], timedOut: true }
+  }
+
+  /**
+   * Read every committed event after `afterSeq` up to the wait cursor. Pages
+   * are message-aligned, so a busy interval may need more than one page.
+   * @returns {Promise<Array<{ event: { seq: number } }> | undefined>} undefined when the controller cannot serve history
+   */
+  async function readEventsSince(sessionId, afterSeq, throughSeq) {
+    if (typeof sessionController.events !== 'function') return undefined
+    try {
+      const pages = []
+      let beforeSeq
+      let cut = typeof throughSeq === 'number' ? throughSeq : undefined
+      for (let page = 0; page < 4; page += 1) {
+        const result = await sessionController.events({
+          address: { kind: 'session', sessionId },
+          maxMessages: 100,
+          ...(cut === undefined ? {} : { throughSeq: cut }),
+          ...(beforeSeq === undefined ? {} : { beforeSeq }),
+        }, controller.signal)
+        const records = Array.isArray(result?.records) ? result.records : []
+        if (records.length === 0) break
+        pages.unshift(records)
+        const oldest = records[0]?.event?.seq
+        if (typeof oldest !== 'number' || oldest <= afterSeq + 1 || result?.hasMore !== true) break
+        beforeSeq = oldest
+        cut = undefined
+      }
+
+      const seen = new Set()
+      return pages
+        .flat()
+        .filter((record) => record?.event && typeof record.event.seq === 'number')
+        .sort((left, right) => left.event.seq - right.event.seq)
+        .filter((record) => {
+          if (record.event.seq <= afterSeq || seen.has(record.event.seq)) return false
+          seen.add(record.event.seq)
+          return true
+        })
+    } catch (error) {
+      logger.warn('telegram-remote: cannot read session events: %s', errorMessage(error))
+      return undefined
+    }
   }
 
   async function finishTurn(api, chatId, placeholderId, outcome) {
@@ -485,12 +870,25 @@ export function mountTelegramRemote(ctx, config, deps) {
       notes.push('⏸ DSH đang chờ bạn phê duyệt hoặc trả lời câu hỏi trong ứng dụng.')
     }
 
-    const body = outcome.parts.join('\n\n').trim()
-    const text = [body, ...notes].filter((part) => part.length > 0).join('\n\n')
+    const finalText = await outcome.reporter.finish()
+    const body = [
+      finalText.length > 0 ? `${FINAL_LABEL} ${finalText}` : '',
+      ...notes,
+    ].filter((part) => part.length > 0).join('\n\n')
       || '✅ Xong, nhưng lượt này không sinh ra nội dung văn bản.'
-    const chunks = chunkText(text)
-    await editQuietly(api, chatId, placeholderId, chunks[0] ?? '✅ Xong.')
-    for (const chunk of chunks.slice(1)) await api.sendMessage(chatId, chunk)
+
+    await retirePlaceholder(api, chatId, placeholderId)
+    await reply(api, chatId, body)
+  }
+
+  /** Remove the status message, falling back to a short completion label. */
+  async function retirePlaceholder(api, chatId, messageId) {
+    try {
+      await api.deleteMessage(chatId, messageId)
+    } catch (error) {
+      logger.warn('telegram-remote: cannot delete placeholder: %s', errorMessage(error))
+      await editQuietly(api, chatId, messageId, '✅ Xong')
+    }
   }
 
   async function handleCommand(api, chatId, text) {
@@ -533,6 +931,120 @@ export function mountTelegramRemote(ctx, config, deps) {
         if (created.binding.model) lines.push(`🤖 ${modelLabel(created.binding.model)}`)
         if (created.note) lines.push(created.note)
         await reply(api, chatId, lines.join('\n'))
+        return
+      }
+      case 'sessions': {
+        let items
+        try {
+          const index = await loadSessionIndex()
+          const archived = archivedSessionIds()
+          items = index.filter((item) => !archived.has(item.sessionId))
+          await saveListing(chatId, 'sessions', items)
+        } catch (error) {
+          await reply(api, chatId, `❌ ${errorMessage(error)}`)
+          return
+        }
+        await showSessionList(api, chatId, argument, { items })
+        return
+      }
+      case 'session': {
+        const binding = store.state.bindings?.[chatId]
+        if (argument.length === 0) {
+          await reply(api, chatId, binding?.sessionId
+            ? [
+              `Phiên đang gắn: ${binding.sessionId}`,
+              ...(binding.cwd ? [`📁 ${binding.cwd}`] : []),
+              'Gửi /sessions để chọn phiên khác.',
+            ].join('\n')
+            : 'Chưa gắn phiên nào. Gửi /sessions để chọn, hoặc gửi tin nhắn để tạo phiên mới.')
+          return
+        }
+        const target = resolveSessionArgument(chatId, argument, 'sessions')
+        if (!target) {
+          await reply(api, chatId, `Không tìm thấy phiên "${argument}". Gửi /sessions để xem danh sách.`)
+          return
+        }
+        try {
+          await bindSession(chatId, target)
+        } catch (error) {
+          await reply(api, chatId, `❌ ${errorMessage(error)}`)
+          return
+        }
+        await reply(api, chatId, [
+          `🔗 Đã gắn chat này với phiên ${target.sessionId}`,
+          ...(target.title ? [`📝 ${target.title}`] : []),
+          'Tin nhắn tiếp theo sẽ vào phiên này.',
+        ].join('\n'))
+        return
+      }
+      case 'archived': {
+        let items
+        try {
+          const index = await loadSessionIndex()
+          const archived = archivedSessionIds()
+          items = index.filter((item) => archived.has(item.sessionId))
+          await saveListing(chatId, 'archived', items)
+        } catch (error) {
+          await reply(api, chatId, `❌ ${errorMessage(error)}`)
+          return
+        }
+        await showArchivedList(api, chatId, argument, { items })
+        return
+      }
+      case 'archive': {
+        let target
+        if (argument.length === 0) {
+          const binding = store.state.bindings?.[chatId]
+          if (!binding?.sessionId) {
+            await reply(api, chatId, 'Cú pháp: /archive <số|sessionId>. Gửi /sessions để xem danh sách.')
+            return
+          }
+          target = cachedList(chatId, 'sessions').find((item) => item.sessionId === binding.sessionId)
+            ?? { sessionId: binding.sessionId, title: '', cwd: binding.cwd ?? '' }
+        } else {
+          target = resolveSessionArgument(chatId, argument, 'sessions')
+          if (!target) {
+            await reply(api, chatId, `Không tìm thấy phiên "${argument}". Gửi /sessions để xem danh sách.`)
+            return
+          }
+        }
+        const wasBound = store.state.bindings?.[chatId]?.sessionId === target.sessionId
+        try {
+          await archiveSessionById(target.sessionId)
+        } catch (error) {
+          await reply(api, chatId, `❌ Không lưu trữ được: ${errorMessage(error)}`)
+          return
+        }
+        if (wasBound) await forgetBinding(chatId)
+        await dropFromListing(chatId, 'sessions', target.sessionId)
+        await reply(api, chatId, [
+          `📦 Đã lưu trữ phiên ${shortSessionId(target.sessionId)}${target.title ? ` — ${target.title}` : ''}.`,
+          ...(wasBound ? ['Chat đã được bỏ gắn.'] : []),
+          'Dùng /archived để khôi phục.',
+        ].join('\n'))
+        return
+      }
+      case 'restore': {
+        if (argument.length === 0) {
+          await reply(api, chatId, 'Cú pháp: /restore <số|sessionId>. Gửi /archived để xem danh sách.')
+          return
+        }
+        const target = resolveSessionArgument(chatId, argument, 'archived')
+        if (!target) {
+          await reply(api, chatId, `Không tìm thấy phiên "${argument}". Gửi /archived để xem danh sách.`)
+          return
+        }
+        try {
+          await unarchiveSessionById(target.sessionId)
+        } catch (error) {
+          await reply(api, chatId, `❌ Không khôi phục được: ${errorMessage(error)}`)
+          return
+        }
+        await dropFromListing(chatId, 'archived', target.sessionId)
+        await reply(api, chatId, [
+          `♻️ Đã khôi phục phiên ${shortSessionId(target.sessionId)}${target.title ? ` — ${target.title}` : ''}.`,
+          'Dùng /sessions để chọn lại.',
+        ].join('\n'))
         return
       }
       case 'workspaces': {
@@ -752,15 +1264,36 @@ export function mountTelegramRemote(ctx, config, deps) {
       return
     }
 
-    const match = /^([wm]):(\d+)$/.exec(data)
+    if (data === 'c') {
+      await answer('Đã huỷ')
+      await editQuietly(api, chatId, message.message_id, '↩️ Đã huỷ lưu trữ.', {
+        keyboard: { inline_keyboard: [] },
+      })
+      return
+    }
+
+    const match = /^([wmxsupPA]):(\d+)$/.exec(data)
     if (!match) {
       await answer()
       return
     }
+    const action = match[1]
     const index = Number(match[2])
     const messageId = message.message_id
 
-    if (match[1] === 'w') {
+    if (action === 'p' || action === 'P') {
+      const kind = action === 'p' ? 'sessions' : 'archived'
+      if (cachedList(chatId, kind).length === 0) {
+        await answer('Danh sách đã cũ, gửi lại lệnh nhé.', true)
+        return
+      }
+      if (kind === 'sessions') await showSessionList(api, chatId, index, { editMessageId: messageId })
+      else await showArchivedList(api, chatId, index, { editMessageId: messageId })
+      await answer()
+      return
+    }
+
+    if (action === 'w') {
       const target = cachedList(chatId, 'workspaces')[index]
       if (!target) {
         await answer('Danh sách đã cũ, gửi /workspaces lại nhé.', true)
@@ -772,6 +1305,107 @@ export function mountTelegramRemote(ctx, config, deps) {
         `🗂 Đã chọn workspace: ${target.title} — ${target.path}`,
         `Id: ${target.id}`,
         'Phiên hiện tại không đổi; gửi /new để mở phiên trong workspace này.',
+      ].join('\n'), { keyboard: { inline_keyboard: [] } })
+      return
+    }
+
+    if (action === 's') {
+      const target = cachedList(chatId, 'sessions')[index]
+      if (!target) {
+        await answer('Danh sách đã cũ, gửi /sessions lại nhé.', true)
+        return
+      }
+      try {
+        await bindSession(chatId, target)
+      } catch (error) {
+        await answer(errorMessage(error), true)
+        return
+      }
+      await answer('Đã gắn phiên')
+      await editQuietly(api, chatId, messageId, [
+        `🔗 Đã gắn chat này với phiên ${target.sessionId}`,
+        ...(target.title ? [`📝 ${target.title}`] : []),
+        'Tin nhắn tiếp theo sẽ vào phiên này.',
+      ].join('\n'), { keyboard: { inline_keyboard: [] } })
+      return
+    }
+
+    if (action === 'x') {
+      const target = cachedList(chatId, 'sessions')[index]
+      if (!target) {
+        await answer('Danh sách đã cũ, gửi /sessions lại nhé.', true)
+        return
+      }
+      if (!canArchiveSessions()) {
+        await answer('Bản DSH này không hỗ trợ lưu trữ phiên.', true)
+        return
+      }
+      await answer()
+      await editQuietly(api, chatId, messageId, [
+        '📦 Lưu trữ phiên này?',
+        '',
+        `${index + 1}. ${shorten(target.title, 64)}`,
+        shortSessionId(target.sessionId),
+        '',
+        'Phiên sẽ ẩn khỏi danh sách nhưng dữ liệu vẫn còn; khôi phục bằng /archived.',
+      ].join('\n'), {
+        keyboard: {
+          inline_keyboard: [[
+            { text: '📦 Lưu trữ', callback_data: `A:${index}` },
+            { text: '↩️ Huỷ', callback_data: 'c' },
+          ]],
+        },
+      })
+      return
+    }
+
+    if (action === 'A') {
+      const target = cachedList(chatId, 'sessions')[index]
+      if (!target) {
+        await answer('Danh sách đã cũ, gửi /sessions lại nhé.', true)
+        return
+      }
+      const wasBound = store.state.bindings?.[chatId]?.sessionId === target.sessionId
+      try {
+        await archiveSessionById(target.sessionId)
+      } catch (error) {
+        await answer('Không lưu trữ được', true)
+        await editQuietly(api, chatId, messageId, `❌ ${errorMessage(error)}`, {
+          keyboard: { inline_keyboard: [] },
+        })
+        return
+      }
+      if (wasBound) await forgetBinding(chatId)
+      await dropFromListing(chatId, 'sessions', target.sessionId)
+      await answer('Đã lưu trữ')
+      await editQuietly(api, chatId, messageId, [
+        `📦 Đã lưu trữ phiên ${shortSessionId(target.sessionId)}${target.title ? ` — ${target.title}` : ''}.`,
+        ...(wasBound ? ['Chat đã được bỏ gắn.'] : []),
+        'Dùng /archived để khôi phục.',
+      ].join('\n'), { keyboard: { inline_keyboard: [] } })
+      return
+    }
+
+    if (action === 'u') {
+      const target = cachedList(chatId, 'archived')[index]
+      if (!target) {
+        await answer('Danh sách đã cũ, gửi /archived lại nhé.', true)
+        return
+      }
+      try {
+        await unarchiveSessionById(target.sessionId)
+      } catch (error) {
+        await answer('Không khôi phục được', true)
+        await editQuietly(api, chatId, messageId, `❌ ${errorMessage(error)}`, {
+          keyboard: { inline_keyboard: [] },
+        })
+        return
+      }
+      await dropFromListing(chatId, 'archived', target.sessionId)
+      await answer('Đã khôi phục')
+      await editQuietly(api, chatId, messageId, [
+        `♻️ Đã khôi phục phiên ${shortSessionId(target.sessionId)}${target.title ? ` — ${target.title}` : ''}.`,
+        'Dùng /sessions để chọn lại.',
       ].join('\n'), { keyboard: { inline_keyboard: [] } })
       return
     }
@@ -876,6 +1510,9 @@ export function mountTelegramRemote(ctx, config, deps) {
           logger.info('telegram-remote: connected as @%s', identity.username)
           await api.setMyCommands([
             { command: 'new', description: 'Tạo phiên DSH mới' },
+            { command: 'sessions', description: 'Liệt kê và chọn phiên' },
+            { command: 'archived', description: 'Phiên đã lưu trữ' },
+            { command: 'archive', description: 'Lưu trữ phiên' },
             { command: 'workspaces', description: 'Liệt kê workspace' },
             { command: 'workspace', description: 'Chọn workspace cho phiên mới' },
             { command: 'models', description: 'Liệt kê provider và model' },
@@ -952,20 +1589,9 @@ export function mountTelegramRemote(ctx, config, deps) {
     if (stopped) return
     stopped = true
     controller.abort()
+    if (typeof detachSessionEvents === 'function') detachSessionEvents()
+    turnSinks.clear()
   }
-}
-
-/** Extract the visible text of one assistant message event. */
-export function assistantText(event) {
-  const content = event?.data?.message?.content
-  if (!Array.isArray(content)) return ''
-  const parts = []
-  for (const block of content) {
-    if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
-      parts.push(block.text)
-    }
-  }
-  return parts.join('\n').trim()
 }
 
 function errorMessage(error) {

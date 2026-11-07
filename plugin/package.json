@@ -1,9 +1,9 @@
 {
   "name": "@local/personal-hub",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Personal DeepSeek Harness plugin: remote control from Telegram and room for more features.",
+  "description": "Personal DeepSeek Harness plugin: remote control from Telegram, and a Git panel with diffs, pull requests, and issues.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

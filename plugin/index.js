@@ -5,10 +5,14 @@
  * authorized chat become prompts in a bound Session, and the assistant's answer
  * comes back to that chat.
  *
+ * Feature 2 — a Git panel in the right Sidebar: the working tree, per-file
+ * diffs, the commit log, and the code host's change requests and issues.
+ *
  * Add a feature by writing `features/<name>.js` that exports `mount(ctx, config,
  * deps)` returning a disposer, then list it in `FEATURES` below.
  */
 import { normalizeConfig } from './lib/config.js'
+import { mountGit } from './features/git.js'
 import { mountTelegramRemote } from './features/telegram-remote.js'
 
 export const name = 'personal-hub'
@@ -21,6 +25,11 @@ const FEATURES = [
     key: 'telegram',
     label: 'Telegram remote control',
     mount: mountTelegramRemote,
+  },
+  {
+    key: 'git',
+    label: 'Git panel',
+    mount: mountGit,
   },
 ]
 

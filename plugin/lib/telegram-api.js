@@ -124,6 +124,14 @@ export class TelegramApi {
     }, signal)
   }
 
+  /** Remove a message; the status placeholder is deleted once the turn ends. */
+  deleteMessage(chatId, messageId, signal) {
+    return this.#call('deleteMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+    }, signal)
+  }
+
   sendChatAction(chatId, action = 'typing', signal) {
     return this.#call('sendChatAction', { chat_id: chatId, action }, signal)
   }

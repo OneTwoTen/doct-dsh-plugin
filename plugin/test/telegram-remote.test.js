@@ -18,16 +18,30 @@ async function waitFor(check, timeout = 4000) {
   throw new Error('timed out waiting for condition')
 }
 
-function createSessionController() {
+function createSessionController({ onEvent } = {}) {
   const bag = {
     cursor: 5,
     inbox: [],
+    log: [],
+    script: [],
     prompts: [],
     cancelled: [],
     running: false,
     created: [],
     selected: [],
+    listing: [],
+    archived: [],
+    archiveCalls: [],
+    unarchiveCalls: [],
     answer: 'Xin chào từ DSH',
+  }
+  const append = (event) => {
+    bag.cursor += 1
+    const stored = { ...event, seq: bag.cursor, time: Date.now() }
+    bag.log.push(stored)
+    bag.inbox.push({ type: 'event', event: stored })
+    onEvent?.(stored)
+    return stored
   }
   const controller = {
     bag,
@@ -36,19 +50,21 @@ function createSessionController() {
       return { sessionId: 'session-fake-1' }
     },
     async state({ sessionId }) {
-      if (sessionId !== 'session-fake-1') throw new Error('unknown session')
+      const known = sessionId === 'session-fake-1' || bag.listing.some((item) => item.sessionId === sessionId)
+      if (!known) throw new Error('unknown session')
       return { cursor: bag.cursor, active: true, running: bag.running, queue: null, pendingInput: [] }
+    },
+    async list() {
+      return { items: bag.listing }
     },
     async prompt(request) {
       bag.prompts.push(request)
       bag.running = true
-      bag.cursor += 1
-      bag.inbox.push({
-        type: 'event',
-        event: {
+      if (bag.script.length > 0) {
+        for (const event of bag.script) append(event)
+      } else {
+        append({
           type: 'assistant/message',
-          seq: bag.cursor,
-          time: Date.now(),
           data: {
             turn: 1,
             step: 1,
@@ -60,8 +76,14 @@ function createSessionController() {
               ],
             },
           },
-        },
-      })
+        })
+      }
+    },
+    async events({ throughSeq }) {
+      const records = bag.log
+        .filter((event) => throughSeq === undefined || event.seq <= throughSeq)
+        .map((event) => ({ type: 'event', event }))
+      return { cursor: bag.cursor, records, hasMore: false }
     },
     async wait({ afterSeq }) {
       const records = bag.inbox.filter((record) => record.event.seq > afterSeq)
@@ -108,6 +130,7 @@ function createTelegram() {
     edits: [],
     answers: [],
     commands: [],
+    deleted: [],
     me: { id: 42, username: 'personal_hub_bot' },
   }
   const fetchImpl = async (url, init) => {
@@ -138,6 +161,10 @@ function createTelegram() {
       state.answers.push(body)
       return ok(true)
     }
+    if (method === 'deleteMessage') {
+      state.deleted.push(body)
+      return ok(true)
+    }
     if (method === 'setMyCommands') {
       state.commands = body.commands
       return ok(true)
@@ -154,20 +181,43 @@ function ok(result) {
 const logger = { info() {}, warn() {}, error() {}, debug() {} }
 
 /** Mount the feature against a fresh data directory and return a teardown. */
-async function mountFeature() {
+async function mountFeature({ changes, observe = false } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'personal-hub-test-'))
-  const sessions = createSessionController()
+  const sessionListeners = new Set()
+  const sessions = createSessionController({
+    onEvent: (event) => {
+      for (const listener of [...sessionListeners]) listener({ id: 'session-fake-1' }, event)
+    },
+  })
   const telegram = createTelegram()
   const stop = mountTelegramRemote(
     {
+      on: observe
+        ? (name, listener) => {
+          if (name === 'session/event') sessionListeners.add(listener)
+          return () => sessionListeners.delete(listener)
+        }
+        : undefined,
       get: (key) => {
         if (key === 'sessionController') return sessions
+        if (key === 'workspaceChanges') return changes
         if (key === 'workspaceRegistry') {
           return {
             list: () => [
               { id: 'ws-1', title: 'First project', path: 'C:\\work\\first' },
               { id: 'ws-2', title: 'Second project', path: 'C:\\work\\second' },
             ],
+            get archivedSessionIds() {
+              return sessions.bag.archived
+            },
+            async archiveSession(sessionId) {
+              sessions.bag.archiveCalls.push(sessionId)
+              if (!sessions.bag.archived.includes(sessionId)) sessions.bag.archived.push(sessionId)
+            },
+            async unarchiveSession(sessionId) {
+              sessions.bag.unarchiveCalls.push(sessionId)
+              sessions.bag.archived = sessions.bag.archived.filter((id) => id !== sessionId)
+            },
           }
         }
         return undefined
@@ -203,6 +253,26 @@ function update(updateId, text, chatId = CHAT) {
   }
 }
 
+/** One Host SessionSummary row with a projected title. */
+function sessionRow(sessionId, title, updatedAt = Date.now()) {
+  return {
+    sessionId,
+    updatedAt,
+    running: false,
+    blank: false,
+    cwd: `C:\\work\\${sessionId}`,
+    projections: { kind: 'cached', asOfSeq: 0, values: { title } },
+  }
+}
+
+/** One scripted assistant message event. */
+function assistantEvent(text, { turn = 1, step = 1 } = {}) {
+  return {
+    type: 'assistant/message',
+    data: { turn, step, message: { role: 'assistant', content: [{ type: 'text', text }] } },
+  }
+}
+
 test('assistantText keeps only visible text blocks', () => {
   const text = assistantText({
     data: { message: { content: [{ type: 'reasoning', text: 'hidden' }, { type: 'text', text: 'visible' }] } },
@@ -218,7 +288,7 @@ test('pairs the first chat, turns a message into a prompt, and replies with the 
     await waitFor(() => feature.telegram.state.sent.some((message) => /Đã ghép nối/.test(message.text)))
 
     feature.telegram.push(update(2, 'Chạy kiểm thử giúp tôi'))
-    await waitFor(() => feature.telegram.state.edits.some((edit) => edit.text.includes('Xin chào từ DSH')))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     const { prompts, created } = feature.sessions.bag
     assert.equal(prompts.length, 1)
@@ -233,6 +303,125 @@ test('pairs the first chat, turns a message into a prompt, and replies with the 
     assert.equal(status.bot.username, 'personal_hub_bot')
     assert.deepEqual(status.allowedChatIds, [String(CHAT)])
     assert.equal(feature.telegram.state.commands.length > 0, true)
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('pushes intermediate responses, the changed-files summary, and the final answer in order', async () => {
+  const changes = {
+    summary() {
+      return {
+        turn: 1,
+        total: 1,
+        added: 4,
+        deleted: 1,
+        files: [{ display: 'src/app.js', path: 'src/app.js', added: 4, deleted: 1 }],
+      }
+    },
+  }
+  const feature = await mountFeature({ changes })
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Đã ghép nối/.test(message.text)))
+
+    feature.sessions.bag.script = [
+      assistantEvent('Đang sửa tệp.'),
+      {
+        type: 'tool/call',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'call-1',
+          name: 'edit',
+          arguments: JSON.stringify({ file_path: 'src/app.js' }),
+        },
+      },
+      {
+        type: 'tool/result',
+        data: {
+          turn: 1,
+          step: 1,
+          message: { role: 'tool', toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }] },
+          meta: { diffs: [{ path: 'src/app.js', oldText: 'a\n', newText: 'a\nb\nc\nd\ne\n' }] },
+        },
+      },
+      { type: 'workspace/changes', data: { turn: 1 } },
+      assistantEvent('Đã xong.', { step: 2 }),
+    ]
+
+    feature.telegram.push(update(2, 'sửa giúp tôi'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Đã xong.')))
+
+    const texts = feature.telegram.state.sent.map((message) => message.text)
+    const response = texts.find((text) => text.includes('Đang sửa tệp.'))
+    const summary = texts.find((text) => text.includes('Thay đổi chính'))
+    const final = texts.find((text) => text.includes('Đã xong.'))
+
+    assert.match(response, /^💬 Đang sửa tệp\./)
+    assert.match(summary, /Thay đổi chính · 1 tệp \(\+4 −1\)/)
+    assert.match(summary, /src\/app\.js/)
+    assert.match(final, /^✅ Đã xong\./)
+    assert.ok(texts.indexOf(response) < texts.indexOf(summary))
+    assert.ok(texts.indexOf(summary) < texts.indexOf(final))
+    assert.equal(feature.telegram.state.deleted.length, 1)
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('streams committed session events through the Host listener', async () => {
+  const changes = {
+    summary() {
+      return {
+        total: 1,
+        added: 2,
+        deleted: 0,
+        files: [{ display: 'src/b.js', path: 'src/b.js', added: 2, deleted: 0 }],
+      }
+    },
+  }
+  const feature = await mountFeature({ changes, observe: true })
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Đã ghép nối/.test(message.text)))
+
+    feature.sessions.bag.script = [
+      assistantEvent('Bắt đầu.'),
+      {
+        type: 'tool/call',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'call-1',
+          name: 'write',
+          arguments: JSON.stringify({ file_path: 'src/b.js', content: 'x' }),
+        },
+      },
+      {
+        type: 'tool/result',
+        data: {
+          turn: 1,
+          step: 1,
+          message: { role: 'tool', toolCallId: 'call-1', content: [] },
+        },
+      },
+      { type: 'workspace/changes', data: { turn: 1 } },
+      assistantEvent('Xong.', { step: 2 }),
+    ]
+
+    feature.telegram.push(update(2, 'viết tệp'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xong.')))
+
+    const texts = feature.telegram.state.sent.map((message) => message.text)
+    const response = texts.find((text) => text.includes('Bắt đầu.'))
+    const summary = texts.find((text) => text.includes('Thay đổi chính'))
+    const final = texts.find((text) => text.includes('Xong.'))
+    assert.match(response, /^💬 Bắt đầu\./)
+    assert.match(summary, /Thay đổi chính · 1 tệp \(\+2 −0\)/)
+    assert.match(final, /^✅ Xong\./)
+    assert.ok(texts.indexOf(response) < texts.indexOf(summary))
+    assert.ok(texts.indexOf(summary) < texts.indexOf(final))
   } finally {
     await feature.dispose()
   }
@@ -261,7 +450,7 @@ test('status command reports the bound session', async () => {
     await waitFor(() => feature.telegram.state.sent.length > 0)
 
     feature.telegram.push(update(2, 'hello'))
-    await waitFor(() => feature.telegram.state.edits.length > 0)
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     feature.telegram.push(update(4, '/status'))
     await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên: session-fake-1/.test(message.text)))
@@ -277,7 +466,7 @@ test('cancel asks the session controller to stop the bound session', async () =>
     await waitFor(() => feature.telegram.state.sent.length > 0)
 
     feature.telegram.push(update(2, 'hello'))
-    await waitFor(() => feature.telegram.state.edits.length > 0)
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     feature.telegram.push(update(5, '/cancel'))
     await waitFor(() => feature.sessions.bag.cancelled.length > 0)
@@ -294,7 +483,7 @@ test('unbind drops the binding so the next message opens a new session', async (
     await waitFor(() => feature.telegram.state.sent.length > 0)
 
     feature.telegram.push(update(2, 'hello'))
-    await waitFor(() => feature.telegram.state.edits.length > 0)
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     feature.telegram.push(update(6, '/unbind'))
     await waitFor(() => feature.telegram.state.sent.some((message) => /Đã bỏ gắn/.test(message.text)))
@@ -344,7 +533,7 @@ test('lists models and applies the chosen one to the bound session', async () =>
     assert.match(listing.text, /3\. second-model/)
 
     feature.telegram.push(update(3, 'chào'))
-    await waitFor(() => feature.telegram.state.edits.length > 0)
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     feature.telegram.push(update(4, '/model 2'))
     await waitFor(() => feature.sessions.bag.selected.length > 0)
@@ -427,7 +616,7 @@ test('model buttons switch the bound session model', async () => {
     await waitFor(() => feature.telegram.state.sent.length > 0)
 
     feature.telegram.push(update(2, 'chào'))
-    await waitFor(() => feature.telegram.state.edits.length > 0)
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
 
     feature.telegram.push(update(3, '/models'))
     await waitFor(() => feature.telegram.state.sent.some((message) => message.keyboard !== undefined))
@@ -444,6 +633,119 @@ test('model buttons switch the bound session model', async () => {
       model: 'second-model',
     })
     await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã chọn second\/second-model/.test(edit.text)))
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('lists sessions and binds the one selected with a button', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.sessions.bag.listing = [
+      sessionRow('session-fake-0', 'Phiên cũ', Date.now() - 60000),
+      sessionRow('session-fake-1', 'Phiên hiện tại'),
+    ]
+    feature.telegram.push(update(2, '/sessions'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên DSH/.test(message.text)))
+    const listing = feature.telegram.state.sent.find((message) => /Phiên DSH/.test(message.text))
+    assert.match(listing.text, /1\. Phiên cũ/)
+    assert.match(listing.text, /2\. Phiên hiện tại/)
+    assert.deepEqual(
+      listing.keyboard.inline_keyboard.flat().map((button) => button.callback_data),
+      ['s:0', 'x:0', 's:1', 'x:1'],
+    )
+
+    feature.telegram.push(tap(3, 's:0', listing.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã gắn chat này với phiên session-fake-0/.test(edit.text)))
+
+    feature.telegram.push(update(4, 'chào'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
+    assert.equal(feature.sessions.bag.prompts.at(-1).sessionId, 'session-fake-0')
+    assert.equal(feature.sessions.bag.created.length, 0)
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('archives a session from the picker and restores it from /archived', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.sessions.bag.listing = [
+      sessionRow('session-fake-0', 'Phiên cũ', Date.now() - 60000),
+      sessionRow('session-fake-1', 'Phiên hiện tại'),
+    ]
+    feature.telegram.push(update(2, '/sessions'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên DSH/.test(message.text)))
+    const listing = feature.telegram.state.sent.find((message) => /Phiên DSH/.test(message.text))
+
+    feature.telegram.push(tap(3, 'x:0', listing.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Lưu trữ phiên này\?/.test(edit.text)))
+    feature.telegram.push(tap(4, 'A:0', listing.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã lưu trữ phiên/.test(edit.text)))
+    assert.deepEqual(feature.sessions.bag.archived, ['session-fake-0'])
+    assert.deepEqual(feature.sessions.bag.archiveCalls, ['session-fake-0'])
+
+    feature.telegram.push(update(5, '/archived'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên đã lưu trữ/.test(message.text)))
+    const archived = feature.telegram.state.sent.find((message) => /Phiên đã lưu trữ/.test(message.text))
+    assert.deepEqual(archived.keyboard.inline_keyboard.flat().map((button) => button.callback_data), ['u:0'])
+
+    feature.telegram.push(tap(6, 'u:0', archived.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /Đã khôi phục phiên/.test(edit.text)))
+    assert.deepEqual(feature.sessions.bag.archived, [])
+    assert.deepEqual(feature.sessions.bag.unarchiveCalls, ['session-fake-0'])
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('archiving the bound session unbinds the chat', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, 'hello'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => message.text.includes('Xin chào từ DSH')))
+    assert.equal(feature.sessions.bag.created.length, 1)
+
+    feature.telegram.push(update(3, '/archive'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Đã lưu trữ phiên/.test(message.text)))
+    assert.deepEqual(feature.sessions.bag.archived, ['session-fake-1'])
+    assert.match(feature.telegram.state.sent.find((message) => /Đã lưu trữ phiên/.test(message.text)).text, /bỏ gắn/)
+
+    feature.telegram.push(update(4, 'lại nào'))
+    await waitFor(() => feature.sessions.bag.created.length === 2)
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('pages through the session picker', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.sessions.bag.listing = Array.from({ length: 9 }, (_, index) => (
+      sessionRow(`session-page-${index}`, `Phiên ${index + 1}`, Date.now() - index * 1000)
+    ))
+    feature.telegram.push(update(2, '/sessions'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /trang 1\/2/.test(message.text)))
+    const listing = feature.telegram.state.sent.find((message) => /trang 1\/2/.test(message.text))
+    assert.match(listing.text, /8\. Phiên 8/)
+    assert.doesNotMatch(listing.text, /9\. Phiên 9/)
+
+    feature.telegram.push(tap(3, 'p:2', listing.message_id))
+    await waitFor(() => feature.telegram.state.edits.some((edit) => /trang 2\/2/.test(edit.text)))
+    const second = feature.telegram.state.edits.find((edit) => /trang 2\/2/.test(edit.text))
+    assert.match(second.text, /9\. Phiên 9/)
   } finally {
     await feature.dispose()
   }

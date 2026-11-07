@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Trung tâm cá nhân",
-    "description": "Tiện ích cá nhân cho DeepSeek Harness. Tính năng đầu tiên biến một chat Telegram đã được cho phép thành bảng điều khiển từ xa: tin nhắn trở thành prompt trong phiên đã gắn, và câu trả lời của trợ lý được gửi ngược về chat."
+    "description": "Tiện ích cá nhân cho DeepSeek Harness: điều khiển từ xa qua chat Telegram, và bảng Git ở thanh bên phải hiển thị thay đổi cục bộ kèm diff từng tệp, lịch sử commit, pull request cùng trạng thái kiểm tra và đánh giá, và issue."
   }
 }

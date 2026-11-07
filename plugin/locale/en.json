@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Personal hub",
-    "description": "Personal add-ons for DeepSeek Harness. The first feature turns an authorized Telegram chat into a remote control: messages become prompts in a bound session, and the assistant's answers come back to the chat."
+    "description": "Personal add-ons for DeepSeek Harness: remote control from a Telegram chat, and a Git panel in the right sidebar that shows local changes with per-file diffs, the commit log, pull requests with their check and review status, and issues."
   }
 }
