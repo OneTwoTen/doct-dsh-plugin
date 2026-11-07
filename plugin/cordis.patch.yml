@@ -1,0 +1,7 @@
+- insert:
+    - id: personal-hub
+      name: '@local/personal-hub'
+      config:
+        telegram:
+          enabled: true
+          allowedChatIds: []

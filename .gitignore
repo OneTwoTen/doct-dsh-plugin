@@ -1,0 +1,12 @@
+# Bỏ qua phụ thuộc và tệp tạm
+node_modules/
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+
+# Dữ liệu chạy thử của plugin (không bao giờ commit token)
+plugin/.plugin-manager/
+plugin/**/status.json
+plugin/**/state.json
+plugin/token

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Personal hub",
+    "description": "Personal add-ons for DeepSeek Harness. The first feature turns an authorized Telegram chat into a remote control: messages become prompts in a bound session, and the assistant's answers come back to the chat."
+  }
+}
