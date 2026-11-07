@@ -55,12 +55,21 @@ telegram:
 | Lệnh | Tác dụng |
 |---|---|
 | `/new [thư-mục]` | Tạo phiên mới và gắn với chat |
-| `/status` | Phiên đang gắn, thư mục, đang chạy, hàng đợi, chờ phê duyệt |
+| `/workspaces` | Liệt kê workspace của DSH (đánh số) |
+| `/workspace <số\|id\|đường-dẫn>` | Chọn workspace cho phiên mới |
+| `/models` | Liệt kê provider và model đang dùng được (đánh số) |
+| `/model <số\|provider/model[@effort]>` | Đổi model cho phiên hiện tại (và ghi nhớ cho phiên sau) |
+| `/status` | Phiên đang gắn, thư mục/workspace, model, đang chạy, hàng đợi, chờ phê duyệt |
 | `/cancel` | Dừng lượt đang chạy |
-| `/unbind` | Bỏ gắn phiên |
+| `/unbind` | Bỏ gắn phiên (giữ workspace và model đã chọn) |
 | `/use <sessionId>` | Gắn chat với phiên có sẵn |
 | `/whoami` | Chat id của bạn |
 | `/help` | Danh sách lệnh |
+
+Workspace và model đã chọn được lưu theo chat trong `state.json` (`prefs`) và áp dụng cho mọi
+phiên mới của chat đó; `/workspace` chỉ đổi phiên kế tiếp, không di chuyển phiên đang mở.
+`/model` áp dụng ngay cho phiên đang gắn và đồng thời cập nhật model mặc định của DSH
+giống như bộ chọn model trong giao diện.
 
 Tin nhắn văn bản thường = prompt. Tin nhắn dài được chia thành nhiều tin ≤ 4096 ký tự.
 

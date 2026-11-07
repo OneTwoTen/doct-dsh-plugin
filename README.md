@@ -43,7 +43,11 @@ Thứ tự ưu tiên: `telegram.token` → credential `DSH_TELEGRAM_BOT_TOKEN` �
 |---|---|
 | `/start` | Ghép nối chat đầu tiên (các chat khác bị từ chối) |
 | `/new [thư-mục]` | Tạo phiên DSH mới và gắn với chat |
-| `/status` | Phiên đang gắn, thư mục, đang chạy, hàng đợi, chờ phê duyệt |
+| `/workspaces` | Liệt kê workspace của DSH |
+| `/workspace <số\|id\|đường-dẫn>` | Chọn workspace cho phiên mới |
+| `/models` | Liệt kê provider và model đang dùng được |
+| `/model <số\|provider/model[@effort]>` | Đổi model cho phiên hiện tại |
+| `/status` | Phiên đang gắn, workspace, model, đang chạy, hàng đợi, chờ phê duyệt |
 | `/cancel` | Dừng lượt đang chạy |
 | `/unbind` | Bỏ gắn phiên |
 | `/use <sessionId>` | Gắn chat với phiên có sẵn |

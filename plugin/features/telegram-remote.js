@@ -18,8 +18,12 @@ const HELP_TEXT = [
   '',
   'Gửi tin nhắn văn bản để chuyển thành prompt cho phiên DSH đang gắn với chat này.',
   '',
-  '/new [thư-mục] – tạo phiên mới (mặc định dùng thư mục làm việc hiện tại)',
-  '/status – trạng thái phiên đang gắn và trạng thái bot',
+  '/new [thư-mục] – tạo phiên mới (mặc định dùng workspace hoặc thư mục đang chọn)',
+  '/workspaces – liệt kê workspace của DSH',
+  '/workspace <số|id|đường-dẫn> – chọn workspace cho phiên mới',
+  '/models – liệt kê provider và model đang dùng được',
+  '/model <số|provider/model[@effort]> – đổi model cho phiên này',
+  '/status – phiên đang gắn, workspace, model, trạng thái chạy',
   '/cancel – dừng lượt đang chạy',
   '/unbind – bỏ gắn phiên, tin nhắn sau sẽ tạo phiên mới',
   '/use <sessionId> – gắn chat này vào một phiên có sẵn',
@@ -45,7 +49,10 @@ export function mountTelegramRemote(ctx, config, deps) {
     offset: 0,
     allowedChatIds: [],
     bindings: {},
+    prefs: {},
   })
+  /** Last numbered listing per chat, so `/workspace 2` and `/model 3` resolve. */
+  const listings = new Map()
 
   const controller = new AbortController()
   const chatQueues = new Map()
@@ -60,20 +67,24 @@ export function mountTelegramRemote(ctx, config, deps) {
   let stopped = false
   let identity
   let identityToken = ''
+  let currentState = 'starting'
   let lastStatusText = ''
+  let published = {}
   let lastPollAt = 0
 
   logger.info('telegram-remote: mounted, data directory %s', dataDir)
 
   /** Publish observable runtime status for the user and for debugging. */
   async function publishStatus(patch) {
+    if (typeof patch?.state === 'string') currentState = patch.state
     const next = {
+      ...published,
       updatedAt: new Date().toISOString(),
-      state: 'starting',
-      tokenSource: 'none',
-      lastPollAt: lastPollAt > 0 ? new Date(lastPollAt).toISOString() : null,
-      lastError: null,
-      bot: identity ? { id: identity.id, username: identity.username } : null,
+      state: currentState,
+      tokenSource: published.tokenSource ?? 'none',
+      lastPollAt: lastPollAt > 0 ? new Date(lastPollAt).toISOString() : published.lastPollAt ?? null,
+      lastError: published.lastError ?? null,
+      bot: identity ? { id: identity.id, username: identity.username } : published.bot ?? null,
       allowedChatIds: staticAllowed.length > 0 ? staticAllowed : store.state?.allowedChatIds ?? [],
       bindings: store.state?.bindings ?? {},
       ...patch,
@@ -81,6 +92,7 @@ export function mountTelegramRemote(ctx, config, deps) {
     const comparable = JSON.stringify({ ...next, updatedAt: '' })
     if (comparable === lastStatusText) return
     lastStatusText = comparable
+    published = next
     try {
       await writeJsonFile(statusFile, next)
     } catch (error) {
@@ -169,32 +181,181 @@ export function mountTelegramRemote(ctx, config, deps) {
     }
   }
 
-  async function ensureBinding(chatId) {
-    const existing = store.state.bindings?.[chatId]
-    if (existing?.sessionId) return existing
-
-    const cwd = resolveCwd()
-    const created = await sessionController.create({ cwd })
-    const binding = { sessionId: created.sessionId, cwd, createdAt: Date.now() }
-    await store.update((state) => {
-      state.bindings = { ...(state.bindings ?? {}), [chatId]: binding }
-    })
-    return binding
-  }
-
   async function forgetBinding(chatId) {
     await store.update((state) => {
       if (state.bindings) delete state.bindings[chatId]
     })
   }
 
+  /** Workspaces the DSH profile knows about, in sidebar order. */
+  function listWorkspaces() {
+    const registry = ctx.get('workspaceRegistry')
+    if (!registry || typeof registry.list !== 'function') return []
+    try {
+      return registry.list().map((workspace) => ({
+        id: workspace.id,
+        title: workspace.title ?? workspace.path,
+        path: workspace.path,
+      }))
+    } catch (error) {
+      logger.warn('telegram-remote: cannot list workspaces: %s', errorMessage(error))
+      return []
+    }
+  }
+
+  function preferencesOf(chatId) {
+    return store.state.prefs?.[chatId] ?? {}
+  }
+
+  async function savePreferences(chatId, patch) {
+    await store.update((state) => {
+      const prefs = state.prefs ?? {}
+      state.prefs = { ...prefs, [chatId]: { ...(prefs[chatId] ?? {}), ...patch } }
+    })
+  }
+
+  /** Apply one model selection to a live session, surfacing catalog errors to the chat. */
+  async function applyModel(sessionId, selection) {
+    const applied = await sessionController.selectModel({
+      sessionId,
+      provider: selection.provider,
+      model: selection.model,
+      ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+    }, controller.signal)
+    return applied?.selected ?? selection
+  }
+
+  /**
+   * Create the chat's session from its preferences: an explicit directory wins,
+   * then the chosen workspace, then the configured default directory.
+   * @returns {{ binding: Record<string, unknown>, note?: string }}
+   */
+  async function createSession(chatId, { cwd, workspaceId } = {}) {
+    const prefs = preferencesOf(chatId)
+    const wantedWorkspace = workspaceId ?? (cwd ? undefined : prefs.workspaceId)
+
+    let request
+    if (cwd) request = { cwd }
+    else if (wantedWorkspace) request = { workspaceId: wantedWorkspace }
+    else request = { cwd: resolveCwd() }
+
+    let note
+    let created
+    try {
+      created = await sessionController.create(request)
+    } catch (error) {
+      if (request.workspaceId === undefined) throw error
+      note = `⚠ Không mở được workspace ${request.workspaceId} (${errorMessage(error)}); đã dùng thư mục mặc định.`
+      request = { cwd: resolveCwd() }
+      created = await sessionController.create(request)
+    }
+
+    const model = prefs.model
+    if (model) {
+      try {
+        await applyModel(created.sessionId, model)
+      } catch (error) {
+        note = `${note ? `${note}\n` : ''}⚠ Không đặt được model ${model.provider}/${model.model}: ${errorMessage(error)}`
+      }
+    }
+
+    const binding = {
+      sessionId: created.sessionId,
+      ...(request.cwd ? { cwd: request.cwd } : {}),
+      ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+      ...(model ? { model } : {}),
+      createdAt: Date.now(),
+    }
+    await store.update((state) => {
+      state.bindings = { ...(state.bindings ?? {}), [chatId]: binding }
+    })
+    return { binding, note }
+  }
+
   function readSessionState(sessionId) {
     return sessionController.state({ sessionId }, controller.signal)
   }
 
+  /** Flatten the provider-grouped model catalog into one ordered list. */
+  function flattenModels(catalog) {
+    const groups = Array.isArray(catalog?.groups) ? catalog.groups : []
+    return groups.flatMap((group) => (group.models ?? []).map((model) => ({
+      provider: group.id,
+      providerName: group.name ?? group.id,
+      model: model.id,
+      modelName: model.name ?? model.id,
+    })))
+  }
+
+  function modelLabel(selection) {
+    if (!selection?.provider || !selection?.model) return 'mặc định của DSH'
+    const effort = selection.reasoningEffort ? `@${selection.reasoningEffort}` : ''
+    return `${selection.provider}/${selection.model}${effort}`
+  }
+
+  async function loadModelCatalog() {
+    try {
+      return await sessionController.modelCatalog()
+    } catch (error) {
+      logger.warn('telegram-remote: cannot read model catalog: %s', errorMessage(error))
+      return { groups: [], failures: [] }
+    }
+  }
+
+  /** Resolve a `/workspace` argument: list number, id, absolute or partial path. */
+  function resolveWorkspaceArgument(chatId, argument) {
+    const all = listWorkspaces()
+    const value = argument.trim()
+    if (/^\d+$/.test(value)) {
+      const cached = listings.get(chatId)?.workspaces
+      const pool = cached && cached.length > 0 ? cached : all
+      return pool[Number(value) - 1]
+    }
+    const lowered = value.toLowerCase()
+    const expanded = expandHome(value).toLowerCase()
+    return all.find((workspace) => workspace.id === value)
+      ?? all.find((workspace) => workspace.path.toLowerCase() === expanded)
+      ?? all.find((workspace) => workspace.path.toLowerCase().endsWith(lowered))
+      ?? { id: value, title: value, path: value }
+  }
+
+  /** Resolve a `/model` argument: list number, `provider/model`, `@effort`, or a unique model id. */
+  function resolveModelArgument(chatId, argument, catalog) {
+    const value = argument.trim()
+    const flat = flattenModels(catalog)
+    if (/^\d+$/.test(value)) {
+      const cached = listings.get(chatId)?.models
+      const pool = cached && cached.length > 0 ? cached : flat
+      return pool[Number(value) - 1]
+    }
+    const at = value.indexOf('@')
+    const head = at < 0 ? value : value.slice(0, at)
+    const reasoningEffort = at < 0 ? undefined : value.slice(at + 1)
+    const slash = head.indexOf('/')
+    if (slash > 0) {
+      return {
+        provider: head.slice(0, slash),
+        model: head.slice(slash + 1),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      }
+    }
+    const matches = flat.filter((entry) => entry.model === head)
+    if (matches.length !== 1) return undefined
+    return {
+      provider: matches[0].provider,
+      model: matches[0].model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    }
+  }
+
   /** Run one prompt and stream the assistant's answer back into the chat. */
   async function runPrompt(api, chatId, text) {
-    const binding = await ensureBinding(chatId)
+    let binding = store.state.bindings?.[chatId]
+    if (!binding?.sessionId) {
+      const created = await createSession(chatId, {})
+      binding = created.binding
+      if (created.note) await reply(api, chatId, created.note)
+    }
     const sessionId = binding.sessionId
     const deadline = Date.now() + config.requestTimeoutMs
 
@@ -317,13 +478,116 @@ export function mountTelegramRemote(ctx, config, deps) {
         await reply(api, chatId, '🏓 pong')
         return
       case 'new': {
-        const cwd = argument.length > 0 ? expandHome(argument) : resolveCwd()
-        const created = await sessionController.create({ cwd })
-        const binding = { sessionId: created.sessionId, cwd, createdAt: Date.now() }
-        await store.update((state) => {
-          state.bindings = { ...(state.bindings ?? {}), [chatId]: binding }
+        const created = await createSession(chatId, argument.length > 0 ? { cwd: expandHome(argument) } : {})
+        const lines = [`🆕 Phiên mới: ${created.binding.sessionId}`]
+        if (created.binding.cwd) lines.push(`📁 ${created.binding.cwd}`)
+        if (created.binding.workspaceId) lines.push(`🗂 workspace: ${created.binding.workspaceId}`)
+        if (created.binding.model) lines.push(`🤖 ${modelLabel(created.binding.model)}`)
+        if (created.note) lines.push(created.note)
+        await reply(api, chatId, lines.join('\n'))
+        return
+      }
+      case 'workspaces': {
+        const workspaces = listWorkspaces()
+        listings.set(chatId, { workspaces })
+        if (workspaces.length === 0) {
+          await reply(api, chatId, 'DSH chưa có workspace nào. Dùng /new <thư-mục> để mở phiên trong một thư mục.')
+          return
+        }
+        const chosen = preferencesOf(chatId).workspaceId
+        const lines = ['🗂 Workspace của DSH:']
+        workspaces.forEach((workspace, index) => {
+          const mark = workspace.id === chosen ? ' ✅' : ''
+          lines.push(`${index + 1}. ${workspace.title} — ${workspace.path}${mark}`)
         })
-        await reply(api, chatId, `🆕 Phiên mới: ${created.sessionId}\n📁 ${cwd}`)
+        lines.push('', 'Chọn: /workspace <số|id|đường-dẫn>')
+        await reply(api, chatId, lines.join('\n'))
+        return
+      }
+      case 'workspace': {
+        if (argument.length === 0) {
+          const chosen = preferencesOf(chatId).workspaceId
+          await reply(api, chatId, chosen
+            ? `Workspace đang chọn: ${chosen}\nGửi /workspaces để xem danh sách, /new để mở phiên trong workspace này.`
+            : 'Chưa chọn workspace. Gửi /workspaces để xem danh sách.')
+          return
+        }
+        const target = resolveWorkspaceArgument(chatId, argument)
+        if (!target) {
+          await reply(api, chatId, `Không tìm thấy workspace "${argument}". Gửi /workspaces để xem danh sách.`)
+          return
+        }
+        await savePreferences(chatId, { workspaceId: target.id })
+        await reply(api, chatId, [
+          `🗂 Đã chọn workspace: ${target.title} — ${target.path}`,
+          `Id: ${target.id}`,
+          'Phiên hiện tại không đổi; gửi /new để mở phiên trong workspace này.',
+        ].join('\n'))
+        return
+      }
+      case 'models': {
+        const catalog = await loadModelCatalog()
+        const flat = flattenModels(catalog)
+        listings.set(chatId, { models: flat })
+        if (flat.length === 0) {
+          await reply(api, chatId, 'Không đọc được model nào đang dùng được. Kiểm tra provider trong DSH.')
+          return
+        }
+        const current = preferencesOf(chatId).model
+        const defaultSelection = catalog.default
+        const lines = ['🤖 Model đang dùng được:']
+        let lastProvider
+        flat.forEach((entry, index) => {
+          if (entry.provider !== lastProvider) {
+            lines.push(`\n${entry.providerName} (${entry.provider})`)
+            lastProvider = entry.provider
+          }
+          const marks = []
+          if (defaultSelection?.provider === entry.provider && defaultSelection?.model === entry.model) marks.push('⭐ mặc định')
+          if (current?.provider === entry.provider && current?.model === entry.model) marks.push('✅ đang chọn')
+          const suffix = marks.length > 0 ? `  ${marks.join(' · ')}` : ''
+          lines.push(`${index + 1}. ${entry.model}${suffix}`)
+        })
+        for (const failure of catalog.failures ?? []) {
+          lines.push(`⚠ ${failure.name ?? failure.id}: ${failure.message}`)
+        }
+        lines.push('', 'Chọn: /model <số> hoặc /model provider/model[@effort]')
+        await reply(api, chatId, lines.join('\n'))
+        return
+      }
+      case 'model': {
+        const current = preferencesOf(chatId).model
+        if (argument.length === 0) {
+          await reply(api, chatId, [
+            `Model đang chọn: ${modelLabel(current)}`,
+            'Gửi /models để xem danh sách, rồi /model <số> hoặc /model provider/model.',
+          ].join('\n'))
+          return
+        }
+        const catalog = await loadModelCatalog()
+        const selection = resolveModelArgument(chatId, argument, catalog)
+        if (!selection) {
+          await reply(api, chatId, `Không xác định được model "${argument}". Gửi /models để xem danh sách.`)
+          return
+        }
+
+        const binding = store.state.bindings?.[chatId]
+        let applied = selection
+        if (binding?.sessionId) {
+          try {
+            applied = await applyModel(binding.sessionId, selection)
+          } catch (error) {
+            await reply(api, chatId, `❌ Không đổi được model: ${errorMessage(error)}`)
+            return
+          }
+        }
+        await savePreferences(chatId, { model: applied })
+        if (binding?.sessionId) {
+          await store.update((state) => {
+            state.bindings = { ...(state.bindings ?? {}), [chatId]: { ...binding, model: applied } }
+          })
+        }
+        await reply(api, chatId, `🤖 Đã chọn ${modelLabel(applied)}${binding?.sessionId ? '' : ' cho phiên kế tiếp'}`)
         return
       }
       case 'use': {
@@ -344,7 +608,7 @@ export function mountTelegramRemote(ctx, config, deps) {
       }
       case 'unbind':
         await forgetBinding(chatId)
-        await reply(api, chatId, 'Đã bỏ gắn. Tin nhắn tiếp theo sẽ tạo phiên mới.')
+        await reply(api, chatId, 'Đã bỏ gắn. Tin nhắn tiếp theo sẽ tạo phiên mới (giữ workspace và model đã chọn).')
         return
       case 'cancel': {
         const sessionId = activeTurns.get(chatId) ?? store.state.bindings?.[chatId]?.sessionId
@@ -358,18 +622,23 @@ export function mountTelegramRemote(ctx, config, deps) {
       }
       case 'status': {
         const binding = store.state.bindings?.[chatId]
-        if (!binding?.sessionId) {
-          await reply(api, chatId, 'Chưa gắn phiên nào. Gửi một tin nhắn hoặc /new.')
-          return
+        const prefs = preferencesOf(chatId)
+        const lines = []
+        if (binding?.sessionId) {
+          const state = await readSessionState(binding.sessionId)
+          lines.push(`Phiên: ${binding.sessionId}`)
+          if (binding.cwd) lines.push(`Thư mục: ${binding.cwd}`)
+          if (binding.workspaceId) lines.push(`Workspace: ${binding.workspaceId}`)
+          lines.push(`Model: ${modelLabel(binding.model ?? prefs.model)}`)
+          lines.push(`Đang chạy: ${state.running ? 'có' : 'không'}`)
+          lines.push(`Hàng đợi: ${state.queue?.length ?? 0}`)
+          lines.push(`Chờ phê duyệt: ${(state.pendingInput ?? []).join(', ') || 'không'}`)
+        } else {
+          lines.push('Chưa gắn phiên nào. Gửi một tin nhắn hoặc /new.')
+          lines.push(`Workspace đã chọn: ${prefs.workspaceId ?? 'mặc định'}`)
+          lines.push(`Model đã chọn: ${modelLabel(prefs.model)}`)
         }
-        const state = await readSessionState(binding.sessionId)
-        await reply(api, chatId, [
-          `Phiên: ${binding.sessionId}`,
-          `Thư mục: ${binding.cwd}`,
-          `Đang chạy: ${state.running ? 'có' : 'không'}`,
-          `Hàng đợi: ${state.queue?.length ?? 0}`,
-          `Chờ phê duyệt: ${(state.pendingInput ?? []).join(', ') || 'không'}`,
-        ].join('\n'))
+        await reply(api, chatId, lines.join('\n'))
         return
       }
       default:
@@ -427,10 +696,33 @@ export function mountTelegramRemote(ctx, config, deps) {
     return next
   }
 
+  /** Record what this profile can offer, so `/workspaces` and `/models` failures are visible. */
+  async function probeCapabilities() {
+    const workspaces = listWorkspaces().length
+    let providers = 0
+    let models = 0
+    let modelError
+    try {
+      const catalog = await sessionController.modelCatalog()
+      const flat = flattenModels(catalog)
+      models = flat.length
+      providers = new Set(flat.map((entry) => entry.provider)).size
+    } catch (error) {
+      modelError = errorMessage(error)
+    }
+    await publishStatus({
+      capabilities: {
+        workspaces,
+        ...(modelError === undefined ? { providers, models } : { modelError }),
+      },
+    })
+  }
+
   async function pollLoop() {
     await mkdir(dataDir, { recursive: true })
     await store.load()
     let backoff = 1000
+    let probed = false
 
     while (!stopped) {
       const { token, source, tokenFile } = await resolveToken()
@@ -440,6 +732,10 @@ export function mountTelegramRemote(ctx, config, deps) {
           tokenSource: source,
           hint: `Đặt token vào ${tokenFile ?? join(dataDir, 'token')}, hoặc đặt biến môi trường ${config.tokenEnv}. Tệp token được đọc lại mỗi vòng nên không cần khởi động lại.`,
         })
+        if (!probed) {
+          probed = true
+          void probeCapabilities().catch(() => {})
+        }
         await sleep(3000)
         continue
       }
@@ -456,6 +752,10 @@ export function mountTelegramRemote(ctx, config, deps) {
           logger.info('telegram-remote: connected as @%s', identity.username)
           await api.setMyCommands([
             { command: 'new', description: 'Tạo phiên DSH mới' },
+            { command: 'workspaces', description: 'Liệt kê workspace' },
+            { command: 'workspace', description: 'Chọn workspace cho phiên mới' },
+            { command: 'models', description: 'Liệt kê provider và model' },
+            { command: 'model', description: 'Đổi model cho phiên' },
             { command: 'status', description: 'Trạng thái phiên đang gắn' },
             { command: 'cancel', description: 'Dừng lượt đang chạy' },
             { command: 'unbind', description: 'Bỏ gắn phiên' },
@@ -463,6 +763,10 @@ export function mountTelegramRemote(ctx, config, deps) {
           ]).catch(() => {})
         }
         await publishStatus({ state: 'polling', tokenSource: source, hint: null })
+        if (!probed) {
+          probed = true
+          void probeCapabilities().catch(() => {})
+        }
 
         const updates = await api.getUpdates({
           offset: store.state.offset,

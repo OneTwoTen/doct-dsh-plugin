@@ -26,6 +26,7 @@ function createSessionController() {
     cancelled: [],
     running: false,
     created: [],
+    selected: [],
     answer: 'Xin chào từ DSH',
   }
   const controller = {
@@ -74,6 +75,27 @@ function createSessionController() {
     },
     cancel(request) {
       bag.cancelled.push(request)
+    },
+    async modelCatalog() {
+      return {
+        default: { provider: 'demo', model: 'demo-model' },
+        routableProviders: ['demo', 'second'],
+        groups: [
+          { id: 'demo', name: 'Demo provider', models: [{ id: 'demo-model', name: 'Demo model' }, { id: 'other-model', name: 'Other model' }] },
+          { id: 'second', name: 'Second provider', models: [{ id: 'second-model', name: 'Second model' }] },
+        ],
+        failures: [],
+      }
+    },
+    async selectModel(request) {
+      bag.selected.push(request)
+      return {
+        selected: {
+          provider: request.provider,
+          model: request.model,
+          ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+        },
+      }
     },
   }
   return controller
@@ -127,7 +149,20 @@ async function mountFeature() {
   const sessions = createSessionController()
   const telegram = createTelegram()
   const stop = mountTelegramRemote(
-    { get: (key) => (key === 'sessionController' ? sessions : undefined) },
+    {
+      get: (key) => {
+        if (key === 'sessionController') return sessions
+        if (key === 'workspaceRegistry') {
+          return {
+            list: () => [
+              { id: 'ws-1', title: 'First project', path: 'C:\\work\\first' },
+              { id: 'ws-2', title: 'Second project', path: 'C:\\work\\second' },
+            ],
+          }
+        }
+        return undefined
+      },
+    },
     {
       enabled: true,
       token: '123:abcdef',
@@ -145,6 +180,7 @@ async function mountFeature() {
     telegram,
     async dispose() {
       stop()
+      await new Promise((resolve) => setTimeout(resolve, 60))
       await rm(dataDir, { recursive: true, force: true })
     },
   }
@@ -256,6 +292,82 @@ test('unbind drops the binding so the next message opens a new session', async (
 
     feature.telegram.push(update(7, 'lại nào'))
     await waitFor(() => feature.sessions.bag.created.length === 2)
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('lists workspaces and opens the next session inside the chosen one', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, '/workspaces'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Workspace của DSH/.test(message.text)))
+    const listing = feature.telegram.state.sent.find((message) => /Workspace của DSH/.test(message.text))
+    assert.match(listing.text, /1\. First project — C:\\work\\first/)
+    assert.match(listing.text, /2\. Second project — C:\\work\\second/)
+
+    feature.telegram.push(update(3, '/workspace 2'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Đã chọn workspace/.test(message.text)))
+
+    feature.telegram.push(update(4, '/new'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Phiên mới/.test(message.text)))
+    assert.equal(feature.sessions.bag.created.at(-1).workspaceId, 'ws-2')
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('lists models and applies the chosen one to the bound session', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, '/models'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Model đang dùng được/.test(message.text)))
+    const listing = feature.telegram.state.sent.find((message) => /Model đang dùng được/.test(message.text))
+    assert.match(listing.text, /1\. demo-model/)
+    assert.match(listing.text, /2\. other-model/)
+    assert.match(listing.text, /3\. second-model/)
+
+    feature.telegram.push(update(3, 'chào'))
+    await waitFor(() => feature.telegram.state.edits.length > 0)
+
+    feature.telegram.push(update(4, '/model 2'))
+    await waitFor(() => feature.sessions.bag.selected.length > 0)
+    assert.deepEqual(feature.sessions.bag.selected[0], {
+      sessionId: 'session-fake-1',
+      provider: 'demo',
+      model: 'other-model',
+    })
+
+    feature.telegram.push(update(5, '/status'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Model: demo\/other-model/.test(message.text)))
+  } finally {
+    await feature.dispose()
+  }
+})
+
+test('accepts provider/model with a reasoning effort for the next session', async () => {
+  const feature = await mountFeature()
+  try {
+    feature.telegram.push(update(1, '/start'))
+    await waitFor(() => feature.telegram.state.sent.length > 0)
+
+    feature.telegram.push(update(2, '/model second/second-model@high'))
+    await waitFor(() => feature.telegram.state.sent.some((message) => /Đã chọn second\/second-model@high/.test(message.text)))
+
+    feature.telegram.push(update(3, '/new'))
+    await waitFor(() => feature.sessions.bag.selected.length > 0)
+    assert.deepEqual(feature.sessions.bag.selected[0], {
+      sessionId: 'session-fake-1',
+      provider: 'second',
+      model: 'second-model',
+      reasoningEffort: 'high',
+    })
   } finally {
     await feature.dispose()
   }
