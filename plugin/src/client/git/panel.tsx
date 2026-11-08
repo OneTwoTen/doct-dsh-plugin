@@ -7,7 +7,7 @@
  */
 import { h, useEffect, useRef, useState } from '../runtime.ts'
 import { Icon } from '../icons.tsx'
-import { useLoader, useDocumentVisible } from '../hooks.ts'
+import { useLoader, useDocumentVisible, splitPath } from '../hooks.ts'
 import { messageOf } from '../api.ts'
 import type { GitApi } from '../api.ts'
 import type { Translate } from '../i18n.ts'
@@ -21,11 +21,12 @@ import type { CommitRequest } from './commit-composer.tsx'
 import { CommitsView, CommitPane } from './commits.tsx'
 import { PullsView, PullPane } from './pulls.tsx'
 import { IssuesView, IssuePane } from './issues.tsx'
+import { WorktreesView } from './worktrees.tsx'
 import { Empty, Failure, Loading, DetailBar, stateLabel } from './common.tsx'
 import type { GitActionProgress, GitOverview, GitStackedAction } from '../../shared/protocol.ts'
 
 /** The tab kinds the panel shows. */
-type ViewId = 'changes' | 'pulls' | 'issues' | 'commits'
+type ViewId = 'changes' | 'worktrees' | 'pulls' | 'issues' | 'commits'
 
 /** The open detail, if any. */
 type Selection =
@@ -366,6 +367,10 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       setView('pulls')
       setSelection({ type: 'pull', number })
     },
+    onOpenWorktrees: () => {
+      setView('worktrees')
+      setSelection(null)
+    },
     onBranchChanged: (branch: string | null) => {
       reload()
       toast(t('gitBranchSelect'), branch ?? t('gitDetachedHead'), 'success')
@@ -419,6 +424,13 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       onFilter: setPullFilter,
       onSelect: (number: number) => setSelection({ type: 'pull', number }),
     })
+  } else if (view === 'worktrees') {
+    body = h(WorktreesView, {
+      api, t, sessionId, cwd, revision,
+      newChat: props.newChat,
+      onToast: toast,
+      onChanged: reload,
+    })
   } else if (view === 'issues') {
     body = h(IssuesView, {
       api, t, sessionId, cwd, revision,
@@ -451,6 +463,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       value: view,
       counts: {
         changes: overview?.stats.files ?? 0,
+        worktrees: 0,
         pulls: 0,
         issues: 0,
         commits: 0,
@@ -538,6 +551,7 @@ interface PanelHeaderProps {
   onHint(key: string): void
   onRefresh(): void
   onOpenPull(number: number): void
+  onOpenWorktrees(): void
   onBranchChanged(branch: string | null): void
   onOpenChanges(): void
 }
@@ -547,6 +561,8 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
   const { t, overview } = props
   const repo = overview.repo
   const pull = overview.branchPull
+  const inWorktree = props.cwd.length > 0 && props.cwd.toLowerCase() !== repo.root.toLowerCase()
+  const worktreeName = inWorktree ? splitPath(props.cwd).name : ''
   return h('div', { className: 'ph-head' },
     h('div', { className: 'ph-repo-row' },
       h('span', { style: { display: 'flex', color: 'var(--dsw-alias-label-tertiary)' } }, h(Icon, { name: 'git', size: 14 })),
@@ -587,6 +603,14 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
             stateLabel(t, pull.state)),
       repo.remote?.slug !== null && repo.remote?.slug !== undefined
         ? h('span', { className: 'ph-dim ph-tiny ph-ellipsis', title: repo.remote.slug }, repo.remote.slug)
+        : null,
+      inWorktree
+        ? h('button', {
+            type: 'button',
+            className: 'ph-chip',
+            title: props.cwd,
+            onClick: props.onOpenWorktrees,
+          }, h(Icon, { name: 'folder', size: 10 }), h('span', { className: 'ph-ellipsis' }, worktreeName))
         : null),
 
     h(GitActions, {
@@ -625,6 +649,7 @@ interface PanelTabsProps {
 function PanelTabs(props: PanelTabsProps): ReturnType<typeof h> {
   const items: Array<{ id: ViewId; label: string; count: number }> = [
     { id: 'changes', label: props.t('gitChanges'), count: props.counts.changes },
+    { id: 'worktrees', label: props.t('gitWorktrees'), count: props.counts.worktrees },
     { id: 'pulls', label: props.t('gitPulls'), count: props.counts.pulls },
     { id: 'issues', label: props.t('gitIssues'), count: props.counts.issues },
     { id: 'commits', label: props.t('gitCommits'), count: props.counts.commits },

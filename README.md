@@ -107,6 +107,7 @@ diff xếp chồng, và đổi nhánh ngay trong bảng.
 | Thao tác | nút chính nêu việc kế tiếp — Commit / Commit & push / Commit, push & PR / Push / Push & PR / Pull / Publish — kèm menu Commit, Push, Tạo PR, Publish; chạy có tiến trình, đồng hồ, output, dòng thành công 10 giây và toast lỗi |
 | Commit | checkbox từng tệp quyết định phạm vi commit; thông điệp để trống thì model của phiên tự viết; **Commit** hoặc **Commit trên nhánh mới** |
 | Diff | mọi tệp trong một khối cuộn, header dính, mở/thu từng tệp, một cột/hai cột, xuống dòng, ẩn thay đổi khoảng trắng, phạm vi Chưa commit hoặc Nhánh, sao chép đường dẫn |
+| Worktree | tab quản lý mọi checkout: danh sách kèm trạng thái, tạo worktree mới (tên + nhánh nền local/remote), chuyển chat sang checkout, mở chat trong checkout, xoá (kèm nhánh hoặc buộc xoá), dọn đăng ký mồ côi |
 | Nhánh | danh sách tìm kiếm local + remote, đánh dấu nhánh hiện tại/mặc định, tạo nhánh mới bằng cách gõ tên |
 | Pull request | lọc Đang mở / Đã gộp / Đã đóng / Tất cả; trạng thái kiểm tra, đánh giá; chi tiết có checks, reviews, tệp, bình luận |
 | Issue | lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả, bình luận |

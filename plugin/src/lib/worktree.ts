@@ -32,6 +32,10 @@ export interface WorktreeListEntry {
   branch: string | null
   bare: boolean
   detached: boolean
+  /** Git marks a checkout `locked` while another process owns it. */
+  locked: boolean
+  /** A registration whose directory disappeared; `git worktree prune` clears it. */
+  prunable: boolean
 }
 
 /** One local branch a new checkout may start from. */
@@ -166,7 +170,15 @@ export function parseWorktreeList(raw: string): WorktreeListEntry[] {
   let current: WorktreeListEntry | undefined
   for (const line of String(raw ?? '').split('\n')) {
     if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), head: null, branch: null, bare: false, detached: false }
+      current = {
+        path: line.slice('worktree '.length),
+        head: null,
+        branch: null,
+        bare: false,
+        detached: false,
+        locked: false,
+        prunable: false,
+      }
       entries.push(current)
       continue
     }
@@ -175,6 +187,8 @@ export function parseWorktreeList(raw: string): WorktreeListEntry[] {
     else if (line.startsWith('branch ')) current.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '') || null
     else if (line === 'bare') current.bare = true
     else if (line === 'detached') current.detached = true
+    else if (line === 'locked' || line.startsWith('locked ')) current.locked = true
+    else if (line === 'prunable' || line.startsWith('prunable ')) current.prunable = true
   }
   return entries
 }
@@ -505,11 +519,13 @@ export async function ensurePool(repoRoot: string, config: WorktreePoolConfig | 
  */
 export async function removeWorktree(
   runner: GitRunner,
-  { repoRoot, path, branch, deleteBranch = false, timeoutMs, signal }: {
+  { repoRoot, path, branch, deleteBranch = false, force = false, timeoutMs, signal }: {
     repoRoot: string
     path: string
     branch?: string | null
     deleteBranch?: boolean
+    /** Remove even a checkout holding uncommitted work. */
+    force?: boolean
     timeoutMs?: number
     signal?: AbortSignal
   },
@@ -520,7 +536,11 @@ export async function removeWorktree(
   }
   const present = await stat(target).catch(() => undefined)
   if (present !== undefined) {
-    const result = await runner.run('git', ['worktree', 'remove', target], { cwd: repoRoot, signal, timeoutMs })
+    const result = await runner.run(
+      'git',
+      force ? ['worktree', 'remove', '--force', target] : ['worktree', 'remove', target],
+      { cwd: repoRoot, signal, timeoutMs },
+    )
     if (result.code !== 0) {
       const detail = String(result.stderr ?? '')
       if (/modified or untracked|contains modified/i.test(detail)) {

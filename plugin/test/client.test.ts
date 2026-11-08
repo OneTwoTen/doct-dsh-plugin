@@ -448,3 +448,57 @@ test('the settings form draws every switch it can save', async () => {
   assert.match(textOf(form), /gitSettingsMerged/)
   assert.match(textOf(form), /cleanupTitle/)
 })
+
+test('the worktree manager row shows the checkout, its state, and its actions', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WorktreeRow = view.WorktreeRow as (props: Record<string, unknown>) => unknown
+  const base = {
+    t: (key: string, values?: Record<string, string | number>) => values === undefined ? key : `${key}:${Object.values(values).join(',')}`,
+    sessionId: 'session-1',
+    busy: false,
+    copied: false,
+    removing: false,
+    deleteBranch: false,
+    force: false,
+    onCopy: () => {},
+    onSwitch: () => {},
+    onOpenChat: () => {},
+    onRemove: () => {},
+    onCancelRemove: () => {},
+    onDeleteBranch: () => {},
+    onForce: () => {},
+    onConfirmRemove: () => {},
+  }
+  const entry = {
+    path: 'C:/work/demo/.agents/worktrees/feat-panel',
+    branch: 'feat-panel',
+    head: 'abcdef1234',
+    bare: false,
+    detached: false,
+    locked: false,
+    prunable: false,
+    current: false,
+    isPool: true,
+    sessionId: 'session-1',
+    createdAt: Date.now(),
+    changedFiles: 2,
+  }
+  const row = WorktreeRow({ ...base, entry, main: false })
+  assert.match(textOf(row), /feat-panel/)
+  assert.match(textOf(row), /wtDirty:2/)
+  assert.match(textOf(row), /wtSwitchHere/)
+  assert.match(textOf(row), /wtOpenChat/)
+  assert.match(textOf(row), /wtRemoveAction/)
+  assert.match(textOf(row), /wtThisChat/)
+
+  const main = WorktreeRow({
+    ...base,
+    entry: { ...entry, path: 'C:/work/demo', branch: 'main', isPool: false, sessionId: null, current: true, changedFiles: 0 },
+    main: true,
+  })
+  assert.match(textOf(main), /wtMain/)
+  assert.match(textOf(main), /wtCurrent/)
+  assert.match(textOf(main), /wtClean/)
+  assert.doesNotMatch(textOf(main), /wtRemoveAction/)
+})

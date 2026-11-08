@@ -58,6 +58,7 @@
     gitGuideHint: "Changes, pull requests, and issues",
     gitOpen: "Open the Git panel",
     gitChanges: "Changes",
+    gitWorktrees: "Worktrees",
     gitPulls: "Pull requests",
     gitIssues: "Issues",
     gitCommits: "Commits",
@@ -312,7 +313,53 @@
     gitToastCopied: "Copied",
     gitOpenFailed: "Could not open the file",
     gitSessionUnavailable: "This build cannot start a chat for the panel",
-    gitActionUnavailable: "Action unavailable"
+    gitActionUnavailable: "Action unavailable",
+    /* Worktree manager */
+    wtManagerTitle: "Worktrees",
+    wtManagerHint: "Each checkout has its own branch and folder; the main checkout stays untouched.",
+    wtNew: "New worktree",
+    wtCreateTitle: "Create worktree",
+    wtCreateHint: "The checkout starts from the branch you pick and gets a new branch of its own.",
+    wtName: "Branch name",
+    wtNamePlaceholder: "leave empty for a generated name",
+    wtSwitchHere: "Work here",
+    wtSwitchThisChat: "Switch this chat here",
+    wtOpenChat: "Open chat",
+    wtRemoveAction: "Remove",
+    wtRemoveConfirm: "Remove {branch}?",
+    wtRemoveHint: "Git keeps a checkout with uncommitted work unless you force the removal.",
+    wtForce: "Remove anyway",
+    wtDeleteBranch: "Delete the branch too",
+    wtCancel: "Cancel",
+    wtCreate: "Create",
+    wtCreating: "Creating\u2026",
+    wtCurrent: "current",
+    wtMain: "main",
+    wtPool: "worktree",
+    wtDetached: "detached",
+    wtLocked: "locked",
+    wtPrunable: "missing",
+    wtDirty: "{count} changed",
+    wtClean: "clean",
+    wtCreatedNotice: "Created {branch}",
+    wtCreatedSwitched: "Created {branch}; this chat moved into it",
+    wtSwitched: "This chat now works in {branch}",
+    wtRemovedNotice: "Removed {branch}",
+    wtPruned: "Removed {count} stale registrations",
+    wtPrunedNone: "No stale worktree registrations",
+    wtPrune: "Prune",
+    wtPruneHint: "Forget registrations whose folder disappeared",
+    wtError: "Worktree action failed",
+    wtLoadError: "Could not read the worktrees",
+    wtEmpty: "No worktrees yet",
+    wtEmptyHint: "Create one to work on a branch without touching the main checkout.",
+    wtMainHint: "The project folder every worktree shares.",
+    wtThisChat: "this chat",
+    wtOtherChat: "chat {id}",
+    wtCreatedAt: "created {when}",
+    wtNoSession: "Open a chat to move it into a worktree.",
+    wtLoadBases: "Loading branches\u2026",
+    wtAddFailed: "Could not create the worktree"
   };
   var vi = {
     cardTitle: "Trung t\xE2m c\xE1 nh\xE2n",
@@ -338,6 +385,7 @@
     gitGuideHint: "Thay \u0111\u1ED5i, pull request v\xE0 issue",
     gitOpen: "M\u1EDF b\u1EA3ng Git",
     gitChanges: "Thay \u0111\u1ED5i",
+    gitWorktrees: "Worktree",
     gitPulls: "Pull request",
     gitIssues: "Issue",
     gitCommits: "Commit",
@@ -586,7 +634,52 @@
     gitToastCopied: "\u0110\xE3 sao ch\xE9p",
     gitOpenFailed: "Kh\xF4ng m\u1EDF \u0111\u01B0\u1EE3c t\u1EC7p",
     gitSessionUnavailable: "B\u1EA3n c\xE0i n\xE0y kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c chat cho b\u1EA3ng",
-    gitActionUnavailable: "Thao t\xE1c ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c"
+    gitActionUnavailable: "Thao t\xE1c ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c",
+    wtManagerTitle: "Worktree",
+    wtManagerHint: "M\u1ED7i checkout c\xF3 nh\xE1nh v\xE0 th\u01B0 m\u1EE5c ri\xEAng; checkout ch\xEDnh kh\xF4ng b\u1ECB \u0111\u1EE5ng t\u1EDBi.",
+    wtNew: "Worktree m\u1EDBi",
+    wtCreateTitle: "T\u1EA1o worktree",
+    wtCreateHint: "Checkout b\u1EAFt \u0111\u1EA7u t\u1EEB nh\xE1nh b\u1EA1n ch\u1ECDn v\xE0 c\xF3 nh\xE1nh m\u1EDBi ri\xEAng.",
+    wtName: "T\xEAn nh\xE1nh",
+    wtNamePlaceholder: "\u0111\u1EC3 tr\u1ED1ng \u0111\u1EC3 t\u1EF1 sinh t\xEAn",
+    wtSwitchHere: "L\xE0m vi\u1EC7c \u1EDF \u0111\xE2y",
+    wtSwitchThisChat: "Chuy\u1EC3n chat n\xE0y sang \u0111\xE2y",
+    wtOpenChat: "M\u1EDF chat",
+    wtRemoveAction: "Xo\xE1",
+    wtRemoveConfirm: "Xo\xE1 {branch}?",
+    wtRemoveHint: "Git gi\u1EEF checkout c\xF2n thay \u0111\u1ED5i ch\u01B0a commit tr\u1EEB khi b\u1EA1n bu\u1ED9c xo\xE1.",
+    wtForce: "V\u1EABn xo\xE1",
+    wtDeleteBranch: "Xo\xE1 c\u1EA3 nh\xE1nh",
+    wtCancel: "Hu\u1EF7",
+    wtCreate: "T\u1EA1o",
+    wtCreating: "\u0110ang t\u1EA1o\u2026",
+    wtCurrent: "hi\u1EC7n t\u1EA1i",
+    wtMain: "ch\xEDnh",
+    wtPool: "worktree",
+    wtDetached: "HEAD r\u1EDDi",
+    wtLocked: "\u0111ang kho\xE1",
+    wtPrunable: "m\u1EA5t th\u01B0 m\u1EE5c",
+    wtDirty: "{count} thay \u0111\u1ED5i",
+    wtClean: "s\u1EA1ch",
+    wtCreatedNotice: "\u0110\xE3 t\u1EA1o {branch}",
+    wtCreatedSwitched: "\u0110\xE3 t\u1EA1o {branch}; chat n\xE0y \u0111\xE3 chuy\u1EC3n sang \u0111\xF3",
+    wtSwitched: "Chat n\xE0y gi\u1EDD l\xE0m vi\u1EC7c trong {branch}",
+    wtRemovedNotice: "\u0110\xE3 xo\xE1 {branch}",
+    wtPruned: "\u0110\xE3 d\u1ECDn {count} \u0111\u0103ng k\xFD c\u0169",
+    wtPrunedNone: "Kh\xF4ng c\xF3 \u0111\u0103ng k\xFD worktree c\u0169",
+    wtPrune: "D\u1ECDn \u0111\u0103ng k\xFD",
+    wtPruneHint: "Qu\xEAn c\xE1c \u0111\u0103ng k\xFD c\xF3 th\u01B0 m\u1EE5c \u0111\xE3 m\u1EA5t",
+    wtError: "Thao t\xE1c worktree th\u1EA5t b\u1EA1i",
+    wtLoadError: "Kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c danh s\xE1ch worktree",
+    wtEmpty: "Ch\u01B0a c\xF3 worktree",
+    wtEmptyHint: "T\u1EA1o m\u1ED9t c\xE1i \u0111\u1EC3 l\xE0m vi\u1EC7c tr\xEAn nh\xE1nh ri\xEAng m\xE0 kh\xF4ng \u0111\u1EE5ng checkout ch\xEDnh.",
+    wtMainHint: "Th\u01B0 m\u1EE5c d\u1EF1 \xE1n m\xE0 m\u1ECDi worktree chia s\u1EBB.",
+    wtThisChat: "chat n\xE0y",
+    wtOtherChat: "chat {id}",
+    wtCreatedAt: "t\u1EA1o {when}",
+    wtNoSession: "M\u1EDF m\u1ED9t chat \u0111\u1EC3 chuy\u1EC3n n\xF3 v\xE0o worktree.",
+    wtLoadBases: "\u0110ang t\u1EA3i nh\xE1nh\u2026",
+    wtAddFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c worktree"
   };
   var dictionaries = { en, vi };
 
@@ -669,6 +762,11 @@
       createPull: route("createPull"),
       publish: route("publish"),
       worktreeState: route("worktreeState"),
+      worktrees: route("worktrees"),
+      worktreeAdd: route("worktreeAdd"),
+      worktreeSwitch: route("worktreeSwitch"),
+      worktreeRemovePath: route("worktreeRemovePath"),
+      worktreePrune: route("worktreePrune"),
       worktreeCreate: route("worktreeCreate"),
       worktreeRemove: route("worktreeRemove"),
       mergeSettings: route("mergeSettings"),
@@ -3665,6 +3763,422 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
     );
   }
 
+  // src/client/git/worktrees.tsx
+  function WorktreesView(props) {
+    const { t, api } = props;
+    const sessionId = typeof props.sessionId === "string" ? props.sessionId : "";
+    const [creating, setCreating] = useState(false);
+    const [bases, setBases] = useState(void 0);
+    const [name, setName] = useState("");
+    const [base, setBase] = useState("");
+    const [source, setSource] = useState("local");
+    const [switchHere, setSwitchHere] = useState(true);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const [removing, setRemoving] = useState(null);
+    const [deleteBranch, setDeleteBranch] = useState(false);
+    const [force, setForce] = useState(false);
+    const [pruning, setPruning] = useState(false);
+    const [copied, setCopied] = useState("");
+    const state = useLoader(
+      () => api.worktrees({ sessionId: sessionId || void 0, cwd: props.cwd || void 0 }),
+      [sessionId, props.cwd, props.revision]
+    );
+    useEffect(() => {
+      if (!creating) return void 0;
+      let alive = true;
+      setBases(void 0);
+      api.worktreeState({ sessionId: sessionId || void 0, cwd: props.cwd || void 0 }).then((value) => {
+        if (!alive) return;
+        setBases(value);
+        setBase((current) => current.length > 0 ? current : value.bases?.defaultBase ?? "");
+        setSource(value.sourceDefault === "remote" ? "remote" : "local");
+      }).catch(() => {
+        if (alive) setBases(void 0);
+      });
+      return () => {
+        alive = false;
+      };
+    }, [creating, api, sessionId, props.cwd]);
+    const reload = () => props.onChanged();
+    const create = async () => {
+      setBusy(true);
+      setError("");
+      try {
+        const answer = await api.worktreeAdd({
+          sessionId: sessionId || void 0,
+          cwd: props.cwd || void 0,
+          name: name.trim().length > 0 ? name.trim() : void 0,
+          base: base.length > 0 ? base : void 0,
+          source,
+          switch: sessionId.length > 0 ? switchHere : false
+        });
+        setCreating(false);
+        setName("");
+        props.onToast(
+          answer.switched ? t("wtCreatedSwitched", { branch: answer.worktree.branch }) : t("wtCreatedNotice", { branch: answer.worktree.branch }),
+          "",
+          "success"
+        );
+        setName("");
+        setBases(void 0);
+        props.onChanged();
+      } catch (failure) {
+        setError(`${t("wtAddFailed")}: ${messageOf(failure)}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    const switchTo = async (entry) => {
+      if (sessionId.length === 0) {
+        props.onToast(t("wtError"), t("wtNoSession"), "info");
+        return;
+      }
+      setError("");
+      try {
+        const answer = await api.worktreeSwitch({ sessionId, path: entry.path });
+        props.onToast(t("wtSwitched", { branch: answer.branch ?? entry.branch ?? entry.path }), "", "success");
+        reload();
+      } catch (failure) {
+        props.onToast(t("wtError"), messageOf(failure), "error");
+      }
+    };
+    const openChat = async (entry) => {
+      if (typeof props.newChat !== "function") {
+        props.onToast(t("wtError"), t("gitSessionUnavailable"), "error");
+        return;
+      }
+      try {
+        await props.newChat(entry.path);
+        props.onToast(t("wtOpenChat"), entry.branch ?? entry.path, "success");
+      } catch (failure) {
+        props.onToast(t("wtError"), messageOf(failure), "error");
+      }
+    };
+    const remove = async (entry) => {
+      setBusy(true);
+      setError("");
+      try {
+        await api.worktreeRemovePath({
+          sessionId: sessionId || void 0,
+          cwd: props.cwd || void 0,
+          path: entry.path,
+          deleteBranch,
+          force
+        });
+        props.onToast(t("wtRemovedNotice", { branch: entry.branch ?? entry.path }), "", "success");
+        setRemoving(null);
+        setDeleteBranch(false);
+        setForce(false);
+        reload();
+      } catch (failure) {
+        setError(`${t("wtError")}: ${messageOf(failure)}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    const prune = async () => {
+      setPruning(true);
+      setError("");
+      try {
+        const answer = await api.worktreePrune({ sessionId: sessionId || void 0, cwd: props.cwd || void 0 });
+        props.onToast(
+          answer.pruned > 0 ? t("wtPruned", { count: answer.pruned }) : t("wtPrunedNone"),
+          "",
+          "success"
+        );
+        reload();
+      } catch (failure) {
+        setError(`${t("wtError")}: ${messageOf(failure)}`);
+      } finally {
+        setPruning(false);
+      }
+    };
+    const copy = async (path) => {
+      const ok = await copyText(path);
+      if (!ok) return;
+      setCopied(path);
+      setTimeout(() => setCopied(""), 1500);
+      props.onToast(t("gitCopied"), path, "success");
+    };
+    const toolbar = h(
+      "div",
+      { className: "ph-toolbar" },
+      h(Icon, { name: "tree", size: 13 }),
+      h("span", { className: "ph-toolbar-title" }, t("wtManagerTitle")),
+      h("span", { className: "ph-spacer" }),
+      h("button", {
+        type: "button",
+        className: "ph-icon-button",
+        title: t("wtPruneHint"),
+        "aria-label": t("wtPrune"),
+        disabled: pruning,
+        onClick: () => void prune()
+      }, h(Icon, { name: "refresh", size: 13 })),
+      h("button", {
+        type: "button",
+        className: "ph-button",
+        disabled: creating,
+        onClick: () => {
+          setCreating((value) => !value);
+          setError("");
+        }
+      }, h(Icon, { name: "branchPlus", size: 12 }), t("wtNew"))
+    );
+    const createCard = creating ? h(
+      "div",
+      { className: "ph-card", style: { margin: "8px 10px" } },
+      h("div", { className: "ph-card-title" }, h(Icon, { name: "branchPlus", size: 12 }), t("wtCreateTitle")),
+      h("p", { className: "ph-hint" }, t("wtCreateHint")),
+      h(
+        "label",
+        { className: "ph-field" },
+        h("span", { className: "ph-field-label" }, t("wtName")),
+        h("input", {
+          className: "ph-input",
+          value: name,
+          placeholder: t("wtNamePlaceholder"),
+          spellcheck: false,
+          disabled: busy,
+          onInput: (event) => setName(event.target.value),
+          onChange: (event) => setName(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter" && !busy) void create();
+          }
+        })
+      ),
+      h(
+        "label",
+        { className: "ph-field" },
+        h("span", { className: "ph-field-label" }, t("wtBase")),
+        h(
+          "select",
+          {
+            className: "ph-select",
+            value: base,
+            disabled: busy || bases === void 0,
+            onChange: (event) => setBase(event.target.value)
+          },
+          h("option", { value: "" }, bases?.bases?.defaultBase ?? t("wtLoadBases")),
+          (source === "remote" ? bases?.bases?.remote ?? [] : bases?.bases?.local ?? []).map((item) => h("option", {
+            key: `${source}:${"branch" in item ? item.branch : item.name}`,
+            value: "branch" in item ? item.branch : item.name
+          }, item.name))
+        )
+      ),
+      (bases?.bases?.remote ?? []).length === 0 ? null : h(
+        "div",
+        { className: "ph-field" },
+        h("span", { className: "ph-field-label" }, t("wtSource")),
+        h(
+          "div",
+          { style: { display: "inline-flex", border: "1px solid var(--dsw-alias-border-l1)", borderRadius: "7px", overflow: "hidden" } },
+          ["local", "remote"].map((kind) => h("button", {
+            key: kind,
+            type: "button",
+            className: "ph-filter",
+            style: { border: 0, borderRadius: 0 },
+            "aria-pressed": source === kind ? "true" : "false",
+            disabled: busy,
+            onClick: () => {
+              setSource(kind);
+              setBase("");
+            }
+          }, kind === "remote" ? t("wtRemote") : t("wtLocal")))
+        )
+      ),
+      sessionId.length === 0 ? h("p", { className: "ph-hint" }, t("wtNoSession")) : h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: switchHere,
+          disabled: busy,
+          onChange: (event) => setSwitchHere(event.target.checked)
+        }),
+        h("span", null, t("wtSwitchThisChat"))
+      ),
+      error.length > 0 ? h("p", { className: "ph-error-text" }, error) : null,
+      h(
+        "div",
+        { className: "ph-dialog-actions" },
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: busy,
+          onClick: () => {
+            setCreating(false);
+            setError("");
+          }
+        }, t("wtCancel")),
+        h("button", {
+          type: "button",
+          className: "ph-primary",
+          disabled: busy || bases === void 0,
+          onClick: () => void create()
+        }, busy ? t("wtCreating") : t("wtCreate"))
+      )
+    ) : null;
+    let body2;
+    if (state.status === "error" && state.value === void 0) {
+      body2 = h(Failure, { error: state.error, title: t("wtLoadError"), retryLabel: t("gitRetry"), onRetry: reload });
+    } else if (state.value === void 0) {
+      body2 = h(Loading, { label: t("gitLoading") });
+    } else if (state.value.worktrees.length === 0) {
+      body2 = h(Empty, { icon: "tree", title: t("wtEmpty"), hint: t("wtEmptyHint") });
+    } else {
+      body2 = state.value.worktrees.map((entry) => h(WorktreeRow, {
+        key: entry.path,
+        t,
+        entry,
+        main: entry.path === state.value?.root,
+        sessionId,
+        busy,
+        copied: copied === entry.path,
+        removing: removing === entry.path,
+        deleteBranch,
+        force,
+        onCopy: () => void copy(entry.path),
+        onSwitch: () => void switchTo(entry),
+        onOpenChat: typeof props.newChat === "function" ? () => void openChat(entry) : void 0,
+        onRemove: () => {
+          setRemoving(entry.path);
+          setDeleteBranch(false);
+          setForce(false);
+          setError("");
+        },
+        onCancelRemove: () => setRemoving(null),
+        onDeleteBranch: (next) => setDeleteBranch(next),
+        onForce: (next) => setForce(next),
+        onConfirmRemove: () => void remove(entry)
+      }));
+    }
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" } },
+      toolbar,
+      createCard,
+      error.length > 0 && !creating ? h(
+        "div",
+        { className: "ph-error" },
+        h("span", { className: "ph-error-title" }, h(Icon, { name: "alert", size: 13 }), t("wtError")),
+        h("span", null, error)
+      ) : null,
+      h(
+        "div",
+        { className: "ph-body", style: { flex: "1 1 auto" } },
+        h("p", { className: "ph-hint", style: { padding: "8px 10px 0" } }, t("wtManagerHint")),
+        body2
+      )
+    );
+  }
+  function WorktreeRow(props) {
+    const { t, entry } = props;
+    const parts = splitPath(entry.path);
+    const label = entry.branch ?? parts.name;
+    const dirty = entry.changedFiles !== null && entry.changedFiles > 0;
+    return h(
+      "section",
+      { className: "ph-file", "data-path": entry.path },
+      h(
+        "div",
+        { className: "ph-file-head", style: { cursor: "default" } },
+        h(
+          "span",
+          { style: { display: "flex", color: "var(--dsw-alias-label-tertiary)" } },
+          h(Icon, { name: props.main ? "folder" : "branch", size: 13 })
+        ),
+        h(
+          "span",
+          { className: "ph-file-path", title: entry.path },
+          h("span", { className: "ph-file-name" }, label)
+        ),
+        entry.current ? h("span", { className: "ph-chip", "data-tone": "success" }, t("wtCurrent")) : null,
+        props.main ? h("span", { className: "ph-chip" }, t("wtMain")) : null,
+        entry.detached ? h("span", { className: "ph-chip", "data-tone": "warn" }, t("wtDetached")) : null,
+        entry.locked ? h("span", { className: "ph-chip", "data-tone": "warn" }, t("wtLocked")) : null,
+        entry.prunable ? h("span", { className: "ph-chip", "data-tone": "error" }, t("wtPrunable")) : null,
+        dirty ? h("span", { className: "ph-chip", "data-tone": "warn" }, t("wtDirty", { count: entry.changedFiles ?? 0 })) : null,
+        !dirty && entry.changedFiles === 0 ? h("span", { className: "ph-chip" }, t("wtClean")) : null,
+        h("span", { className: "ph-spacer" }),
+        h("button", {
+          type: "button",
+          className: "ph-icon-button",
+          title: props.copied ? t("gitCopied") : t("gitCopyPath"),
+          "aria-label": t("gitCopyPath"),
+          onClick: props.onCopy
+        }, h(Icon, { name: props.copied ? "check" : "copy", size: 12 }))
+      ),
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "5px", padding: "5px 10px 8px" } },
+        h("span", { className: "ph-mono ph-tiny ph-dim ph-ellipsis", title: entry.path }, entry.path),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" } },
+          entry.sessionId !== null ? h(
+            "span",
+            { className: "ph-chip ph-mono" },
+            t(entry.sessionId === props.sessionId ? "wtThisChat" : "wtOtherChat", { id: entry.sessionId.slice(0, 8) })
+          ) : null,
+          entry.createdAt === null ? null : h("span", { className: "ph-dim ph-tiny" }, t("wtCreatedAt", { when: relativeTime(entry.createdAt) })),
+          h("span", { className: "ph-spacer" }),
+          entry.current || entry.prunable ? null : h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: props.busy || props.sessionId.length === 0,
+            title: props.sessionId.length === 0 ? t("wtNoSession") : t("wtSwitchThisChat"),
+            onClick: props.onSwitch
+          }, h(Icon, { name: "branch", size: 11 }), t("wtSwitchHere")),
+          props.onOpenChat === void 0 || entry.bare || entry.prunable ? null : h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: props.busy,
+            onClick: props.onOpenChat
+          }, h(Icon, { name: "comment", size: 11 }), t("wtOpenChat")),
+          entry.isPool || entry.prunable || !props.main ? h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: props.busy,
+            onClick: props.onRemove
+          }, h(Icon, { name: "trash", size: 11 }), t("wtRemoveAction")) : null
+        )
+      ),
+      props.removing ? h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "6px", padding: "0 10px 10px" } },
+        h("div", { className: "ph-confirm-text" }, t("wtRemoveConfirm", { branch: label })),
+        h("p", { className: "ph-hint" }, t("wtRemoveHint")),
+        h(
+          "label",
+          { className: "ph-check-row" },
+          h("input", {
+            type: "checkbox",
+            checked: props.deleteBranch,
+            onChange: (event) => props.onDeleteBranch(event.target.checked)
+          }),
+          h("span", null, t("wtDeleteBranch"))
+        ),
+        h(
+          "label",
+          { className: "ph-check-row" },
+          h("input", {
+            type: "checkbox",
+            checked: props.force,
+            onChange: (event) => props.onForce(event.target.checked)
+          }),
+          h("span", null, t("wtForce"))
+        ),
+        h(
+          "div",
+          { className: "ph-dialog-actions" },
+          h("button", { type: "button", className: "ph-button", disabled: props.busy, onClick: props.onCancelRemove }, t("wtCancel")),
+          h("button", { type: "button", className: "ph-primary", disabled: props.busy, onClick: props.onConfirmRemove }, t("wtRemoveAction"))
+        )
+      ) : null
+    );
+  }
+
   // src/client/git/panel.tsx
   function GitPanel(props) {
     const { t, api } = props;
@@ -3941,6 +4455,10 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         setView("pulls");
         setSelection({ type: "pull", number });
       },
+      onOpenWorktrees: () => {
+        setView("worktrees");
+        setSelection(null);
+      },
       onBranchChanged: (branch) => {
         reload();
         toast(t("gitBranchSelect"), branch ?? t("gitDetachedHead"), "success");
@@ -4005,6 +4523,17 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         onFilter: setPullFilter,
         onSelect: (number) => setSelection({ type: "pull", number })
       });
+    } else if (view === "worktrees") {
+      body2 = h(WorktreesView, {
+        api,
+        t,
+        sessionId,
+        cwd,
+        revision,
+        newChat: props.newChat,
+        onToast: toast,
+        onChanged: reload
+      });
     } else if (view === "issues") {
       body2 = h(IssuesView, {
         api,
@@ -4050,6 +4579,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         value: view,
         counts: {
           changes: overview?.stats.files ?? 0,
+          worktrees: 0,
           pulls: 0,
           issues: 0,
           commits: 0
@@ -4118,6 +4648,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
     const { t, overview } = props;
     const repo = overview.repo;
     const pull = overview.branchPull;
+    const inWorktree = props.cwd.length > 0 && props.cwd.toLowerCase() !== repo.root.toLowerCase();
+    const worktreeName = inWorktree ? splitPath(props.cwd).name : "";
     return h(
       "div",
       { className: "ph-head" },
@@ -4163,7 +4695,13 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
           `#${pull.number}`,
           stateLabel(t, pull.state)
         ),
-        repo.remote?.slug !== null && repo.remote?.slug !== void 0 ? h("span", { className: "ph-dim ph-tiny ph-ellipsis", title: repo.remote.slug }, repo.remote.slug) : null
+        repo.remote?.slug !== null && repo.remote?.slug !== void 0 ? h("span", { className: "ph-dim ph-tiny ph-ellipsis", title: repo.remote.slug }, repo.remote.slug) : null,
+        inWorktree ? h("button", {
+          type: "button",
+          className: "ph-chip",
+          title: props.cwd,
+          onClick: props.onOpenWorktrees
+        }, h(Icon, { name: "folder", size: 10 }), h("span", { className: "ph-ellipsis" }, worktreeName)) : null
       ),
       h(GitActions, {
         t,
@@ -4191,6 +4729,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
   function PanelTabs(props) {
     const items = [
       { id: "changes", label: props.t("gitChanges"), count: props.counts.changes },
+      { id: "worktrees", label: props.t("gitWorktrees"), count: props.counts.worktrees },
       { id: "pulls", label: props.t("gitPulls"), count: props.counts.pulls },
       { id: "issues", label: props.t("gitIssues"), count: props.counts.issues },
       { id: "commits", label: props.t("gitCommits"), count: props.counts.commits }
@@ -4260,6 +4799,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         GitActions,
         DiffFileSection,
         CommitComposer,
+        WorktreesView,
+        WorktreeRow,
         MergeSettingsForm,
         installStyles
       },

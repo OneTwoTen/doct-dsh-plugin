@@ -235,7 +235,7 @@ function normalizeConfig(raw) {
 // src/features/git.ts
 import { randomUUID } from "node:crypto";
 import { stat as stat4 } from "node:fs/promises";
-import { isAbsolute as isAbsolute3, join as join4 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join4, resolve as resolve4 } from "node:path";
 
 // src/lib/git-run.ts
 import { execFile } from "node:child_process";
@@ -1748,6 +1748,40 @@ function worktreePath(repoRoot, config, name2) {
   }
   return path;
 }
+function parseWorktreeList(raw) {
+  const entries = [];
+  let current;
+  for (const line of String(raw ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = {
+        path: line.slice("worktree ".length),
+        head: null,
+        branch: null,
+        bare: false,
+        detached: false,
+        locked: false,
+        prunable: false
+      };
+      entries.push(current);
+      continue;
+    }
+    if (current === void 0) continue;
+    if (line.startsWith("HEAD ")) current.head = line.slice("HEAD ".length).trim() || null;
+    else if (line.startsWith("branch ")) current.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "") || null;
+    else if (line === "bare") current.bare = true;
+    else if (line === "detached") current.detached = true;
+    else if (line === "locked" || line.startsWith("locked ")) current.locked = true;
+    else if (line === "prunable" || line.startsWith("prunable ")) current.prunable = true;
+  }
+  return entries;
+}
+async function readWorktrees(runner, { root, signal }) {
+  const result = await runner.run("git", ["worktree", "list", "--porcelain"], { cwd: root, signal });
+  if (result.code !== 0) {
+    throw new CommandError("git/failed", String(result.stderr ?? "").trim() || "git worktree list th\u1EA5t b\u1EA1i");
+  }
+  return parseWorktreeList(result.stdout);
+}
 async function readBases(runner, { root, remote = "", limit = 40, signal }) {
   const [heads, remotes, head] = await Promise.all([
     runner.run("git", [
@@ -1937,14 +1971,18 @@ async function ensurePool(repoRoot, config) {
   } catch {
   }
 }
-async function removeWorktree(runner, { repoRoot, path, branch, deleteBranch = false, timeoutMs, signal }) {
+async function removeWorktree(runner, { repoRoot, path, branch, deleteBranch = false, force = false, timeoutMs, signal }) {
   const target = resolve2(String(path ?? ""));
   if (target.length === 0) {
     throw new CommandError("input/invalid", "Thi\u1EBFu \u0111\u01B0\u1EDDng d\u1EABn worktree");
   }
   const present = await stat2(target).catch(() => void 0);
   if (present !== void 0) {
-    const result = await runner.run("git", ["worktree", "remove", target], { cwd: repoRoot, signal, timeoutMs });
+    const result = await runner.run(
+      "git",
+      force ? ["worktree", "remove", "--force", target] : ["worktree", "remove", target],
+      { cwd: repoRoot, signal, timeoutMs }
+    );
     if (result.code !== 0) {
       const detail = String(result.stderr ?? "");
       if (/modified or untracked|contains modified/i.test(detail)) {
@@ -3727,6 +3765,34 @@ function mountRoutes(ctx, connection, config, deps) {
     }
     return names[0] ?? "";
   }
+  function pathKey(value) {
+    const normalized = resolve4(String(value ?? ""));
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  }
+  async function mainWorktreeRoot(root, signal) {
+    const entries = await readWorktrees(runner, { root, signal }).catch(() => []);
+    return resolve4(entries[0]?.path ?? root);
+  }
+  async function countChangedFiles(path, signal) {
+    const result = await runner.run("git", ["status", "--porcelain", "-z", "--untracked-files=normal"], {
+      cwd: path,
+      signal,
+      maxBytes: 2 * 1024 * 1024
+    }).catch(() => void 0);
+    if (result === void 0 || result.code !== 0) return null;
+    return String(result.stdout ?? "").split("\0").filter((field2) => field2.length > 0).length;
+  }
+  async function setSessionDirectory(sessionId, directory, signal) {
+    const agent = agentFor(sessionId);
+    if (agent === void 0) {
+      throw new CommandError("worktree/no-agent", "This Session is not open, so its folder cannot change yet");
+    }
+    const workingDirectory = ctx.get("workingDirectory");
+    if (typeof workingDirectory?.set !== "function") {
+      throw new CommandError("worktree/no-working-directory", "This build cannot change a Session folder");
+    }
+    await workingDirectory.set(agent, directory, signal);
+  }
   const watcher = createMergeWatcher({
     config,
     logger,
@@ -3949,9 +4015,9 @@ function mountRoutes(ctx, connection, config, deps) {
       const overview = await readOverview(runner, { root, config, signal });
       let message2 = String(payload.commitMessage ?? "").trim();
       if (payload.featureBranch === true) {
-        enterPhase(progress, "branch", "Preparing feature branch\u2026");
+        enterPhase(progress, "branch", "Preparing feature branch\xE2\u20AC\xA6");
         if (message2.length === 0) {
-          progress.label = "Generating commit message\u2026";
+          progress.label = "Generating commit message\xE2\u20AC\xA6";
           const facts = await readCommitMessageFacts(runner, {
             root,
             paths: payload.paths,
@@ -3984,9 +4050,9 @@ function mountRoutes(ctx, connection, config, deps) {
       }
       let commit = { status: "skipped_not_requested" };
       if (wantsCommit) {
-        enterPhase(progress, "commit", "Committing\u2026");
+        enterPhase(progress, "commit", "Committing\xE2\u20AC\xA6");
         if (message2.length === 0) {
-          progress.label = "Generating commit message\u2026";
+          progress.label = "Generating commit message\xE2\u20AC\xA6";
           const facts = await readCommitMessageFacts(runner, {
             root,
             paths: payload.paths,
@@ -4008,7 +4074,7 @@ function mountRoutes(ctx, connection, config, deps) {
             logger
           });
           message2 = draft.message;
-          progress.label = "Committing\u2026";
+          progress.label = "Committing\xE2\u20AC\xA6";
         }
         const outcome = await commitChanges(runner, {
           root,
@@ -4023,7 +4089,7 @@ function mountRoutes(ctx, connection, config, deps) {
       }
       let push = { status: "skipped_not_requested" };
       if (wantsPush && branch !== null) {
-        enterPhase(progress, "push", "Pushing\u2026");
+        enterPhase(progress, "push", "Pushing\xE2\u20AC\xA6");
         const outcome = await pushCurrentBranch(runner, {
           root,
           remote: context.remote?.name,
@@ -4041,7 +4107,7 @@ function mountRoutes(ctx, connection, config, deps) {
       }
       let pr = { status: "skipped_not_requested" };
       if (wantsPr && branch !== null) {
-        enterPhase(progress, "pr", "Creating pull request\u2026");
+        enterPhase(progress, "pr", "Creating pull request\xE2\u20AC\xA6");
         const created = await createPullForBranch({
           root,
           sessionId: String(payload.sessionId ?? ""),
@@ -4113,7 +4179,7 @@ function mountRoutes(ctx, connection, config, deps) {
     if (facts.ahead === 0) {
       throw new CommandError("pr/no-commits", `Branch ${branch} has no commits over ${base}.`, { base });
     }
-    onPhase?.("Generating pull request content\u2026");
+    onPhase?.("Generating pull request content\xE2\u20AC\xA6");
     const draft = await draftChangeRequest2({
       sessionId,
       payload,
@@ -4122,7 +4188,7 @@ function mountRoutes(ctx, connection, config, deps) {
       base,
       signal
     });
-    onPhase?.("Creating pull request\u2026");
+    onPhase?.("Creating pull request\xE2\u20AC\xA6");
     const created = await forge.createPull({
       root,
       remote,
@@ -4370,7 +4436,7 @@ function mountRoutes(ctx, connection, config, deps) {
         status: "running",
         phases: [],
         phase: null,
-        label: "Starting\u2026",
+        label: "Starting\xE2\u20AC\xA6",
         startedAt: Date.now(),
         finishedAt: null,
         output: [],
@@ -4592,27 +4658,226 @@ function mountRoutes(ctx, connection, config, deps) {
       }
       const root = await locateRepository(runner, directory, signal);
       if (root === null) return { ...base, reason: "not-a-repository" };
-      const kind = await readCheckoutKind(runner, { path: root, signal });
-      const remote = await preferredRemote(root, signal);
-      const bases = await readBases(runner, { root, remote, signal });
+      const mainRoot = await mainWorktreeRoot(root, signal);
+      const kind = await readCheckoutKind(runner, { path: mainRoot, signal });
+      const remote = await preferredRemote(mainRoot, signal);
+      const bases = await readBases(runner, { root: mainRoot, remote, signal });
       if (config.worktree.base.length > 0) bases.defaultBase = config.worktree.base;
       const value = await state();
       if (payload.probe === true) {
         await store.update((current) => {
-          current.probe = { at: Date.now(), sessionId, directory, root, supported: true };
+          current.probe = { at: Date.now(), sessionId, directory, root: mainRoot, supported: true };
         });
       }
       return {
         ...base,
         supported: config.worktree.enabled === true && kind.linked !== true,
         reason: config.worktree.enabled === true ? kind.linked === true ? "linked-project" : null : "disabled",
-        repositoryRoot: root,
+        repositoryRoot: mainRoot,
         remote,
         sourceDefault: config.worktree.source,
         project: { directory, linked: kind.linked === true },
         bases,
         current: sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null
       };
+    },
+    /**
+     * Every checkout of this repository, with the facts the manager needs:
+     * which one the Session is in, which the plugin created, and whether it
+     * holds uncommitted work.
+     */
+    async worktrees(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const currentPath = sessionDirectory(ctx, sessionId) ?? root;
+      const [entries, value] = await Promise.all([
+        readWorktrees(runner, { root, signal }),
+        state()
+      ]);
+      const mainRoot = resolve4(entries[0]?.path ?? root);
+      const records = /* @__PURE__ */ new Map();
+      for (const record of Object.values(value.worktrees ?? {})) {
+        if (typeof record?.path === "string") records.set(pathKey(record.path), record);
+      }
+      const pool = poolDirectory(mainRoot, config.worktree);
+      const worktrees = await Promise.all(entries.map(async (entry) => {
+        const record = records.get(pathKey(entry.path));
+        const entryPath = resolve4(entry.path);
+        const changedFiles = entry.bare || entry.prunable ? null : await countChangedFiles(entryPath, signal);
+        return {
+          path: entryPath,
+          branch: entry.branch,
+          head: entry.head,
+          bare: entry.bare,
+          detached: entry.detached,
+          locked: entry.locked,
+          prunable: entry.prunable,
+          current: pathKey(entryPath) === pathKey(currentPath),
+          isPool: pathKey(entryPath) !== pathKey(pool) && isInside(pool, entryPath),
+          sessionId: record?.sessionId ?? null,
+          createdAt: record?.createdAt ?? null,
+          changedFiles
+        };
+      }));
+      worktrees.sort((left, right) => {
+        if (left.current !== right.current) return left.current ? -1 : 1;
+        if (left.isPool !== right.isPool) return left.isPool ? -1 : 1;
+        return left.path.localeCompare(right.path);
+      });
+      return { root: mainRoot, poolDirectory: pool, currentPath, worktrees };
+    },
+    /**
+     * Create one checkout from the manager, optionally moving the Session into
+     * it. Unlike the New Session option this accepts a name and a base branch,
+     * so a checkout can be prepared before a chat exists.
+     */
+    async worktreeAdd(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const mainRoot = await mainWorktreeRoot(root, signal);
+      if (config.worktree.enabled !== true) {
+        throw new CommandError("worktree/disabled", "The worktree feature is disabled in the configuration");
+      }
+      const kind = await readCheckoutKind(runner, { path: mainRoot, signal });
+      if (kind.linked) {
+        throw new CommandError("worktree/linked-project", "The open repository is itself a linked worktree", { root: mainRoot });
+      }
+      const remote = await preferredRemote(mainRoot, signal);
+      const requestedBase = typeof payload.base === "string" ? payload.base.trim() : "";
+      const base = requestedBase.length > 0 ? requestedBase : config.worktree.base.length > 0 ? config.worktree.base : await resolveDefaultBase(runner, { root: mainRoot, remote, signal });
+      if (base === null) throw new CommandError("worktree/no-base", "Cannot determine the base branch for the worktree");
+      const source = payload.source === "remote" ? "remote" : "local";
+      const requested = typeof payload.name === "string" ? payload.name.trim() : "";
+      const fragment = sanitizeBranchFragment(
+        requested.length > 0 ? requested : generatedWorktreeName("", config.worktree.namePrefix)
+      ).replace(/\//g, "-");
+      if (fragment.length === 0) throw new CommandError("worktree/invalid-name", "A worktree name is required");
+      const name2 = await uniqueBranchName(runner, { root: mainRoot, branch: fragment, signal });
+      const created = await createWorktree(runner, {
+        repoRoot: mainRoot,
+        name: name2,
+        base,
+        source,
+        remote: source === "remote" ? remote : "",
+        config: config.worktree,
+        timeoutMs: config.worktreeTimeoutMs,
+        signal
+      });
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const record = {
+        ...created,
+        base,
+        source,
+        remote: source === "remote" ? remote : null,
+        sessionId,
+        createdAt: Date.now()
+      };
+      let switched = false;
+      if (sessionId.length > 0) {
+        await store.update((current) => {
+          current.worktrees ??= {};
+          current.worktrees[sessionId] = record;
+        });
+        if (payload.switch !== false) {
+          try {
+            await setSessionDirectory(sessionId, created.path, signal);
+            switched = true;
+          } catch (error) {
+            await removeWorktree(runner, {
+              repoRoot: mainRoot,
+              path: created.path,
+              branch: created.branch,
+              deleteBranch: true,
+              timeoutMs: config.worktreeTimeoutMs
+            }).catch(() => void 0);
+            await store.update((current) => {
+              if (current.worktrees !== void 0) delete current.worktrees[sessionId];
+            }).catch(() => void 0);
+            throw error;
+          }
+        }
+      }
+      logger.info("git: created worktree %s for %s", created.branch, sessionId.length > 0 ? sessionId : "no Session");
+      return { worktree: record, switched };
+    },
+    /** Move one Session into an existing checkout, or back to the project. */
+    async worktreeSwitch(payload, signal) {
+      const sessionId = requiredString(payload.sessionId, "sessionId");
+      const target = requiredString(payload.path, "path");
+      const { root } = await repository(payload, signal);
+      const mainRoot = await mainWorktreeRoot(root, signal);
+      const entries = await readWorktrees(runner, { root, signal });
+      const match = entries.find((entry) => pathKey(entry.path) === pathKey(target));
+      if (match === void 0) {
+        throw new CommandError("worktree/unknown-path", "That folder is not a worktree of this repository", { path: target });
+      }
+      if (match.bare) throw new CommandError("worktree/bare", "A bare repository cannot hold a Session");
+      const matchPath = resolve4(match.path);
+      await setSessionDirectory(sessionId, matchPath, signal);
+      await store.update((current) => {
+        current.worktrees ??= {};
+        const existing = Object.values(current.worktrees).find(
+          (record) => typeof record?.path === "string" && pathKey(record.path) === pathKey(matchPath)
+        );
+        if (existing !== void 0 && pathKey(matchPath) !== pathKey(mainRoot)) {
+          current.worktrees[sessionId] = { ...existing, sessionId };
+        } else {
+          delete current.worktrees[sessionId];
+        }
+      });
+      return { directory: matchPath, branch: match.branch };
+    },
+    /** Remove one checkout by path, never the main one. */
+    async worktreeRemovePath(payload, signal) {
+      const target = requiredString(payload.path, "path");
+      const { root } = await repository(payload, signal);
+      const mainRoot = await mainWorktreeRoot(root, signal);
+      if (pathKey(target) === pathKey(mainRoot)) {
+        throw new CommandError("worktree/main", "The main checkout cannot be removed");
+      }
+      const entries = await readWorktrees(runner, { root, signal });
+      const match = entries.find((entry) => pathKey(entry.path) === pathKey(target));
+      if (match === void 0) {
+        throw new CommandError("worktree/unknown-path", "That folder is not a worktree of this repository", { path: target });
+      }
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      if (sessionId.length > 0) {
+        const current = sessionDirectory(ctx, sessionId);
+        if (current !== void 0 && isInside(match.path, current)) {
+          await setSessionDirectory(sessionId, mainRoot, signal);
+        }
+      }
+      const result = await removeWorktree(runner, {
+        repoRoot: mainRoot,
+        path: match.path,
+        branch: match.branch,
+        deleteBranch: payload.deleteBranch === true,
+        force: payload.force === true,
+        timeoutMs: config.worktreeTimeoutMs,
+        signal
+      });
+      await store.update((current) => {
+        if (current.worktrees === void 0) return;
+        for (const [id, record] of Object.entries(current.worktrees)) {
+          if (typeof record?.path === "string" && pathKey(record.path) === pathKey(match.path)) delete current.worktrees[id];
+        }
+      });
+      return { removed: result.removed, branchDeleted: result.branchDeleted, directory: resolve4(match.path) };
+    },
+    /** Forget registrations whose checkout directory disappeared. */
+    async worktreePrune(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const result = await runner.run("git", ["worktree", "prune", "-v"], {
+        cwd: root,
+        signal,
+        timeoutMs: config.worktreeTimeoutMs
+      });
+      if (result.code !== 0) {
+        throw new CommandError("worktree/failed", String(result.stderr ?? "").trim() || "git worktree prune failed");
+      }
+      const output = `${result.stdout ?? ""}
+${result.stderr ?? ""}`;
+      const pruned = output.split("\n").filter((line) => /^\s*Removing\b/i.test(line)).length;
+      return { pruned };
     },
     /**
      * Create one checkout for a Session and move that Session into it.
@@ -4624,6 +4889,7 @@ function mountRoutes(ctx, connection, config, deps) {
     async worktreeCreate(payload, signal) {
       const sessionId = requiredString(payload.sessionId, "sessionId");
       const { directory, root } = await repository(payload, signal);
+      const mainRoot = await mainWorktreeRoot(root, signal);
       if (config.worktree.enabled !== true) {
         throw new CommandError("worktree/disabled", "The worktree feature is disabled in the configuration");
       }
@@ -4635,7 +4901,7 @@ function mountRoutes(ctx, connection, config, deps) {
       if (typeof workingDirectory?.set !== "function") {
         throw new CommandError("worktree/no-working-directory", "This build cannot change a Session folder");
       }
-      if (isInside(poolDirectory(root, config.worktree), directory)) {
+      if (isInside(poolDirectory(mainRoot, config.worktree), directory)) {
         throw new CommandError("worktree/already", "This Session already works in a worktree of this repository", { directory });
       }
       const value = await state();
@@ -4643,18 +4909,18 @@ function mountRoutes(ctx, connection, config, deps) {
       if (previous !== void 0) {
         throw new CommandError("worktree/already", `This Session already has worktree ${String(previous.branch)}`, { path: previous.path });
       }
-      const kind = await readCheckoutKind(runner, { path: root, signal });
+      const kind = await readCheckoutKind(runner, { path: mainRoot, signal });
       if (kind.linked) {
-        throw new CommandError("worktree/linked-project", "The open repository is itself a linked worktree, so no second one is created", { root });
+        throw new CommandError("worktree/linked-project", "The open repository is itself a linked worktree, so no second one is created", { root: mainRoot });
       }
-      const remote = await preferredRemote(root, signal);
+      const remote = await preferredRemote(mainRoot, signal);
       const requested = typeof payload.base === "string" ? payload.base.trim() : "";
-      const base = requested.length > 0 ? requested : config.worktree.base.length > 0 ? config.worktree.base : await resolveDefaultBase(runner, { root, remote, signal });
+      const base = requested.length > 0 ? requested : config.worktree.base.length > 0 ? config.worktree.base : await resolveDefaultBase(runner, { root: mainRoot, remote, signal });
       if (base === null) throw new CommandError("worktree/no-base", "Cannot determine the base branch for the worktree");
       const source = payload.source === "remote" ? "remote" : "local";
       const name2 = generatedWorktreeName(sessionId, config.worktree.namePrefix);
       const created = await createWorktree(runner, {
-        repoRoot: root,
+        repoRoot: mainRoot,
         name: name2,
         base,
         source,
@@ -4665,6 +4931,8 @@ function mountRoutes(ctx, connection, config, deps) {
       });
       const record = {
         ...created,
+        base,
+        source,
         remote: source === "remote" ? remote : null,
         sessionId,
         createdAt: Date.now()
@@ -4673,7 +4941,7 @@ function mountRoutes(ctx, connection, config, deps) {
         await workingDirectory.set(agent, created.path, signal);
       } catch (error) {
         await removeWorktree(runner, {
-          repoRoot: root,
+          repoRoot: mainRoot,
           path: created.path,
           branch: created.branch,
           deleteBranch: true,
@@ -5621,12 +5889,12 @@ function mountTelegramRemote(ctx, config, deps) {
     }
   }
   function sleep(ms) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const timer = setTimeout(done, ms);
       function done() {
         clearTimeout(timer);
         controller.signal.removeEventListener("abort", done);
-        resolve4();
+        resolve5();
       }
       controller.signal.addEventListener("abort", done, { once: true });
     });

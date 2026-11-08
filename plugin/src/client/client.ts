@@ -21,6 +21,7 @@ import { GitPanel, GitHeaderButton } from './git/panel.tsx'
 import { GitActions } from './git/actions.tsx'
 import { DiffFileSection } from './git/diff-view.tsx'
 import { CommitComposer } from './git/commit-composer.tsx'
+import { WorktreesView, WorktreeRow } from './git/worktrees.tsx'
 
 /** The `plugins.row.config` key: bundle package name and row id. */
 const ROW_KEY = '@local/personal-hub#personal-hub'
@@ -57,6 +58,8 @@ export function createClient(): ClientModule {
       GitActions,
       DiffFileSection,
       CommitComposer,
+      WorktreesView,
+      WorktreeRow,
       MergeSettingsForm,
       installStyles,
     },

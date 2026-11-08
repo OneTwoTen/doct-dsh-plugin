@@ -19,7 +19,8 @@ const EXPECTED_ROUTES = [
   'actionState', 'branchPull', 'branches', 'cleanupRun', 'cleanupState', 'commit', 'commitChanges', 'commits',
   'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'forge', 'issue', 'issues',
   'mergeSettings', 'mergeSettingsSet', 'overview', 'publish', 'pull', 'pullRequest', 'pulls', 'push', 'stage',
-  'startAction', 'switchBranch', 'unstage', 'worktreeCreate', 'worktreeRemove', 'worktreeState',
+  'startAction', 'switchBranch', 'unstage', 'worktreeAdd', 'worktreeCreate', 'worktreePrune', 'worktreeRemove',
+  'worktreeRemovePath', 'worktreeState', 'worktreeSwitch', 'worktrees',
 ].sort()
 
 /** Initialize a repository with a committed file, a modified file, a staged file, and an untracked file. */

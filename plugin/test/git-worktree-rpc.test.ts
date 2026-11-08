@@ -417,3 +417,154 @@ test('cleanup settings and a manual pass are served to the panel', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('the worktree manager lists, creates, switches, and removes checkouts', async () => {
+  const root = await makeRepository()
+  const moves = []
+  let current = root
+  const feature = await mountFeature({
+    root,
+    services: {
+      workingDirectory: {
+        get: () => current,
+        set: async (_agent, path) => {
+          moves.push(path)
+          current = path
+          return path
+        },
+      },
+    },
+  })
+  try {
+    const before = await feature.call('worktrees', { sessionId: SESSION })
+    assert.equal(before.ok, true, JSON.stringify(before))
+    assert.equal(before.value.root, root)
+    assert.equal(before.value.currentPath, root)
+    assert.equal(before.value.worktrees.length, 1)
+    assert.equal(before.value.worktrees[0].current, true)
+    assert.equal(before.value.worktrees[0].branch, 'main')
+    assert.equal(before.value.poolDirectory.endsWith(join('.agents', 'worktrees')), true)
+
+    const created = await feature.call('worktreeAdd', {
+      sessionId: SESSION,
+      name: 'feat/panel',
+      base: 'main',
+      switch: true,
+    })
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const record = created.value.worktree
+    assert.equal(record.branch, 'feat-panel')
+    assert.equal(record.base, 'main')
+    assert.equal(created.value.switched, true)
+    assert.equal((await stat(record.path)).isDirectory(), true)
+    assert.deepEqual(moves, [record.path])
+
+    const after = await feature.call('worktrees', { sessionId: SESSION })
+    assert.equal(after.ok, true, JSON.stringify(after))
+    assert.equal(after.value.worktrees.length, 2)
+    const mine = after.value.worktrees.find((entry) => entry.path === record.path)
+    assert.equal(mine.current, true)
+    assert.equal(mine.isPool, true)
+    assert.equal(mine.sessionId, SESSION)
+    assert.equal(mine.branch, 'feat-panel')
+    assert.equal(mine.changedFiles, 0)
+    const main = after.value.worktrees.find((entry) => entry.path === root)
+    assert.equal(main.current, false)
+
+    const back = await feature.call('worktreeSwitch', { sessionId: SESSION, path: root })
+    assert.equal(back.ok, true, JSON.stringify(back))
+    assert.equal(back.value.directory, root)
+    assert.equal(moves.at(-1), root)
+
+    const again = await feature.call('worktreeSwitch', { sessionId: SESSION, path: record.path })
+    assert.equal(again.ok, true, JSON.stringify(again))
+    assert.equal(moves.at(-1), record.path)
+
+    const removed = await feature.call('worktreeRemovePath', {
+      sessionId: SESSION,
+      path: record.path,
+      deleteBranch: true,
+    })
+    assert.equal(removed.ok, true, JSON.stringify(removed))
+    assert.equal(removed.value.removed, true)
+    assert.equal(removed.value.branchDeleted, true)
+    assert.equal(moves.at(-1), root)
+    await assert.rejects(() => stat(record.path))
+
+    const final = await feature.call('worktrees', { sessionId: SESSION })
+    assert.equal(final.value.worktrees.length, 1)
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the manager protects the main checkout and prunes stale registrations', async () => {
+  const root = await makeRepository()
+  const feature = await mountFeature({ root })
+  try {
+    const refused = await feature.call('worktreeRemovePath', { cwd: root, path: root })
+    assert.equal(refused.ok, false)
+    assert.equal(refused.error.code, 'worktree/main')
+
+    const created = await feature.call('worktreeAdd', { cwd: root, name: 'stale-one', base: 'main', switch: false })
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const record = created.value.worktree
+    await rm(record.path, { recursive: true, force: true })
+
+    const listed = await feature.call('worktrees', { cwd: root })
+    const stale = listed.value.worktrees.find((entry) => entry.path === record.path)
+    assert.equal(stale.prunable, true)
+
+    const pruned = await feature.call('worktreePrune', { cwd: root })
+    assert.equal(pruned.ok, true, JSON.stringify(pruned))
+    assert.ok(pruned.value.pruned >= 1)
+
+    const after = await feature.call('worktrees', { cwd: root })
+    assert.equal(after.value.worktrees.some((entry) => entry.path === record.path), false)
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a dirty checkout is kept unless the manager forces the removal', async () => {
+  const root = await makeRepository()
+  const feature = await mountFeature({ root })
+  try {
+    const created = await feature.call('worktreeAdd', { cwd: root, name: 'dirty-one', base: 'main', switch: false })
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const record = created.value.worktree
+    await writeFile(join(record.path, 'note.txt'), 'draft\n', 'utf8')
+
+    const refused = await feature.call('worktreeRemovePath', { cwd: root, path: record.path })
+    assert.equal(refused.ok, false)
+    assert.equal(refused.error.code, 'worktree/dirty')
+
+    const forced = await feature.call('worktreeRemovePath', { cwd: root, path: record.path, force: true })
+    assert.equal(forced.ok, true, JSON.stringify(forced))
+    await assert.rejects(() => stat(record.path))
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('switching a checkout needs an open Session', async () => {
+  const root = await makeRepository()
+  const feature = await mountFeature({ root })
+  try {
+    const created = await feature.call('worktreeAdd', { cwd: root, name: 'other-chat', base: 'main', switch: false })
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const answer = await feature.call('worktreeSwitch', {
+      sessionId: 'session-unknown',
+      cwd: root,
+      path: created.value.worktree.path,
+    })
+    assert.equal(answer.ok, false)
+    assert.equal(answer.error.code, 'worktree/no-agent')
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})

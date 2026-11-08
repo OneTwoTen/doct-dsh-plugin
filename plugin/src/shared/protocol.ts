@@ -383,8 +383,43 @@ export interface WorktreeRecord {
   sessionId: string
   createdAt: number
   remote?: string | null
+  /** The branch the checkout started from, when the manager created it. */
+  base?: string
+  /** Whether it started from a local or a fetched remote branch. */
+  source?: 'local' | 'remote'
   namedAt?: number
   namingError?: string
+}
+
+/** One checkout of the repository, as the worktree manager lists it. */
+export interface WorktreeInfo {
+  path: string
+  branch: string | null
+  head: string | null
+  bare: boolean
+  detached: boolean
+  /** Git marks a checkout locked while another process owns it. */
+  locked: boolean
+  /** A registration whose directory disappeared; `git worktree prune` clears it. */
+  prunable: boolean
+  /** Whether this is the folder the current Session works in. */
+  current: boolean
+  /** Whether the checkout lives in the plugin's worktree pool. */
+  isPool: boolean
+  /** The Session this plugin created the checkout for, when it did. */
+  sessionId: string | null
+  createdAt: number | null
+  /** Changed files, or null when the checkout could not be inspected. */
+  changedFiles: number | null
+}
+
+/** The worktree manager's list answer. */
+export interface WorktreeListResult {
+  root: string
+  poolDirectory: string
+  /** The folder the current Session works in. */
+  currentPath: string | null
+  worktrees: WorktreeInfo[]
 }
 
 /** The New Session worktree option's answer. */
@@ -653,6 +688,35 @@ export interface PublishRequest extends GitTarget {
   visibility: 'private' | 'public'
 }
 
+/** A request to create one checkout from the worktree manager. */
+export interface WorktreeAddRequest extends GitTarget {
+  /** The branch (and directory) name; generated when absent. */
+  name?: string
+  /** The branch the checkout starts from; the default branch when absent. */
+  base?: string
+  source?: 'local' | 'remote'
+  /** Move this Session into the new checkout. */
+  sessionId?: string
+  /** Whether to move the Session at all; defaults to true when a Session is named. */
+  switch?: boolean
+}
+
+/** A request to move a Session into an existing checkout, or back to the project. */
+export interface WorktreeSwitchRequest extends GitTarget {
+  sessionId: string
+  path: string
+}
+
+/** A request to remove one checkout by path. */
+export interface WorktreeRemovePathRequest extends GitTarget {
+  path: string
+  deleteBranch?: boolean
+  /** Remove even a checkout holding uncommitted work. */
+  force?: boolean
+  /** Move this Session back to the project first. */
+  sessionId?: string
+}
+
 /** One route the browser may call. */
 export interface GitApi {
   overview(payload: GitTarget): Promise<GitOverview>
@@ -716,6 +780,15 @@ export interface GitApi {
   }>
   publish(payload: PublishRequest): Promise<{ remote: string; url: string | null; pushed: boolean }>
   worktreeState(payload: GitTarget & { probe?: boolean }): Promise<WorktreeState>
+  worktrees(payload: GitTarget): Promise<WorktreeListResult>
+  worktreeAdd(payload: WorktreeAddRequest): Promise<{ worktree: WorktreeRecord; switched: boolean }>
+  worktreeSwitch(payload: WorktreeSwitchRequest): Promise<{ directory: string; branch: string | null }>
+  worktreeRemovePath(payload: WorktreeRemovePathRequest): Promise<{
+    removed: boolean
+    branchDeleted: boolean
+    directory: string
+  }>
+  worktreePrune(payload: GitTarget): Promise<{ pruned: number }>
   worktreeCreate(payload: GitTarget & {
     sessionId: string
     base?: string

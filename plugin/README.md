@@ -215,6 +215,28 @@ chỉ bật khi CLI tương ứng đã đăng nhập), tên `owner/repo`, và ch
 Plugin chạy `gh repo create --source . --remote origin --push` (GitLab: `glab repo create` rồi push),
 sau đó bảng tự làm mới và remote mới xuất hiện ở header.
 
+### Quản lý worktree (tab Worktree)
+
+Tab **Worktree** trong bảng Git là nơi quản lý mọi checkout của kho mã, không chỉ checkout do
+phiên tạo:
+
+- **Danh sách** gồm checkout chính, các worktree trong pool `.agents/worktrees/`, và cả worktree
+  liên kết bên ngoài. Mỗi dòng có nhánh, đường dẫn, chip `hiện tại` / `chính` / `HEAD rời` /
+  `đang khoá` / `mất thư mục`, số tệp đang thay đổi, chat đang dùng, và thời điểm tạo.
+- **Worktree mới**: đặt tên nhánh (để trống thì tự sinh `dsh-…`), chọn nhánh nền từ local hoặc
+  remote đã fetch, và tuỳ chọn **Chuyển chat này sang đây**. Checkout có nhánh riêng nên không đụng
+  checkout chính.
+- **Làm việc ở đây**: chuyển thư mục làm việc của chat hiện tại sang checkout đó (kể cả quay về
+  checkout chính).
+- **Mở chat**: tạo một chat mới ngay trong checkout đó, để hai chat cùng làm một nhánh.
+- **Xoá**: xoá checkout (kèm tuỳ chọn xoá nhánh). Checkout còn thay đổi chưa commit sẽ bị Git giữ
+  lại; bật **Vẫn xoá** để buộc. Checkout chính không bao giờ bị xoá.
+- **Dọn đăng ký** (`prune`): quên những worktree có thư mục đã biến mất.
+
+Khi chat đang làm ngoài checkout chính, header hiện thêm chip thư mục; bấm vào là mở tab Worktree.
+Xoá checkout đang dùng sẽ đưa chat về checkout chính trước, nên không có phiên nào trỏ vào thư mục
+đã mất.
+
 ### Worktree cho phiên mới
 
 Ở màn hình **New Session**, cạnh bộ chọn workspace có một hàng giống T3 Code: nút **Worktree mới**,
