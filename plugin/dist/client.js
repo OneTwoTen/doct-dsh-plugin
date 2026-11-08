@@ -359,7 +359,73 @@
     wtCreatedAt: "created {when}",
     wtNoSession: "Open a chat to move it into a worktree.",
     wtLoadBases: "Loading branches\u2026",
-    wtAddFailed: "Could not create the worktree"
+    wtAddFailed: "Could not create the worktree",
+    webRemoteTitle: "Web Remote",
+    webRemoteSummary: "Control this DSH from your phone through a relay; no port is opened on this machine.",
+    webRemoteIntro: "The plugin connects out to your relay, pairs once, then serves chats, prompts, approvals, and questions to the web client.",
+    webRemoteLoading: "Reading the Web Remote state\u2026",
+    webRemoteUnavailable: "The Host half of this plugin is not reachable, so the Web Remote state is unavailable. Restart Harness after installing or updating the plugin.",
+    webRemoteStale: "The last status update failed; this snapshot may be a few seconds old.",
+    webRemoteRelayLabel: "Relay URL",
+    webRemoteRelayPlaceholder: "https://chat.example.com",
+    webRemoteRelayHint: "Changing the relay removes the stored credential, so this device pairs again.",
+    webRemoteRelayInvalid: "The relay URL must start with http://, https://, ws://, or wss://.",
+    webRemoteDeviceLabel: "Device name",
+    webRemoteDevicePlaceholder: "Name shown on the approval screen",
+    webRemoteAutoPair: "Start pairing automatically when no credential is stored",
+    webRemoteEnabled: "Turn Web Remote on",
+    webRemoteDisabledHint: "Web Remote is off in this profile. Turn it on and save to let the plugin connect out to your relay.",
+    webRemoteSettingsTitle: "Relay settings",
+    webRemoteSave: "Save",
+    webRemoteSaving: "Saving\u2026",
+    webRemoteSaved: "Saved. Harness reloads this plugin row, so the change applies in a moment.",
+    webRemoteReadOnly: "This deployment does not allow configuration edits.",
+    webRemoteRefresh: "Refresh status",
+    webRemotePairedBadge: "paired",
+    webRemoteDevice: "Device",
+    webRemoteFingerprint: "Key fingerprint",
+    webRemoteConnection: "Connection",
+    webRemoteConnectedAt: "connected {when}",
+    webRemotePaired: "Pairing",
+    webRemotePairedAt: "paired {when}",
+    webRemoteWatching: "Web clients",
+    webRemoteWatchingCount: "{count} session(s) followed",
+    webRemoteWatchingNone: "none following",
+    webRemoteLastError: "Last error",
+    webRemoteOpenWebChat: "Open the WebChat",
+    webRemoteNoRelayHint: "Set the relay URL and save to pair this machine.",
+    webRemotePairTitle: "Pair this device",
+    webRemotePairStep: "Open the approval page on another device, enter this code, then approve:",
+    webRemotePairOpen: "Open the approval page",
+    webRemotePairCopy: "Copy code",
+    webRemotePairCopied: "Copied",
+    webRemotePairExpires: "The code expires in {time}.",
+    webRemotePairExpired: "The code expired. Start pairing again.",
+    webRemotePairCancel: "Cancel pairing",
+    webRemotePairCancelled: "Pairing was cancelled.",
+    webRemotePairNow: "Pair now",
+    webRemotePairAgain: "Pair again",
+    webRemoteUnpair: "Disconnect",
+    webRemoteUnpairConfirm: "Delete the stored credential and cut the web client off?",
+    webRemoteUnpairYes: "Disconnect",
+    webRemoteUnpairCancel: "Keep it",
+    webRemoteUnpaired: "Disconnected. The web client lost access until you pair again.",
+    webRemoteActionFailed: "The action failed: {message}",
+    webRemoteStateStarting: "Starting\u2026",
+    webRemoteStateDisabled: "Off",
+    webRemoteStateWaitingRelay: "No relay configured",
+    webRemoteStatePairing: "Waiting for approval",
+    webRemoteStateWaitingPairing: "Pairing required",
+    webRemoteStatePairingRequired: "Pairing required",
+    webRemoteStateConnecting: "Connecting\u2026",
+    webRemoteStateReconnecting: "Reconnecting\u2026",
+    webRemoteStateConnected: "Connected",
+    webRemoteStatePaired: "Paired",
+    webRemoteStateAuthRequired: "The relay rejected the credential",
+    webRemoteStateRevoked: "Device revoked",
+    webRemoteStateError: "Error",
+    webRemoteStateStopped: "Stopped",
+    webRemoteStateDisconnected: "Disconnected"
   };
   var vi = {
     cardTitle: "Trung t\xE2m c\xE1 nh\xE2n",
@@ -679,12 +745,79 @@
     wtCreatedAt: "t\u1EA1o {when}",
     wtNoSession: "M\u1EDF m\u1ED9t chat \u0111\u1EC3 chuy\u1EC3n n\xF3 v\xE0o worktree.",
     wtLoadBases: "\u0110ang t\u1EA3i nh\xE1nh\u2026",
-    wtAddFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c worktree"
+    wtAddFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c worktree",
+    webRemoteTitle: "Web Remote",
+    webRemoteSummary: "\u0110i\u1EC1u khi\u1EC3n DSH n\xE0y t\u1EEB \u0111i\u1EC7n tho\u1EA1i qua relay; m\xE1y kh\xF4ng m\u1EDF c\u1ED5ng n\xE0o.",
+    webRemoteIntro: "Plugin n\u1ED1i ra ngo\xE0i t\u1EDBi relay, gh\xE9p c\u1EB7p m\u1ED9t l\u1EA7n, r\u1ED3i ph\u1EE5c v\u1EE5 chat, prompt, ph\xEA duy\u1EC7t v\xE0 c\xE2u h\u1ECFi cho web client.",
+    webRemoteLoading: "\u0110ang \u0111\u1ECDc tr\u1EA1ng th\xE1i Web Remote\u2026",
+    webRemoteUnavailable: "Kh\xF4ng li\xEAn l\u1EA1c \u0111\u01B0\u1EE3c ph\u1EA7n Host c\u1EE7a plugin, n\xEAn ch\u01B0a \u0111\u1ECDc \u0111\u01B0\u1EE3c tr\u1EA1ng th\xE1i Web Remote. H\xE3y kh\u1EDFi \u0111\u1ED9ng l\u1EA1i Harness sau khi c\xE0i ho\u1EB7c c\u1EADp nh\u1EADt plugin.",
+    webRemoteStale: "L\u1EA7n c\u1EADp nh\u1EADt tr\u1EA1ng th\xE1i g\u1EA7n nh\u1EA5t th\u1EA5t b\u1EA1i; s\u1ED1 li\u1EC7u c\xF3 th\u1EC3 c\u0169 v\xE0i gi\xE2y.",
+    webRemoteRelayLabel: "\u0110\u1ECBa ch\u1EC9 relay",
+    webRemoteRelayPlaceholder: "https://chat.example.com",
+    webRemoteRelayHint: "\u0110\u1ED5i relay s\u1EBD xo\xE1 credential \u0111\xE3 l\u01B0u, n\xEAn thi\u1EBFt b\u1ECB ph\u1EA3i gh\xE9p c\u1EB7p l\u1EA1i.",
+    webRemoteRelayInvalid: "\u0110\u1ECBa ch\u1EC9 relay ph\u1EA3i b\u1EAFt \u0111\u1EA7u b\u1EB1ng http://, https://, ws:// ho\u1EB7c wss://.",
+    webRemoteDeviceLabel: "T\xEAn thi\u1EBFt b\u1ECB",
+    webRemoteDevicePlaceholder: "T\xEAn hi\u1EC7n tr\xEAn m\xE0n h\xECnh duy\u1EC7t",
+    webRemoteAutoPair: "T\u1EF1 ch\u1EA1y gh\xE9p c\u1EB7p khi ch\u01B0a c\xF3 credential",
+    webRemoteEnabled: "B\u1EADt Web Remote",
+    webRemoteDisabledHint: "Web Remote \u0111ang t\u1EAFt trong profile n\xE0y. B\u1EADt r\u1ED3i l\u01B0u \u0111\u1EC3 plugin n\u1ED1i ra relay.",
+    webRemoteSettingsTitle: "Thi\u1EBFt l\u1EADp relay",
+    webRemoteSave: "L\u01B0u",
+    webRemoteSaving: "\u0110ang l\u01B0u\u2026",
+    webRemoteSaved: "\u0110\xE3 l\u01B0u. Harness t\u1EA3i l\u1EA1i h\xE0ng plugin n\xE0y, n\xEAn thay \u0111\u1ED5i \xE1p d\u1EE5ng ngay sau \u0111\xF3.",
+    webRemoteReadOnly: "B\u1EA3n c\xE0i n\xE0y kh\xF4ng cho s\u1EEDa c\u1EA5u h\xECnh.",
+    webRemoteRefresh: "L\xE0m m\u1EDBi tr\u1EA1ng th\xE1i",
+    webRemotePairedBadge: "\u0111\xE3 gh\xE9p c\u1EB7p",
+    webRemoteDevice: "Thi\u1EBFt b\u1ECB",
+    webRemoteFingerprint: "V\xE2n tay kho\xE1",
+    webRemoteConnection: "K\u1EBFt n\u1ED1i",
+    webRemoteConnectedAt: "k\u1EBFt n\u1ED1i {when}",
+    webRemotePaired: "Gh\xE9p c\u1EB7p",
+    webRemotePairedAt: "gh\xE9p c\u1EB7p {when}",
+    webRemoteWatching: "Web client",
+    webRemoteWatchingCount: "\u0111ang theo d\xF5i {count} phi\xEAn",
+    webRemoteWatchingNone: "ch\u01B0a theo d\xF5i phi\xEAn n\xE0o",
+    webRemoteLastError: "L\u1ED7i g\u1EA7n nh\u1EA5t",
+    webRemoteOpenWebChat: "M\u1EDF WebChat",
+    webRemoteNoRelayHint: "\u0110\u1EB7t \u0111\u1ECBa ch\u1EC9 relay r\u1ED3i l\u01B0u \u0111\u1EC3 gh\xE9p c\u1EB7p m\xE1y n\xE0y.",
+    webRemotePairTitle: "Gh\xE9p c\u1EB7p thi\u1EBFt b\u1ECB",
+    webRemotePairStep: "M\u1EDF trang duy\u1EC7t tr\xEAn thi\u1EBFt b\u1ECB kh\xE1c, nh\u1EADp m\xE3 n\xE0y r\u1ED3i b\u1EA5m Duy\u1EC7t:",
+    webRemotePairOpen: "M\u1EDF trang duy\u1EC7t",
+    webRemotePairCopy: "Sao ch\xE9p m\xE3",
+    webRemotePairCopied: "\u0110\xE3 ch\xE9p",
+    webRemotePairExpires: "M\xE3 h\u1EBFt h\u1EA1n sau {time}.",
+    webRemotePairExpired: "M\xE3 \u0111\xE3 h\u1EBFt h\u1EA1n. H\xE3y gh\xE9p c\u1EB7p l\u1EA1i.",
+    webRemotePairCancel: "Hu\u1EF7 gh\xE9p c\u1EB7p",
+    webRemotePairCancelled: "\u0110\xE3 hu\u1EF7 gh\xE9p c\u1EB7p.",
+    webRemotePairNow: "Gh\xE9p c\u1EB7p ngay",
+    webRemotePairAgain: "Gh\xE9p c\u1EB7p l\u1EA1i",
+    webRemoteUnpair: "Ng\u1EAFt gh\xE9p n\u1ED1i",
+    webRemoteUnpairConfirm: "Xo\xE1 credential \u0111\xE3 l\u01B0u v\xE0 ng\u1EAFt quy\u1EC1n c\u1EE7a web client?",
+    webRemoteUnpairYes: "Ng\u1EAFt",
+    webRemoteUnpairCancel: "Gi\u1EEF l\u1EA1i",
+    webRemoteUnpaired: "\u0110\xE3 ng\u1EAFt. Web client m\u1EA5t quy\u1EC1n truy c\u1EADp cho t\u1EDBi khi b\u1EA1n gh\xE9p c\u1EB7p l\u1EA1i.",
+    webRemoteActionFailed: "Thao t\xE1c th\u1EA5t b\u1EA1i: {message}",
+    webRemoteStateStarting: "\u0110ang kh\u1EDFi \u0111\u1ED9ng\u2026",
+    webRemoteStateDisabled: "\u0110ang t\u1EAFt",
+    webRemoteStateWaitingRelay: "Ch\u01B0a c\u1EA5u h\xECnh relay",
+    webRemoteStatePairing: "\u0110ang ch\u1EDD duy\u1EC7t",
+    webRemoteStateWaitingPairing: "C\u1EA7n gh\xE9p c\u1EB7p",
+    webRemoteStatePairingRequired: "C\u1EA7n gh\xE9p c\u1EB7p",
+    webRemoteStateConnecting: "\u0110ang k\u1EBFt n\u1ED1i\u2026",
+    webRemoteStateReconnecting: "\u0110ang k\u1EBFt n\u1ED1i l\u1EA1i\u2026",
+    webRemoteStateConnected: "\u0110\xE3 k\u1EBFt n\u1ED1i",
+    webRemoteStatePaired: "\u0110\xE3 gh\xE9p c\u1EB7p",
+    webRemoteStateAuthRequired: "Relay t\u1EEB ch\u1ED1i credential",
+    webRemoteStateRevoked: "Thi\u1EBFt b\u1ECB b\u1ECB thu h\u1ED3i",
+    webRemoteStateError: "L\u1ED7i",
+    webRemoteStateStopped: "\u0110\xE3 d\u1EEBng",
+    webRemoteStateDisconnected: "\u0110\xE3 ng\u1EAFt k\u1EBFt n\u1ED1i"
   };
   var dictionaries = { en, vi };
 
   // src/client/api.ts
   var GIT_PATH = "api/personal-hub-git";
+  var WEB_REMOTE_PATH = "api/personal-hub-web-remote";
   var GitRequestError = class extends Error {
     code;
     details;
@@ -695,11 +828,11 @@
       this.details = details;
     }
   };
-  function createGitCaller() {
+  function createCaller(prefix) {
     return async function call(endpoint, payload) {
       let response;
       try {
-        response = await fetch(`${GIT_PATH}/${endpoint}`, {
+        response = await fetch(`${prefix}/${endpoint}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload ?? {}),
@@ -726,11 +859,23 @@
         const detail = envelope.error;
         throw new GitRequestError(
           detail?.code ?? "system/failed",
-          detail?.message ?? "The Git request failed",
+          detail?.message ?? "The request failed",
           detail?.details
         );
       }
       return envelope.value;
+    };
+  }
+  function createGitCaller() {
+    return createCaller(GIT_PATH);
+  }
+  function createWebRemoteApi(call = createCaller(WEB_REMOTE_PATH)) {
+    return {
+      state: (payload) => call("state", payload),
+      settingsSet: (payload) => call("settingsSet", payload),
+      pair: (payload) => call("pair", payload),
+      pairCancel: (payload) => call("pairCancel", payload),
+      unpair: (payload) => call("unpair", payload)
     };
   }
   function createGitApi(call) {
@@ -1025,6 +1170,17 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-check-row input{flex:none;margin:0}
 .ph-check-row input:disabled+span{opacity:.6}
 .ph-ok{margin:0;color:var(--dsw-alias-state-success-primary);font-size:12px}
+
+/* Web Remote card (plugin row) */
+.ph-dot[data-state=warn]{background:var(--dsw-alias-state-warn-primary)}
+.ph-dot[data-state=idle]{background:var(--dsw-alias-label-tertiary)}
+a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
+.ph-pair{display:flex;flex-direction:column;gap:6px;padding:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,var(--dsw-alias-border-l1));border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 6%,var(--dsw-alias-bg-layer-1))}
+.ph-pair[data-expired=true]{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
+.ph-pair-code-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ph-pair-code{flex:1 1 auto;min-width:0;padding:6px 10px;border:1px dashed var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:17px;font-weight:600;letter-spacing:.14em;text-align:center;user-select:all}
+.ph-pair[data-expired=true] .ph-pair-code{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}
+.ph-fingerprint{font-size:10.5px;word-break:break-all}
 .ph-tooltip{position:relative}
 `;
 
@@ -1363,6 +1519,533 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
       state.error.length > 0 ? h("p", { className: "ph-error-text" }, state.error) : null,
       state.notice.length > 0 ? h("p", { className: "ph-ok" }, state.notice) : null,
       h("p", { className: "ph-hint" }, t("hint"))
+    );
+  }
+
+  // src/client/hooks.ts
+  function useLoader(loader, deps) {
+    const [state, setState] = useState({ status: "loading", value: void 0, error: void 0 });
+    useEffect(() => {
+      let alive = true;
+      setState((previous) => ({ status: "loading", value: previous.value, error: void 0 }));
+      Promise.resolve().then(loader).then((value) => {
+        if (alive) setState({ status: "ready", value, error: void 0 });
+      }).catch((error) => {
+        if (alive) setState({ status: "error", value: void 0, error });
+      });
+      return () => {
+        alive = false;
+      };
+    }, deps);
+    return state;
+  }
+  function useNowSecond(active) {
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+      if (!active) return void 0;
+      setNow(Date.now());
+      const timer = setInterval(() => setNow(Date.now()), 1e3);
+      return () => clearInterval(timer);
+    }, [active]);
+    return now;
+  }
+  function useDocumentVisible() {
+    const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible");
+    useEffect(() => {
+      if (typeof document === "undefined") return void 0;
+      const onChange = () => setVisible(document.visibilityState === "visible");
+      document.addEventListener("visibilitychange", onChange);
+      return () => document.removeEventListener("visibilitychange", onChange);
+    }, []);
+    return visible;
+  }
+  function relativeTime(value) {
+    const time = typeof value === "number" ? value : Date.parse(String(value ?? ""));
+    if (!Number.isFinite(time)) return "";
+    const seconds = Math.round((time - Date.now()) / 1e3);
+    const formatter = new Intl.RelativeTimeFormat(void 0, { numeric: "auto" });
+    const units = [
+      ["year", 31536e3],
+      ["month", 2592e3],
+      ["week", 604800],
+      ["day", 86400],
+      ["hour", 3600],
+      ["minute", 60]
+    ];
+    for (const [unit, size] of units) {
+      if (Math.abs(seconds) >= size) return formatter.format(Math.round(seconds / size), unit);
+    }
+    return formatter.format(seconds, "second");
+  }
+  function splitPath(path) {
+    const text = String(path ?? "");
+    const index = text.lastIndexOf("/");
+    return index < 0 ? { dir: "", name: text } : { dir: text.slice(0, index + 1), name: text.slice(index + 1) };
+  }
+  function formatElapsed(startedAtMs, nowMs) {
+    if (startedAtMs === null) return null;
+    const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1e3));
+    if (elapsedSeconds < 60) return `${elapsedSeconds}s`;
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return `${minutes}m ${seconds}s`;
+  }
+  async function copyText(text) {
+    const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
+    if (clipboard === void 0) return false;
+    try {
+      await clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // src/client/web-remote.tsx
+  function emptyCardState() {
+    return {
+      writable: false,
+      settings: { enabled: false, relayUrl: "", deviceName: "", effectiveDeviceName: "", autoPair: true },
+      status: {
+        state: "starting",
+        deviceId: "",
+        deviceName: "",
+        fingerprint: "",
+        relayUrl: "",
+        paired: false,
+        pairedAt: null,
+        connectedAt: null,
+        pairing: null,
+        pairingStatus: null,
+        watching: [],
+        lastError: null,
+        updatedAt: null
+      }
+    };
+  }
+  function draftOf(settings) {
+    return {
+      enabled: settings.enabled,
+      relayUrl: settings.relayUrl,
+      deviceName: settings.deviceName,
+      autoPair: settings.autoPair
+    };
+  }
+  var STATE_KEYS = {
+    starting: "webRemoteStateStarting",
+    disabled: "webRemoteStateDisabled",
+    "waiting-relay": "webRemoteStateWaitingRelay",
+    pairing: "webRemoteStatePairing",
+    "waiting-pairing": "webRemoteStateWaitingPairing",
+    "pairing-required": "webRemoteStatePairingRequired",
+    connecting: "webRemoteStateConnecting",
+    reconnecting: "webRemoteStateReconnecting",
+    connected: "webRemoteStateConnected",
+    paired: "webRemoteStatePaired",
+    "auth-required": "webRemoteStateAuthRequired",
+    revoked: "webRemoteStateRevoked",
+    error: "webRemoteStateError",
+    stopped: "webRemoteStateStopped",
+    disconnected: "webRemoteStateDisconnected"
+  };
+  function stateTone(state) {
+    if (state === "connected" || state === "paired") return "success";
+    if (state === "error" || state === "auth-required" || state === "revoked") return "error";
+    if (["pairing", "waiting-pairing", "pairing-required", "connecting", "reconnecting", "waiting-relay"].includes(state)) {
+      return "warn";
+    }
+    return "idle";
+  }
+  function stateLabel(t, state) {
+    const key = STATE_KEYS[state];
+    return key === void 0 ? state : t(key);
+  }
+  function countdownText(remainingMs) {
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) return "0:00";
+    const seconds = Math.floor(remainingMs / 1e3);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  function relayLooksValid(value) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return true;
+    try {
+      const url = new URL(trimmed);
+      return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "ws:" || url.protocol === "wss:";
+    } catch {
+      return false;
+    }
+  }
+  function WebRemoteCard(props) {
+    const { t, api } = props;
+    const [loaded, setLoaded] = useState(void 0);
+    const [draft, setDraft] = useState(void 0);
+    const [dirty, setDirty] = useState(false);
+    const [busy, setBusy] = useState("");
+    const [error, setError] = useState("");
+    const [loadError, setLoadError] = useState("");
+    const [notice, setNotice] = useState("");
+    const [copied, setCopied] = useState(false);
+    const [unpairArmed, setUnpairArmed] = useState(false);
+    const visible = useDocumentVisible();
+    const now = useNowSecond(true);
+    const reload = useCallback(async () => {
+      try {
+        const value = await api.state({});
+        setLoaded(value);
+        setLoadError("");
+      } catch (failure) {
+        setLoadError(messageOf(failure));
+      }
+    }, [api]);
+    useEffect(() => {
+      let alive = true;
+      const load = async () => {
+        await reload();
+        if (!alive) return;
+      };
+      void load();
+      if (!visible) {
+        return () => {
+          alive = false;
+        };
+      }
+      const timer = setInterval(() => void load(), 2e3);
+      return () => {
+        alive = false;
+        clearInterval(timer);
+      };
+    }, [reload, visible]);
+    useEffect(() => {
+      if (loaded === void 0 || dirty) return;
+      setDraft(draftOf(loaded.settings));
+    }, [loaded, dirty]);
+    const changeDraft = (patch) => {
+      setDraft((current) => ({ ...current ?? draftOf(emptyCardState().settings), ...patch }));
+      setDirty(true);
+      setNotice("");
+      setError("");
+    };
+    const run = async (label, task, done) => {
+      setBusy(label);
+      setError("");
+      setNotice("");
+      try {
+        await task();
+        setNotice(done);
+      } catch (failure) {
+        setError(t("webRemoteActionFailed", { message: messageOf(failure) }));
+      } finally {
+        setBusy("");
+      }
+    };
+    const save = () => {
+      const value = draft ?? draftOf(emptyCardState().settings);
+      if (!relayLooksValid(value.relayUrl)) {
+        setError(t("webRemoteRelayInvalid"));
+        return;
+      }
+      void run("save", async () => {
+        try {
+          const answer = await api.settingsSet(value);
+          setLoaded((current) => current === void 0 ? current : { ...current, settings: answer.settings });
+          setDraft(draftOf(answer.settings));
+        } catch (failure) {
+          const code = codeOf(failure);
+          if (code !== "connection/failed" && code !== "connection/empty") throw failure;
+        }
+        setDirty(false);
+      }, t("webRemoteSaved"));
+    };
+    const pair = () => {
+      void run("pair", async () => {
+        await api.pair({});
+      }, "");
+    };
+    const cancelPairing = () => {
+      void run("cancel", async () => {
+        await api.pairCancel({});
+      }, "");
+    };
+    const unpair = () => {
+      setUnpairArmed(false);
+      void run("unpair", async () => {
+        await api.unpair({});
+      }, t("webRemoteUnpaired"));
+    };
+    const copyCode = () => {
+      const code = loaded?.status.pairing?.code ?? "";
+      if (code.length === 0) return;
+      void copyText(code).then((ok) => {
+        setCopied(ok);
+        if (ok) setTimeout(() => setCopied(false), 2e3);
+      });
+    };
+    if (props.view === "summary") return h("span", null, t("webRemoteSummary"));
+    if (loaded === void 0) {
+      return h(
+        "div",
+        { "data-personal-hub-web-remote": true, style: { display: "flex", flexDirection: "column", gap: "6px" } },
+        h("div", { className: "ph-setting-head" }, t("webRemoteTitle")),
+        h("p", { className: "ph-hint" }, t("webRemoteLoading")),
+        loadError.length > 0 ? h("p", { className: "ph-hint" }, t("webRemoteUnavailable")) : null
+      );
+    }
+    return h(WebRemoteForm, {
+      t,
+      state: loaded,
+      draft: draft ?? draftOf(loaded.settings),
+      dirty,
+      busy,
+      error,
+      notice,
+      copied,
+      unpairArmed,
+      now,
+      stale: loadError.length > 0,
+      onDraft: changeDraft,
+      onSave: save,
+      onRefresh: () => void reload(),
+      onPair: pair,
+      onCancelPairing: cancelPairing,
+      onArmUnpair: () => setUnpairArmed(true),
+      onCancelUnpair: () => setUnpairArmed(false),
+      onUnpair: unpair,
+      onCopyCode: copyCode
+    });
+  }
+  function WebRemoteForm(props) {
+    const { t, state, draft } = props;
+    const status = state.status;
+    const writable = state.writable;
+    const busy = props.busy;
+    const paired = status.paired;
+    const pairing = status.pairing;
+    const remaining = pairing === null ? 0 : Date.parse(pairing.expiresAt) - props.now;
+    const expired = pairing !== null && remaining <= 0;
+    const off = status.state === "disabled";
+    const relayMissing = status.relayUrl.length === 0;
+    return h(
+      "div",
+      { "data-personal-hub-web-remote": true, style: { display: "flex", flexDirection: "column", gap: "8px" } },
+      h("div", { className: "ph-setting-head" }, t("webRemoteTitle")),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+        h("span", { className: "ph-dot", "data-state": stateTone(status.state) }),
+        h("span", null, stateLabel(t, status.state)),
+        paired ? h("span", { className: "ph-chip", "data-tone": "success" }, t("webRemotePairedBadge")) : null,
+        h("button", {
+          type: "button",
+          className: "ph-icon-button",
+          title: t("webRemoteRefresh"),
+          "aria-label": t("webRemoteRefresh"),
+          disabled: busy.length > 0,
+          onClick: props.onRefresh
+        }, h(Icon, { name: "refresh", size: 11 }))
+      ),
+      h("p", { className: "ph-hint" }, t("webRemoteIntro")),
+      props.stale ? h("p", { className: "ph-hint" }, t("webRemoteStale")) : null,
+      pairing === null ? null : h(PairBlock, { t, pairing, remaining, expired, copied: props.copied, busy, onCopy: props.onCopyCode, onCancel: props.onCancelPairing }),
+      // A cancelled or finished attempt leaves a note without a code to show.
+      pairing === null && status.pairingStatus === "cancelled" ? h("p", { className: "ph-hint" }, t("webRemotePairCancelled")) : null,
+      relayMissing || off ? h("p", { className: "ph-hint" }, off ? t("webRemoteDisabledHint") : t("webRemoteNoRelayHint")) : h(StatusDetails, { t, status, paired, busy, unpairArmed: props.unpairArmed, onPair: props.onPair, onArmUnpair: props.onArmUnpair, onCancelUnpair: props.onCancelUnpair, onUnpair: props.onUnpair }),
+      h(
+        "div",
+        { className: "ph-setting" },
+        h("div", { className: "ph-setting-head" }, t("webRemoteSettingsTitle")),
+        h(
+          "label",
+          { className: "ph-check-row" },
+          h("input", {
+            type: "checkbox",
+            checked: draft.enabled,
+            disabled: !writable || busy.length > 0,
+            onChange: (event) => props.onDraft({ enabled: event.target.checked })
+          }),
+          h("span", null, t("webRemoteEnabled"))
+        ),
+        h(
+          "div",
+          { className: "ph-field" },
+          h("label", { className: "ph-field-label", htmlFor: "personal-hub-web-relay" }, t("webRemoteRelayLabel")),
+          h("input", {
+            id: "personal-hub-web-relay",
+            className: "ph-input",
+            type: "url",
+            inputMode: "url",
+            autoComplete: "off",
+            spellCheck: false,
+            value: draft.relayUrl,
+            placeholder: t("webRemoteRelayPlaceholder"),
+            disabled: !writable || busy.length > 0,
+            onInput: (event) => props.onDraft({ relayUrl: event.target.value }),
+            onChange: (event) => props.onDraft({ relayUrl: event.target.value })
+          })
+        ),
+        h(
+          "div",
+          { className: "ph-field" },
+          h("label", { className: "ph-field-label", htmlFor: "personal-hub-web-name" }, t("webRemoteDeviceLabel")),
+          h("input", {
+            id: "personal-hub-web-name",
+            className: "ph-input",
+            type: "text",
+            autoComplete: "off",
+            spellCheck: false,
+            value: draft.deviceName,
+            placeholder: status.deviceName.length > 0 ? status.deviceName : t("webRemoteDevicePlaceholder"),
+            disabled: !writable || busy.length > 0,
+            onInput: (event) => props.onDraft({ deviceName: event.target.value }),
+            onChange: (event) => props.onDraft({ deviceName: event.target.value })
+          })
+        ),
+        h(
+          "label",
+          { className: "ph-check-row" },
+          h("input", {
+            type: "checkbox",
+            checked: draft.autoPair,
+            disabled: !writable || busy.length > 0,
+            onChange: (event) => props.onDraft({ autoPair: event.target.checked })
+          }),
+          h("span", null, t("webRemoteAutoPair"))
+        ),
+        h("p", { className: "ph-hint" }, t("webRemoteRelayHint")),
+        writable ? h(
+          "div",
+          { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+          h("button", {
+            type: "button",
+            className: "ph-primary",
+            disabled: busy.length > 0 || !props.dirty,
+            onClick: props.onSave
+          }, busy === "save" ? t("webRemoteSaving") : t("webRemoteSave"))
+        ) : h("p", { className: "ph-hint" }, t("webRemoteReadOnly"))
+      ),
+      props.error.length > 0 ? h("p", { className: "ph-error-text" }, props.error) : null,
+      props.notice.length > 0 ? h("p", { className: "ph-ok" }, props.notice) : null
+    );
+  }
+  function PairBlock(props) {
+    const { t, pairing } = props;
+    return h(
+      "div",
+      { className: "ph-pair", "data-expired": props.expired },
+      h("div", { className: "ph-setting-head" }, t("webRemotePairTitle")),
+      h("p", { className: "ph-hint" }, t("webRemotePairStep")),
+      h(
+        "div",
+        { className: "ph-pair-code-row" },
+        h("code", { className: "ph-pair-code" }, pairing.code),
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: props.busy.length > 0,
+          onClick: props.onCopy
+        }, h(Icon, { name: "copy", size: 11 }), props.copied ? t("webRemotePairCopied") : t("webRemotePairCopy"))
+      ),
+      h(
+        "p",
+        { className: "ph-hint" },
+        props.expired ? t("webRemotePairExpired") : t("webRemotePairExpires", { time: countdownText(props.remaining) })
+      ),
+      h(
+        "div",
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        h("a", {
+          className: "ph-button",
+          href: pairing.uri,
+          target: "_blank",
+          rel: "noreferrer"
+        }, h(Icon, { name: "external", size: 11 }), t("webRemotePairOpen")),
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: props.busy.length > 0,
+          onClick: props.onCancel
+        }, t("webRemotePairCancel"))
+      )
+    );
+  }
+  function StatusDetails(props) {
+    const { t, status } = props;
+    const pairingBusy = props.busy === "pair" || props.busy === "cancel" || props.busy === "unpair";
+    return h(
+      "div",
+      { className: "ph-setting" },
+      h(
+        "div",
+        { className: "ph-detail-meta" },
+        h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemoteDevice")),
+          h("span", { className: "ph-detail-value" }, status.deviceName)
+        ),
+        status.fingerprint.length > 0 ? h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemoteFingerprint")),
+          h("span", { className: "ph-detail-value ph-mono ph-fingerprint" }, status.fingerprint)
+        ) : null,
+        status.connectedAt === null ? null : h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemoteConnection")),
+          h("span", { className: "ph-detail-value" }, t("webRemoteConnectedAt", { when: relativeTime(status.connectedAt) }))
+        ),
+        status.pairedAt === null ? null : h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemotePaired")),
+          h("span", { className: "ph-detail-value" }, t("webRemotePairedAt", { when: relativeTime(status.pairedAt) }))
+        ),
+        h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemoteWatching")),
+          h("span", { className: "ph-detail-value" }, status.watching.length > 0 ? t("webRemoteWatchingCount", { count: status.watching.length }) : t("webRemoteWatchingNone"))
+        ),
+        status.lastError === null ? null : h(
+          "div",
+          { className: "ph-detail-row" },
+          h("span", { className: "ph-detail-label" }, t("webRemoteLastError")),
+          h("span", { className: "ph-detail-value ph-error-text" }, status.lastError)
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: pairingBusy || props.busy.length > 0 || status.pairing !== null,
+          onClick: props.onPair
+        }, h(Icon, { name: "refresh", size: 11 }), props.paired ? t("webRemotePairAgain") : t("webRemotePairNow")),
+        props.paired ? props.unpairArmed ? h(
+          "span",
+          { className: "ph-wrap" },
+          h("span", { className: "ph-hint" }, t("webRemoteUnpairConfirm")),
+          h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: props.busy.length > 0,
+            onClick: props.onUnpair
+          }, t("webRemoteUnpairYes")),
+          h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: props.busy.length > 0,
+            onClick: props.onCancelUnpair
+          }, t("webRemoteUnpairCancel"))
+        ) : h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: props.busy.length > 0,
+          onClick: props.onArmUnpair
+        }, h(Icon, { name: "cross", size: 11 }), t("webRemoteUnpair")) : null
+      ),
+      status.relayUrl.length > 0 ? h("a", { className: "ph-hint", href: status.relayUrl, target: "_blank", rel: "noreferrer" }, t("webRemoteOpenWebChat")) : null
     );
   }
 
@@ -1779,85 +2462,6 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         if (current !== null) void create(next, kind);
       }
     });
-  }
-
-  // src/client/hooks.ts
-  function useLoader(loader, deps) {
-    const [state, setState] = useState({ status: "loading", value: void 0, error: void 0 });
-    useEffect(() => {
-      let alive = true;
-      setState((previous) => ({ status: "loading", value: previous.value, error: void 0 }));
-      Promise.resolve().then(loader).then((value) => {
-        if (alive) setState({ status: "ready", value, error: void 0 });
-      }).catch((error) => {
-        if (alive) setState({ status: "error", value: void 0, error });
-      });
-      return () => {
-        alive = false;
-      };
-    }, deps);
-    return state;
-  }
-  function useNowSecond(active) {
-    const [now, setNow] = useState(() => Date.now());
-    useEffect(() => {
-      if (!active) return void 0;
-      setNow(Date.now());
-      const timer = setInterval(() => setNow(Date.now()), 1e3);
-      return () => clearInterval(timer);
-    }, [active]);
-    return now;
-  }
-  function useDocumentVisible() {
-    const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible");
-    useEffect(() => {
-      if (typeof document === "undefined") return void 0;
-      const onChange = () => setVisible(document.visibilityState === "visible");
-      document.addEventListener("visibilitychange", onChange);
-      return () => document.removeEventListener("visibilitychange", onChange);
-    }, []);
-    return visible;
-  }
-  function relativeTime(value) {
-    const time = typeof value === "number" ? value : Date.parse(String(value ?? ""));
-    if (!Number.isFinite(time)) return "";
-    const seconds = Math.round((time - Date.now()) / 1e3);
-    const formatter = new Intl.RelativeTimeFormat(void 0, { numeric: "auto" });
-    const units = [
-      ["year", 31536e3],
-      ["month", 2592e3],
-      ["week", 604800],
-      ["day", 86400],
-      ["hour", 3600],
-      ["minute", 60]
-    ];
-    for (const [unit, size] of units) {
-      if (Math.abs(seconds) >= size) return formatter.format(Math.round(seconds / size), unit);
-    }
-    return formatter.format(seconds, "second");
-  }
-  function splitPath(path) {
-    const text = String(path ?? "");
-    const index = text.lastIndexOf("/");
-    return index < 0 ? { dir: "", name: text } : { dir: text.slice(0, index + 1), name: text.slice(index + 1) };
-  }
-  function formatElapsed(startedAtMs, nowMs) {
-    if (startedAtMs === null) return null;
-    const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1e3));
-    if (elapsedSeconds < 60) return `${elapsedSeconds}s`;
-    const minutes = Math.floor(elapsedSeconds / 60);
-    const seconds = elapsedSeconds % 60;
-    return `${minutes}m ${seconds}s`;
-  }
-  async function copyText(text) {
-    const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
-    if (clipboard === void 0) return false;
-    try {
-      await clipboard.writeText(text);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   // src/client/git/action-logic.ts
@@ -3173,7 +3777,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
       }, option.label))
     );
   }
-  function stateLabel(t, state) {
+  function stateLabel2(t, state) {
     switch (state) {
       case "open":
         return t("gitStateOpen");
@@ -3243,7 +3847,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         "span",
         { className: "ph-chip", "data-tone": pull.state === "merged" ? "business" : pull.state === "closed" ? "error" : void 0 },
         h("span", { className: "ph-dot", "data-state": pull.state }),
-        stateLabel(t, pull.state)
+        stateLabel2(t, pull.state)
       ),
       pull.checks.total > 0 ? h(
         "span",
@@ -3494,7 +4098,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
             "span",
             { className: "ph-chip", "data-tone": pull.state === "merged" ? "business" : pull.state === "closed" ? "error" : "success" },
             h("span", { className: "ph-dot", "data-state": pull.state }),
-            stateLabel(t, pull.state)
+            stateLabel2(t, pull.state)
           ),
           pull.branch.length > 0 ? h("span", { className: "ph-chip ph-mono" }, t("gitFrom", { branch: pull.branch })) : null,
           pull.base.length > 0 ? h("span", { className: "ph-chip ph-mono" }, `\u2192 ${pull.base}`) : null
@@ -4693,7 +5297,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
           },
           h("span", { className: "ph-dot", "data-state": pull.state }),
           `#${pull.number}`,
-          stateLabel(t, pull.state)
+          stateLabel2(t, pull.state)
         ),
         repo.remote?.slug !== null && repo.remote?.slug !== void 0 ? h("span", { className: "ph-dim ph-tiny ph-ellipsis", title: repo.remote.slug }, repo.remote.slug) : null,
         inWorktree ? h("button", {
@@ -4791,6 +5395,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
       /** Rendering helpers the Node test harness exercises with a stand-in React. */
       __internal: {
         TelegramCard,
+        WebRemoteCard,
+        WebRemoteForm,
         MergeSettingsCard,
         WorktreeHero,
         WorktreeOption,
@@ -4802,6 +5408,12 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         WorktreesView,
         WorktreeRow,
         MergeSettingsForm,
+        stateLabel,
+        stateTone,
+        countdownText,
+        relayLooksValid,
+        emptyCardState,
+        draftOf,
         installStyles
       },
       apply(ctx) {
@@ -4819,6 +5431,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
           };
         }, "personal-hub: credential watch");
         const api = createGitApi(createGitCaller());
+        const webRemote = createWebRemoteApi();
         ctx.effect(() => installStyles(), "personal-hub: styles");
         ctx.effect(
           () => ctx.slots.inject("plugins.row.config", () => registerSlot(ctx, {
@@ -4834,7 +5447,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
               getState: controller.getState,
               save: controller.save,
               clear: controller.clear,
-              api
+              api,
+              webRemote
             })
           }, PersonalHubCard)),
           "personal-hub: row config card"
@@ -4923,6 +5537,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
         "div",
         { style: { display: "flex", flexDirection: "column", gap: "4px" } },
         h("span", null, t("summary")),
+        h("span", { className: "ph-hint" }, t("webRemoteSummary")),
         h("span", { className: "ph-hint" }, t("gitSettingsSummary"))
       );
     }
@@ -4930,6 +5545,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
       "div",
       { "data-personal-hub-card": true, style: { display: "flex", flexDirection: "column", gap: "16px" } },
       h(TelegramCard, props),
+      h("div", { style: { borderTop: "1px solid var(--dsw-alias-border-l3)" } }),
+      h(WebRemoteCard, { api: props.webRemote, t }),
       h("div", { style: { borderTop: "1px solid var(--dsw-alias-border-l3)" } }),
       h(MergeSettingsCard, { api: props.api, t })
     );

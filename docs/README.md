@@ -10,9 +10,11 @@ Bộ tài liệu thiết kế cho Web Remote (điều khiển DSH từ xa qua We
 | [`protocol/README.md`](../protocol/README.md) | Giao thức v1: frame, thao tác, mã lỗi, giới hạn, fixture | đã có (Phase 1) |
 
 Triển khai hiện tại: bridge Host trong `plugin/src/features/web-remote.ts` + `plugin/src/lib/remote-*.ts`
-theo Phase 1, kèm **dev relay + WebChat tối giản** trong `tools/dev-relay/` để chạy thử
-end-to-end. Relay Zig (Phase 2) và web client SvelteKit (Phase 3) chưa viết. Trạng thái cấu
-hình/ghép cặp nằm trong [`plugin/README.md`](../plugin/README.md#7-web-remote-phase-1--bridge).
+theo Phase 1, thẻ **Web Remote** trong hàng plugin (`plugin/src/client/web-remote.tsx` +
+`plugin/src/features/web-remote-routes.ts`) để xem mã ghép cặp và trạng thái, kèm **dev relay +
+WebChat tối giản** trong `tools/dev-relay/` để chạy thử end-to-end. Relay Zig (Phase 2) và web
+client SvelteKit (Phase 3) chưa viết. Trạng thái cấu hình/ghép cặp nằm trong
+[`plugin/README.md`](../plugin/README.md#7-web-remote-phase-1--bridge).
 
 ## Thứ tự đọc
 

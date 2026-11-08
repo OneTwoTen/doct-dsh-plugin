@@ -64,7 +64,9 @@ export function apply(ctx: DshContext, config: unknown): void {
     for (const feature of FEATURES) {
       const featureConfig: TelegramConfig | GitConfig | WebRemoteConfig | undefined = settings[feature.key]
       if (featureConfig === undefined) continue
-      if (featureConfig.enabled === false) {
+      // Web Remote still mounts while disabled: its settings card is the control
+      // that turns it back on, and a disabled mount opens no socket.
+      if (featureConfig.enabled === false && feature.key !== 'webRemote') {
         logger.info('personal-hub: %s disabled by configuration', feature.label)
         continue
       }

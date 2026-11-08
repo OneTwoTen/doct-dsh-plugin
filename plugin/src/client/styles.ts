@@ -243,5 +243,16 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-check-row input{flex:none;margin:0}
 .ph-check-row input:disabled+span{opacity:.6}
 .ph-ok{margin:0;color:var(--dsw-alias-state-success-primary);font-size:12px}
+
+/* Web Remote card (plugin row) */
+.ph-dot[data-state=warn]{background:var(--dsw-alias-state-warn-primary)}
+.ph-dot[data-state=idle]{background:var(--dsw-alias-label-tertiary)}
+a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
+.ph-pair{display:flex;flex-direction:column;gap:6px;padding:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,var(--dsw-alias-border-l1));border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 6%,var(--dsw-alias-bg-layer-1))}
+.ph-pair[data-expired=true]{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
+.ph-pair-code-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ph-pair-code{flex:1 1 auto;min-width:0;padding:6px 10px;border:1px dashed var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:17px;font-weight:600;letter-spacing:.14em;text-align:center;user-select:all}
+.ph-pair[data-expired=true] .ph-pair-code{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}
+.ph-fingerprint{font-size:10.5px;word-break:break-all}
 .ph-tooltip{position:relative}
 `

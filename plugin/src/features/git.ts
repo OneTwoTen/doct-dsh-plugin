@@ -59,6 +59,7 @@ import type { ChangeRequestFacts } from '../lib/pr-draft.ts'
 import { createMergeWatcher } from '../lib/merge-watch.ts'
 import type { MergeStoreState } from '../lib/merge-watch.ts'
 import { pluginDataDir } from '../lib/paths.ts'
+import { jsonResponse, readJsonPayload } from '../lib/host-http.ts'
 import { JsonStateStore } from '../lib/state-store.ts'
 import { createWorktreeCleanup } from '../lib/worktree-cleanup.ts'
 import { suggestBranchName } from '../lib/worktree-name.ts'
@@ -1836,7 +1837,7 @@ function mountRoutes(
       methods: ['POST'],
       requestBody: 'buffered',
       fetch: async (request: Request) => {
-        const payload = await readPayload(request)
+        const payload = await readJsonPayload(request)
         if (payload === undefined) {
           return jsonResponse({ ok: false, error: { code: 'input/invalid', message: 'The request body is not valid JSON' } })
         }
@@ -1927,38 +1928,6 @@ function firstUrl(text: string | null | undefined): string | null {
 /** First non-empty line of a command's stderr. */
 function firstLine(text: string | null | undefined): string {
   return String(text ?? '').split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? ''
-}
-
-/**
- * Read one route's JSON request payload.
- * @param request the Fetch request the shared channel admitted.
- * @returns the payload, or undefined when the body is not JSON.
- */
-async function readPayload(request: Request): Promise<Record<string, unknown> | undefined> {
-  let text: string
-  try {
-    text = await request.text()
-  } catch {
-    return undefined
-  }
-  if (text.trim().length === 0) return {}
-  try {
-    const parsed = JSON.parse(text)
-    return parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Answer one route call as JSON the browser reads directly.
- * @param body response envelope.
- */
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  })
 }
 
 /**

@@ -125,6 +125,9 @@ test('the client module registers the row card, the Git tab type, its body, and 
   const injected = (card.options.inject as () => Record<string, unknown>)()
   assert.equal(typeof injected.api, 'object')
   assert.equal(typeof (injected.api as { overview?: unknown }).overview, 'function')
+  assert.equal(typeof injected.webRemote, 'object')
+  assert.equal(typeof (injected.webRemote as { state?: unknown }).state, 'function')
+  assert.equal(typeof (injected.webRemote as { unpair?: unknown }).unpair, 'function')
   assert.equal(typeof injected.save, 'function')
   assert.equal(typeof injected.getState, 'function')
 
@@ -501,4 +504,218 @@ test('the worktree manager row shows the checkout, its state, and its actions', 
   assert.match(textOf(main), /wtCurrent/)
   assert.match(textOf(main), /wtClean/)
   assert.doesNotMatch(textOf(main), /wtRemoveAction/)
+})
+
+test('the Web Remote caller posts to its own route prefix', async () => {
+  const { createWebRemoteApi } = await import('../src/client/api.ts')
+  const calls: Array<{ url: string; init: { method: string; body: string; credentials: string } }> = []
+  const restore = stubFetch(calls, { ok: true, value: { writable: true, settings: {}, status: {} } })
+  try {
+    const api = createWebRemoteApi()
+    const answer = await api.state({})
+    assert.deepEqual(answer, { writable: true, settings: {}, status: {} })
+  } finally {
+    restore()
+  }
+  assert.equal(calls[0].url, 'api/personal-hub-web-remote/state')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+})
+
+test('the Web Remote card shows the pairing code, the countdown, and the approval link', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WebRemoteForm = view.WebRemoteForm as (props: Record<string, unknown>) => unknown
+  const now = Date.parse('2026-11-08T12:00:00.000Z')
+  const form = WebRemoteForm({
+    t: (key: string, values?: Record<string, string | number>) => (values === undefined ? key : `${key}:${Object.values(values).join(',')}`),
+    state: {
+      writable: true,
+      settings: { enabled: true, relayUrl: 'https://relay.test', deviceName: 'PC-Office', effectiveDeviceName: 'PC-Office', autoPair: true },
+      status: {
+        state: 'pairing',
+        deviceId: 'dev_1',
+        deviceName: 'PC-Office',
+        fingerprint: 'SHA256:AA:BB:CC',
+        relayUrl: 'https://relay.test',
+        paired: false,
+        pairedAt: null,
+        connectedAt: null,
+        pairing: { code: 'ABCD-EFGH', uri: 'https://relay.test/pair', expiresAt: new Date(now + 600_000).toISOString() },
+        pairingStatus: 'authorize',
+        watching: [],
+        lastError: null,
+        updatedAt: null,
+      },
+    },
+    draft: { enabled: true, relayUrl: 'https://relay.test', deviceName: 'PC-Office', autoPair: true },
+    dirty: false,
+    busy: '',
+    error: '',
+    notice: '',
+    copied: false,
+    unpairArmed: false,
+    now,
+    stale: false,
+    onDraft: () => {},
+    onSave: () => {},
+    onRefresh: () => {},
+    onPair: () => {},
+    onCancelPairing: () => {},
+    onArmUnpair: () => {},
+    onCancelUnpair: () => {},
+    onUnpair: () => {},
+    onCopyCode: () => {},
+  })
+
+  assert.match(textOf(form), /webRemoteStatePairing/)
+  assert.match(textOf(form), /ABCD-EFGH/)
+  assert.match(textOf(form), /webRemotePairExpires:10:00/)
+  assert.match(textOf(form), /webRemotePairOpen/)
+  assert.match(textOf(form), /webRemotePairCancel/)
+  assert.match(textOf(form), /webRemotePairAgain|webRemotePairNow/)
+
+  const inputs = findAll(form, (element) => element.type === 'input')
+  const relay = inputs.find((element) => element.props?.id === 'personal-hub-web-relay')
+  assert.equal(relay?.props?.value, 'https://relay.test')
+  const save = findAll(form, (element) => element.type === 'button')
+    .find((element) => (((element as { children?: unknown[] }).children) ?? []).includes('webRemoteSave'))
+  assert.equal(save?.props?.disabled, true, 'an unchanged form cannot be saved')
+})
+
+test('the Web Remote card shows the identity and the disconnect controls once paired', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WebRemoteForm = view.WebRemoteForm as (props: Record<string, unknown>) => unknown
+  const form = WebRemoteForm({
+    t: (key: string, values?: Record<string, string | number>) => (values === undefined ? key : `${key}:${Object.values(values).join(',')}`),
+    state: {
+      writable: true,
+      settings: { enabled: true, relayUrl: 'https://relay.test', deviceName: 'PC-Office', effectiveDeviceName: 'PC-Office', autoPair: true },
+      status: {
+        state: 'connected',
+        deviceId: 'dev_1',
+        deviceName: 'PC-Office',
+        fingerprint: 'SHA256:AA:BB:CC',
+        relayUrl: 'https://relay.test',
+        paired: true,
+        pairedAt: '2026-11-08T11:00:00.000Z',
+        connectedAt: '2026-11-08T11:59:00.000Z',
+        pairing: null,
+        pairingStatus: null,
+        watching: ['s1', 's2'],
+        lastError: null,
+        updatedAt: null,
+      },
+    },
+    draft: { enabled: true, relayUrl: 'https://relay.test', deviceName: 'PC-Office', autoPair: true },
+    dirty: true,
+    busy: '',
+    error: '',
+    notice: '',
+    copied: false,
+    unpairArmed: false,
+    now: Date.parse('2026-11-08T12:00:00.000Z'),
+    stale: false,
+    onDraft: () => {},
+    onSave: () => {},
+    onRefresh: () => {},
+    onPair: () => {},
+    onCancelPairing: () => {},
+    onArmUnpair: () => {},
+    onCancelUnpair: () => {},
+    onUnpair: () => {},
+    onCopyCode: () => {},
+  })
+
+  assert.match(textOf(form), /webRemoteStateConnected/)
+  assert.match(textOf(form), /PC-Office/)
+  assert.match(textOf(form), /SHA256:AA:BB:CC/)
+  assert.match(textOf(form), /webRemoteWatchingCount:2/)
+  assert.match(textOf(form), /webRemoteUnpair/)
+  assert.match(textOf(form), /webRemotePairAgain/)
+  assert.deepEqual(findAll(form, (element) => element.type === 'a').map((element) => element.props?.href), [
+    'https://relay.test',
+  ])
+})
+
+test('the Web Remote card offers the switch that turns a disabled feature on', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WebRemoteForm = view.WebRemoteForm as (props: Record<string, unknown>) => unknown
+  const form = WebRemoteForm({
+    t: (key: string) => key,
+    state: {
+      writable: true,
+      settings: { enabled: false, relayUrl: '', deviceName: '', effectiveDeviceName: 'PC-Office', autoPair: true },
+      status: {
+        state: 'disabled',
+        deviceId: '',
+        deviceName: 'PC-Office',
+        fingerprint: '',
+        relayUrl: '',
+        paired: false,
+        pairedAt: null,
+        connectedAt: null,
+        pairing: null,
+        pairingStatus: null,
+        watching: [],
+        lastError: null,
+        updatedAt: null,
+      },
+    },
+    draft: { enabled: false, relayUrl: '', deviceName: '', autoPair: true },
+    dirty: false,
+    busy: '',
+    error: '',
+    notice: '',
+    copied: false,
+    unpairArmed: false,
+    now: 0,
+    stale: false,
+    onDraft: () => {},
+    onSave: () => {},
+    onRefresh: () => {},
+    onPair: () => {},
+    onCancelPairing: () => {},
+    onArmUnpair: () => {},
+    onCancelUnpair: () => {},
+    onUnpair: () => {},
+    onCopyCode: () => {},
+  })
+
+  assert.match(textOf(form), /webRemoteStateDisabled/)
+  assert.match(textOf(form), /webRemoteDisabledHint/)
+  assert.match(textOf(form), /webRemoteEnabled/)
+  const boxes = findAll(form, (element) => element.type === 'input' && typeof element.props?.type === 'string')
+    .filter((element) => element.props?.type === 'checkbox')
+  assert.equal(boxes.length, 2)
+  assert.equal(boxes[0].props?.checked, false)
+  assert.equal(boxes[1].props?.checked, true)
+})
+
+test('the Web Remote helpers name states and refuse URLs the transport cannot use', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const stateLabel = view.stateLabel as (t: (key: string) => string, state: string) => string
+  const stateTone = view.stateTone as (state: string) => string
+  const countdownText = view.countdownText as (ms: number) => string
+  const relayLooksValid = view.relayLooksValid as (value: string) => boolean
+
+  assert.equal(stateLabel((key) => `label:${key}`, 'connected'), 'label:webRemoteStateConnected')
+  assert.equal(stateLabel((key) => `label:${key}`, 'pairing-required'), 'label:webRemoteStatePairingRequired')
+  assert.equal(stateLabel((key) => `label:${key}`, 'disabled'), 'label:webRemoteStateDisabled')
+  assert.equal(stateLabel((key) => key, 'a-state-from-the-future'), 'a-state-from-the-future')
+  assert.equal(stateTone('connected'), 'success')
+  assert.equal(stateTone('pairing'), 'warn')
+  assert.equal(stateTone('revoked'), 'error')
+  assert.equal(stateTone('starting'), 'idle')
+  assert.equal(countdownText(600_000), '10:00')
+  assert.equal(countdownText(59_000), '0:59')
+  assert.equal(countdownText(-1), '0:00')
+  assert.equal(relayLooksValid(''), true)
+  assert.equal(relayLooksValid('https://relay.test'), true)
+  assert.equal(relayLooksValid('wss://relay.test/ws'), true)
+  assert.equal(relayLooksValid('relay.test'), false)
+  assert.equal(relayLooksValid('ftp://relay.test'), false)
 })
