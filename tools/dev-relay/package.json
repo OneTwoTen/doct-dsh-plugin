@@ -1,0 +1,11 @@
+{
+  "name": "@local/dsh-dev-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Development-only Web Remote relay and WebChat for the personal-hub DSH plugin.",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test"
+  }
+}

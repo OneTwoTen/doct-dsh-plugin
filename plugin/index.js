@@ -14,6 +14,7 @@
 import { normalizeConfig } from './lib/config.js'
 import { mountGit } from './features/git.js'
 import { mountTelegramRemote } from './features/telegram-remote.js'
+import { mountWebRemote } from './features/web-remote.js'
 
 export const name = 'personal-hub'
 
@@ -30,6 +31,11 @@ const FEATURES = [
     key: 'git',
     label: 'Git panel',
     mount: mountGit,
+  },
+  {
+    key: 'webRemote',
+    label: 'Web Remote',
+    mount: mountWebRemote,
   },
 ]
 

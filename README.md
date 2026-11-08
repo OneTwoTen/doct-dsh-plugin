@@ -11,27 +11,53 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 - **Worktree cho phiên mới** — chọn ở màn hình New Session: worktree riêng, bắt đầu từ nhánh local
   hoặc nhánh remote đã fetch.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
+- **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
+  mở port trên máy. Phase 1 (bridge Host + giao thức v1) đã có; relay và web client đang triển khai.
 
 ## Cấu trúc
 
 | Đường dẫn | Nội dung |
 |---|---|
 | [`plugin/`](plugin/) | Package cài được: `@local/personal-hub` (Host + Client + bundle patch + locale + icon + test) |
-| [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH khi phát triển plugin (xem bên dưới) |
+| [`protocol/`](protocol/) | Giao thức Web Remote v1: schema, fixture dùng chung, đặc tả frame/thao tác/lỗi |
+| [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH, và **dev relay** Web Remote (`tools/dev-relay/`) |
 | [`docs/`](docs/) | Nghiên cứu kiến trúc, đặc tả ghép cặp/xác thực, ADR bố trí repo |
-| `protocol/`, `web/`, `server/`, `deploy/` | Kế hoạch Web Remote (chưa scaffold) — xem [ADR-001](docs/adr-001-repo-layout.md) |
+| `web/`, `server/`, `deploy/` | Kế hoạch Web Remote (chưa scaffold) — xem [ADR-001](docs/adr-001-repo-layout.md) |
 
 `plugin/` là thư mục cài đặt; `tools/` và `docs/` không nằm trong package.
 
-## Web Remote (kế hoạch)
+## Web Remote
 
 Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở port trên máy cá nhân.
 
 - Kiến trúc và so sánh phương án: [`docs/nghien-cuu-remote-webchat.md`](docs/nghien-cuu-remote-webchat.md)
 - Ghép cặp thiết bị, Clerk, API, schema: [`docs/dac-ta-v1-pairing-va-xac-thuc.md`](docs/dac-ta-v1-pairing-va-xac-thuc.md)
 - Bố trí repo (monorepo giai đoạn đầu): [`docs/adr-001-repo-layout.md`](docs/adr-001-repo-layout.md)
+- Giao thức v1: [`protocol/README.md`](protocol/README.md)
 
-Trạng thái: mới ở mức thiết kế; `features/web-remote.js` và relay chưa được viết.
+| Hạng mục | Trạng thái |
+|---|---|
+| Bridge Host (`features/web-remote.js`) | đã có: identity Ed25519, pairing luồng B, transport WS, 9 thao tác phiên, 2 stream, approval/question |
+| Giao thức v1 + fixture | đã có: schema, golden frame, test codec |
+| Relay phát triển (Node) | đã có trong [`tools/dev-relay/`](tools/dev-relay/) — chạy thử end-to-end, không dùng production |
+| Relay (Zig) | chưa có — Phase 2 |
+| Web client (SvelteKit) | chưa có — Phase 3; dev relay có WebChat tối giản để thử |
+
+Cấu hình, trạng thái và giới hạn: [`plugin/README.md#7-web-remote-phase-1--bridge`](plugin/README.md#7-web-remote-phase-1--bridge).
+
+### Chạy thử nhanh
+
+```powershell
+# 1. Relay + WebChat (in ra URL có token)
+node tools/dev-relay/index.mjs --port 8787
+
+# 2. Bật Web Remote trong DSH: relayUrl: 'http://127.0.0.1:8787'
+
+# 3. Mở link /pair?code=… mà relay in ra khi plugin yêu cầu ghép cặp, bấm Duyệt
+# 4. Mở link WebChat trên điện thoại (cùng LAN thì chạy relay với --host 0.0.0.0)
+```
+
+Chi tiết dev relay: [`tools/dev-relay/README.md`](tools/dev-relay/README.md).
 
 ## Cài đặt
 
@@ -41,8 +67,9 @@ Bundle được cài vào một profile của DSH bằng Plugin Manager với đ
 plugin_manager install_bundle  →  <đường dẫn tuyệt đối>/plugin
 ```
 
-Cài xong, hàng `personal-hub` xuất hiện trong profile và cả hai tính năng tự chạy
-(Telegram ở trạng thái chờ token cho tới khi bạn cấu hình; bảng Git đọc kho mã của phiên đang mở).
+Cài xong, hàng `personal-hub` xuất hiện trong profile và các tính năng tự chạy
+(Telegram ở trạng thái chờ token cho tới khi bạn cấu hình; bảng Git đọc kho mã của phiên đang mở;
+Web Remote chờ `relayUrl`).
 
 ## Cấu hình token
 
@@ -113,8 +140,12 @@ nên dùng đúng phiên đăng nhập sẵn có. Không có CLI thì GitHub v�
 
 ```powershell
 cd plugin
-node --test        # hàm thuần, kênh RPC của bảng Git trên kho mã tạm, và bridge Telegram giả lập
+node --test        # hàm thuần, bảng Git trên kho mã tạm, bridge Telegram giả lập, và Web Remote
 ```
+
+Test Web Remote đọc fixture trong `protocol/fixtures/` và dùng WebSocket giả, nên không cần relay
+hay mạng thật. Khi đổi frame, sửa đồng thời `protocol/schema`, `protocol/fixtures` và
+`plugin/lib/remote-protocol.js` (xem [`protocol/README.md`](protocol/README.md)).
 
 Thêm tính năng mới: tạo `plugin/features/<tên>.js` export `mount(ctx, config, deps)` trả về hàm dọn dẹp,
 thêm một mục vào `FEATURES` trong `plugin/index.js` và khoá cấu hình tương ứng trong `plugin/lib/config.js`.
@@ -125,6 +156,13 @@ Hai script chỉ dùng khi phát triển, cần đường dẫn tới `app.asar`
 
 - `asar-extract.mjs` — trích package trong `app.asar` ra thư mục để đọc mã và README.
 - `schema.mjs` — in JSON Schema của một endpoint Remote trong `lib/typert.host.js`.
+
+Và [`tools/dev-relay/`](tools/dev-relay/) — relay + WebChat tối giản để thử Web Remote:
+
+```powershell
+node tools/dev-relay/index.mjs --port 8787
+cd tools/dev-relay; node --test
+```
 
 Ví dụ:
 
@@ -142,6 +180,8 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
   Phiên đang chạy phải `/cancel` hoặc đợi xong trước khi lưu trữ.
 - Bảng Git là chỉ đọc (chưa stage/unstage, commit hay tạo PR từ bảng); diff dừng sau 4000 dòng.
   PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được nhưng không có chi tiết checks.
+- Web Remote mới có bridge Host và giao thức: chưa có relay, web client, màn hình nhập mã trong DSH UI;
+  chỉ nhận prompt văn bản và chưa có E2E (relay thấy plaintext — cần TLS và relay tự quản).
 
 ## Giấy phép
 

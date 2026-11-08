@@ -5,6 +5,14 @@
         telegram:
           enabled: true
           allowedChatIds: []
+        # Điều khiển từ xa qua WebChat: plugin nối ra ngoài tới relay, không mở port.
+        webRemote:
+          enabled: false
+          relayUrl: ''
+          deviceName: ''
+          autoPair: true
+          approvalTimeoutMs: 300000
+          questionTimeoutMs: 300000
         git:
           enabled: true
           forge: auto

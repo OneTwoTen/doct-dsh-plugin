@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Personal hub",
-    "description": "Personal add-ons for DeepSeek Harness: remote control from a Telegram chat, and a Git panel in the right sidebar that shows local changes with per-file diffs, the commit log, pull requests with their check and review status, and issues — plus AI-drafted pull requests, a worktree option for each new Session, and cleanup once a Session’s pull request is merged."
+    "description": "Personal add-ons for DeepSeek Harness: remote control from a Telegram chat or from the phone-first Web Remote bridge (no port opened), and a Git panel in the right sidebar that shows local changes with per-file diffs, the commit log, pull requests with their check and review status, and issues — plus AI-drafted pull requests, a worktree option for each new Session, and cleanup once a Session’s pull request is merged."
   }
 }

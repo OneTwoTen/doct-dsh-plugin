@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>DSH Web Remote</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <button id="menu" class="icon" aria-label="Danh sách phiên">☰</button>
+    <div id="heading">
+      <div id="title">Web Remote</div>
+      <div id="status" data-state="offline">Đang kết nối…</div>
+    </div>
+    <button id="new" class="icon" aria-label="Phiên mới">＋</button>
+  </header>
+
+  <div id="layout">
+    <aside id="sidebar" aria-label="Phiên">
+      <div class="sidebar-head">
+        <strong>Phiên</strong>
+        <button id="refresh" class="link">Làm mới</button>
+      </div>
+      <div id="sessions"></div>
+    </aside>
+    <div id="scrim"></div>
+
+    <main id="chat">
+      <div id="messages"></div>
+      <div id="notices"></div>
+      <form id="composer">
+        <textarea id="prompt" rows="1" placeholder="Nhắn cho DSH…" autocomplete="off"></textarea>
+        <button id="stop" type="button" class="secondary" hidden>Dừng</button>
+        <button id="send" type="submit">Gửi</button>
+      </form>
+    </main>
+  </div>
+</div>
+
+<div id="login" hidden>
+  <form id="login-form">
+    <h1>DSH Web Remote</h1>
+    <p>Dán token WebChat mà relay in ra khi khởi động.</p>
+    <input id="token" type="password" autocomplete="off" placeholder="at_…">
+    <button type="submit">Kết nối</button>
+  </form>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

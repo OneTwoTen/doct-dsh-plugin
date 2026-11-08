@@ -7,6 +7,12 @@ Bộ tài liệu thiết kế cho Web Remote (điều khiển DSH từ xa qua We
 | [Nghiên cứu kiến trúc](nghien-cuu-remote-webchat.md) | Đối chiếu DSH hiện có, đánh giá Zig 0.17.1 / SvelteKit 3, so sánh 4 phương án, protocol v2, lộ trình | hoàn tất |
 | [Đặc tả v1 — Ghép cặp & xác thực](dac-ta-v1-pairing-va-xac-thuc.md) | Hai luồng pairing, Clerk, API `/v1`, schema SQLite, rate limit, UX, phụ lục code | draft |
 | [ADR-001 — Bố trí repo](adr-001-repo-layout.md) | Monorepo giai đoạn đầu, cấu trúc thư mục, CI, điều kiện tách repo | đã chấp nhận |
+| [`protocol/README.md`](../protocol/README.md) | Giao thức v1: frame, thao tác, mã lỗi, giới hạn, fixture | đã có (Phase 1) |
+
+Triển khai hiện tại: bridge Host trong `plugin/features/web-remote.js` + `plugin/lib/remote-*.js`
+theo Phase 1, kèm **dev relay + WebChat tối giản** trong `tools/dev-relay/` để chạy thử
+end-to-end. Relay Zig (Phase 2) và web client SvelteKit (Phase 3) chưa viết. Trạng thái cấu
+hình/ghép cặp nằm trong [`plugin/README.md`](../plugin/README.md#7-web-remote-phase-1--bridge).
 
 ## Thứ tự đọc
 
