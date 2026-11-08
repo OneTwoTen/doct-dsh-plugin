@@ -90,7 +90,7 @@ export function createCommandRunner({ ctx, logger, timeoutMs = 15000 }) {
    * Run one program to completion.
    * @param {string} program executable name or path.
    * @param {string[]} args arguments, never shell-interpreted.
-   * @param {{ cwd?: string, env?: Record<string, string>, signal?: AbortSignal, maxBytes?: number, stdin?: string }} [options]
+   * @param {{ cwd?: string, env?: Record<string, string>, signal?: AbortSignal, maxBytes?: number, stdin?: string, timeoutMs?: number }} [options]
    * @returns {Promise<{ code: number, stdout: string, stderr: string, truncated: boolean }>}
    */
   async function run(program, args, options = {}) {
@@ -98,7 +98,8 @@ export function createCommandRunner({ ctx, logger, timeoutMs = 15000 }) {
     const cwd = options.cwd ?? process.cwd()
     const maxBytes = options.maxBytes ?? 4 * 1024 * 1024
     const env = { ...GIT_ENV, ...(options.env ?? {}) }
-    const deadline = AbortSignal.timeout(Math.max(1000, timeoutMs))
+    const limit = Math.max(1000, Number(options.timeoutMs) || timeoutMs)
+    const deadline = AbortSignal.timeout(limit)
     const signal = options.signal === undefined ? deadline : AbortSignal.any([options.signal, deadline])
 
     if (subprocess !== undefined && typeof subprocess.spawn === 'function') {
@@ -119,7 +120,7 @@ export function createCommandRunner({ ctx, logger, timeoutMs = 15000 }) {
         const stdout = handle.collected?.stdout?.readFrom(0) ?? { text: '', lossy: false }
         const stderr = handle.collected?.stderr?.readFrom(0)?.text ?? ''
         if (deadline.aborted && !options.signal?.aborted) {
-          throw new CommandError('system/timeout', `${program} did not answer within ${timeoutMs} ms`, { program })
+          throw new CommandError('system/timeout', `${program} did not answer within ${limit} ms`, { program })
         }
         return {
           code: typeof outcome?.exitCode === 'number' ? outcome.exitCode : 1,
@@ -143,7 +144,7 @@ export function createCommandRunner({ ctx, logger, timeoutMs = 15000 }) {
           env: { ...process.env, ...env },
           encoding: 'utf8',
           maxBuffer: Math.max(64 * 1024, maxBytes),
-          timeout: Math.max(1000, timeoutMs),
+          timeout: limit,
           windowsHide: true,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
         },
@@ -174,6 +175,94 @@ export function createCommandRunner({ ctx, logger, timeoutMs = 15000 }) {
     run,
     backend: subprocess !== undefined && typeof subprocess.spawn === 'function' ? 'subprocess' : 'child_process',
   }
+}
+
+/**
+ * Push the checked-out branch and set its upstream.
+ *
+ * @param {{ run: Function }} runner command runner.
+ * @param {{ root: string, remote: string, branch: string, timeoutMs?: number, signal?: AbortSignal }} options
+ * @returns {Promise<{ remote: string, branch: string }>}
+ * @throws {CommandError} when Git refuses the push.
+ */
+export async function pushBranch(runner, { root, remote, branch, timeoutMs, signal }) {
+  if (typeof branch !== 'string' || branch.trim().length === 0) {
+    throw new CommandError('pr/detached', 'Nhánh hiện tại không có tên nên không đẩy lên được', { branch })
+  }
+  const result = await runner.run('git', ['push', '--set-upstream', remote, `HEAD:refs/heads/${branch}`], {
+    cwd: root,
+    signal,
+    timeoutMs,
+    maxBytes: 1024 * 1024,
+  })
+  if (result.code !== 0) {
+    const detail = String(result.stderr ?? '')
+    throw new CommandError('pr/push-failed', `Không đẩy được nhánh ${branch} lên ${remote}: ${firstLine(detail) || `mã ${result.code}`}`, {
+      remote,
+      branch,
+      detail: detail.slice(0, 4000),
+    })
+  }
+  return { remote, branch }
+}
+
+/**
+ * Read the facts a change-request draft needs: the commits this branch adds,
+ * its changed files, and a bounded diff excerpt.
+ *
+ * @param {{ run: Function }} runner command runner.
+ * @param {{ root: string, base: string, config: Record<string, unknown>, signal?: AbortSignal }} options
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function readChangeRequestFacts(runner, { root, base, config, signal }) {
+  const range = `${base}...HEAD`
+  const limit = Number(config.pull?.commitLimit) || 40
+  const maxBytes = Number(config.pull?.contextBytes) || 60000
+  const [count, log, stats, patch] = await Promise.all([
+    runner.run('git', ['rev-list', '--count', range], { cwd: root, signal }),
+    runner.run('git', [
+      'log',
+      '-n',
+      String(limit),
+      '--no-show-signature',
+      '--format=%an%x1f%aI%x1f%s',
+      range,
+    ], { cwd: root, signal }),
+    runner.run('git', ['diff', '--numstat', '-z', '-M', range], { cwd: root, signal }),
+    runner.run('git', ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--submodule=short', '-M', range], {
+      cwd: root,
+      signal,
+      maxBytes,
+    }),
+  ])
+  if (count.code !== 0) {
+    throw new CommandError('pr/unknown-base', String(count.stderr ?? '').trim() || `Không so được với nhánh ${base}`, { base })
+  }
+  const commits = []
+  for (const entry of String(log.stdout ?? '').split('\n')) {
+    if (entry.length === 0) continue
+    const fields = entry.split('\x1f')
+    if (fields.length < 3) continue
+    commits.push({ author: fields[0], date: fields[1], subject: fields.slice(2).join('\x1f') })
+  }
+  const files = parseNumstatZ(stats.code === 0 ? stats.stdout : '').map((entry) => ({
+    path: entry.path,
+    additions: entry.additions,
+    deletions: entry.deletions,
+  }))
+  return {
+    base,
+    ahead: Number.parseInt(String(count.stdout ?? '').trim(), 10) || 0,
+    commits,
+    files,
+    diff: String(patch.stdout ?? ''),
+    truncated: patch.truncated === true,
+  }
+}
+
+/** First non-empty line of a command's stderr. */
+function firstLine(text) {
+  return String(text ?? '').split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? ''
 }
 
 /**

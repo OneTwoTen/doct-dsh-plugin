@@ -105,6 +105,22 @@ test('the client module registers a row config card for the bundle row', async (
   assert.equal(typeof card.component, 'function')
 })
 
+/** Answer one POST with a JSON body, recording the request first. */
+function stubFetch(calls, body) {
+  const previous = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      status: 200,
+      json: async () => body,
+    }
+  }
+  return () => {
+    globalThis.fetch = previous
+  }
+}
+
 test('the client module registers the Git tab type, its body, and the header button', async () => {
   const module = await loadClient()
 
@@ -127,14 +143,6 @@ test('the client module registers the Git tab type, its body, and the header but
   }
   const calls = []
   const gitContext = {
-    connection: {
-      rpc: {
-        call: async (channel, endpoint, payload) => {
-          calls.push({ channel, endpoint, payload })
-          return { ok: true, value: {} }
-        },
-      },
-    },
     sidebarRightTabs: {
       register: (definition) => {
         tabTypes.push(definition)
@@ -164,7 +172,7 @@ test('the client module registers the Git tab type, its body, and the header but
       return () => {}
     },
     inject: (deps, callback) => {
-      assert.deepEqual(deps, ['connection', 'sidebarRightTabs', 'sidebarRight'])
+      assert.deepEqual(deps, ['sidebarRightTabs', 'sidebarRight'])
       callback(gitContext)
     },
   }
@@ -191,10 +199,18 @@ test('the client module registers the Git tab type, its body, and the header but
   assert.equal(typeof bodyProps.call, 'function')
   assert.equal(typeof body.component, 'function')
 
-  // The injected caller speaks the documented channel and unwraps the result envelope.
-  const answer = await bodyProps.call('overview', { sessionId: 's1' })
-  assert.deepEqual(answer, {})
-  assert.deepEqual(calls[0], { channel: '/personal-hub-git', endpoint: 'overview', payload: { sessionId: 's1' } })
+  // The injected caller posts to the Host route and unwraps the result envelope.
+  const restore = stubFetch(calls, { ok: true, value: {} })
+  try {
+    const answer = await bodyProps.call('overview', { sessionId: 's1' })
+    assert.deepEqual(answer, {})
+  } finally {
+    restore()
+  }
+  assert.equal(calls[0].url, 'api/personal-hub-git/overview')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { sessionId: 's1' })
+  assert.equal(calls[0].init.credentials, 'same-origin')
 
   const button = registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities')
   assert.ok(button, 'registered the header button')
@@ -218,11 +234,6 @@ test('the injected caller turns a failed envelope into an error with its code', 
   }
   const locale = { bind: () => (key) => key, register: () => () => {} }
   const gitContext = {
-    connection: {
-      rpc: {
-        call: async () => ({ ok: false, error: { code: 'git/not-a-repository', message: 'not here' } }),
-      },
-    },
     sidebarRightTabs: { register: () => () => {} },
     sidebarRight: { openTab: () => {} },
     slots,
@@ -242,11 +253,64 @@ test('the injected caller turns a failed envelope into an error with its code', 
 
   const body = registrations.find((entry) => entry.options.name === 'sidebar.right.pane.tab')
   const { call } = body.options.inject()
-  await assert.rejects(() => call('overview', {}), (error) => {
-    assert.equal(error.code, 'git/not-a-repository')
-    assert.equal(error.message, 'not here')
-    return true
+  const calls = []
+  const restore = stubFetch(calls, { ok: false, error: { code: 'git/not-a-repository', message: 'not here' } })
+  try {
+    await assert.rejects(() => call('overview', {}), (error) => {
+      assert.equal(error.code, 'git/not-a-repository')
+      assert.equal(error.message, 'not here')
+      return true
+    })
+  } finally {
+    restore()
+  }
+})
+
+test('the injected caller reports an unreachable Host as a connection failure', async () => {
+  const module = await loadClient()
+  const registrations = []
+  const slots = {
+    inject: (_key, callback) => {
+      callback()
+      return () => {}
+    },
+    register: (options, component) => {
+      registrations.push({ options, component })
+      return () => {}
+    },
+  }
+  const locale = { bind: () => (key) => key, register: () => () => {} }
+  const gitContext = {
+    sidebarRightTabs: { register: () => () => {} },
+    sidebarRight: { openTab: () => {} },
+    slots,
+    locale,
+    effect: (fn) => fn(),
+  }
+  module.apply({
+    remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }), set: async () => {}, unset: async () => {} },
+      $on: () => () => {},
+    },
+    locale,
+    slots,
+    effect: (fn) => fn(),
+    inject: (_deps, callback) => callback(gitContext),
   })
+
+  const body = registrations.find((entry) => entry.options.name === 'sidebar.right.pane.tab')
+  const { call } = body.options.inject()
+  const previous = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 405, json: async () => ({}) })
+  try {
+    await assert.rejects(() => call('overview', {}), (error) => {
+      assert.equal(error.code, 'connection/failed')
+      assert.match(error.message, /HTTP 405/)
+      return true
+    })
+  } finally {
+    globalThis.fetch = previous
+  }
 })
 
 test('the git panel renders its header, file groups, and a diff without a browser', async () => {

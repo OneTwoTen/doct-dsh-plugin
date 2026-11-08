@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Trung tâm cá nhân",
-    "description": "Tiện ích cá nhân cho DeepSeek Harness: điều khiển từ xa qua chat Telegram, và bảng Git ở thanh bên phải hiển thị thay đổi cục bộ kèm diff từng tệp, lịch sử commit, pull request cùng trạng thái kiểm tra và đánh giá, và issue."
+    "description": "Tiện ích cá nhân cho DeepSeek Harness: điều khiển từ xa qua chat Telegram, và bảng Git ở thanh bên phải hiển thị thay đổi cục bộ kèm diff từng tệp, lịch sử commit, pull request cùng trạng thái kiểm tra và đánh giá, và issue — kèm tạo pull request bằng AI, worktree riêng cho phiên mới, và dọn dẹp khi pull request của phiên được gộp."
   }
 }

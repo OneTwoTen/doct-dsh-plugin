@@ -18,6 +18,24 @@ async function waitFor(check, timeout = 4000) {
   throw new Error('timed out waiting for condition')
 }
 
+/**
+ * Remove one feature's data directory.
+ *
+ * A disposed feature can still finish a status write, so a removal may lose a
+ * race with it; retrying is what makes that cleanup reliable.
+ */
+async function removeDataDir(directory) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code !== 'ENOTEMPTY' && error?.code !== 'EBUSY') throw error
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+}
+
 function createSessionController({ onEvent } = {}) {
   const bag = {
     cursor: 5,
@@ -241,7 +259,7 @@ async function mountFeature({ changes, observe = false } = {}) {
     async dispose() {
       stop()
       await new Promise((resolve) => setTimeout(resolve, 60))
-      await rm(dataDir, { recursive: true, force: true })
+    await removeDataDir(dataDir)
     },
   }
 }
@@ -788,6 +806,6 @@ test('resolves the bot token from the credential store before the environment', 
     assert.equal(status.state, 'polling')
   } finally {
     stop()
-    await rm(dataDir, { recursive: true, force: true })
+    await removeDataDir(dataDir)
   }
 })

@@ -27,6 +27,8 @@ export const GIT_DEFAULTS = Object.freeze({
   /** Environment variable holding a GitHub token for the REST fallback. */
   tokenEnv: 'GITHUB_TOKEN',
   commandTimeoutMs: 15000,
+  /** Longest `git fetch` or worktree command; the default command limit is too short for a network fetch. */
+  worktreeTimeoutMs: 180000,
   /** Bytes of diff text kept per file. */
   maxDiffBytes: 393216,
   /** Bytes read from one untracked file when it has no diff. */
@@ -40,6 +42,74 @@ export const GIT_DEFAULTS = Object.freeze({
   cacheMs: 20000,
   /** Suggested client refresh interval. */
   refreshMs: 30000,
+  /** Creating a change request with a model. */
+  pull: Object.freeze({
+    enabled: true,
+    /** Base branch a new change request targets; empty asks the repository for its default. */
+    base: '',
+    /**
+     * Route used to draft the title and description. Empty uses the Session's
+     * current model with the lowest reasoning effort that route supports.
+     */
+    provider: '',
+    model: '',
+    /** Push the branch before creating the change request. */
+    push: true,
+    /** End-to-end deadline for the drafting request. */
+    timeoutMs: 90000,
+    /** Model output-token cap for the draft. */
+    maxOutputTokens: 4096,
+    /** Bytes of diff text the draft prompt may carry. */
+    contextBytes: 60000,
+    /** Commits the draft prompt lists. */
+    commitLimit: 40,
+  }),
+  /** New Session worktrees. */
+  worktree: Object.freeze({
+    enabled: true,
+    /** Directory inside the repository that holds created checkouts. */
+    directory: '.agents/worktrees',
+    /** Branch and directory name prefix. */
+    namePrefix: 'dsh',
+    /** `id` keeps `dsh-<session digits>`; `semantic` renames the branch from the first message. */
+    naming: 'id',
+    /** Extra instruction for the naming model, appended to its prompt. */
+    nameInstructions: '',
+    /** Branch the picker starts on; empty asks the repository for its default branch. */
+    base: '',
+    /** Where a new worktree starts: `local` (recent local branches) or `remote` (fetched remote branches). */
+    source: 'local',
+    /** Remote used for `source: remote`; empty follows the selected remote, then `origin`. */
+    remote: '',
+    /** Removing checkouts nobody uses any more. */
+    cleanup: Object.freeze({
+      enabled: false,
+      /** Milliseconds between cleanup passes. */
+      checkMs: 3600000,
+      /** Remove a checkout untouched for this many days; 0 turns the rule off. */
+      inactiveDays: 7,
+      /** Remove a checkout whose branch never gained a commit over its base. */
+      whenNoCommits: true,
+      /** Grace before the no-commit rule applies, so a fresh checkout survives its first hour. */
+      noCommitsAfterHours: 6,
+      /** `tracked` keeps a checkout with uncommitted tracked edits, `any` also keeps untracked files, `none` ignores both. */
+      keepChanges: 'tracked',
+      /** Delete the branch together with its checkout. */
+      deleteBranch: false,
+    }),
+  }),
+  /** What happens once a Session's change request is merged. */
+  merged: Object.freeze({
+    enabled: false,
+    /** Remove the worktree this Session created once its change request is merged. */
+    removeWorktree: true,
+    /** Delete the merged worktree branch too. */
+    deleteBranch: false,
+    /** Archive the Session so it leaves the active list. */
+    archiveSession: true,
+    /** Milliseconds between merge checks. */
+    checkMs: 60000,
+  }),
 })
 
 function asBoolean(value, fallback) {
@@ -75,6 +145,10 @@ export function normalizeConfig(raw) {
   const telegram = root.telegram && typeof root.telegram === 'object' ? root.telegram : {}
   const allowedChatIds = Array.isArray(telegram.allowedChatIds) ? telegram.allowedChatIds : []
   const git = root.git && typeof root.git === 'object' ? root.git : {}
+  const pull = git.pull && typeof git.pull === 'object' ? git.pull : {}
+  const worktree = git.worktree && typeof git.worktree === 'object' ? git.worktree : {}
+  const cleanup = worktree.cleanup && typeof worktree.cleanup === 'object' ? worktree.cleanup : {}
+  const merged = git.merged && typeof git.merged === 'object' ? git.merged : {}
   return {
     telegram: {
       enabled: asBoolean(telegram.enabled, TELEGRAM_DEFAULTS.enabled),
@@ -106,6 +180,44 @@ export function normalizeConfig(raw) {
       issueLimit: asPositiveInteger(git.issueLimit, GIT_DEFAULTS.issueLimit, { min: 1, max: 100 }),
       cacheMs: asPositiveInteger(git.cacheMs, GIT_DEFAULTS.cacheMs, { min: 0, max: 600000 }),
       refreshMs: asPositiveInteger(git.refreshMs, GIT_DEFAULTS.refreshMs, { min: 3000, max: 600000 }),
+      worktreeTimeoutMs: asPositiveInteger(git.worktreeTimeoutMs, GIT_DEFAULTS.worktreeTimeoutMs, { min: 5000, max: 1800000 }),
+      pull: {
+        enabled: asBoolean(pull.enabled, GIT_DEFAULTS.pull.enabled),
+        base: asString(pull.base, GIT_DEFAULTS.pull.base).trim(),
+        provider: asString(pull.provider, GIT_DEFAULTS.pull.provider).trim(),
+        model: asString(pull.model, GIT_DEFAULTS.pull.model).trim(),
+        push: asBoolean(pull.push, GIT_DEFAULTS.pull.push),
+        timeoutMs: asPositiveInteger(pull.timeoutMs, GIT_DEFAULTS.pull.timeoutMs, { min: 5000, max: 600000 }),
+        maxOutputTokens: asPositiveInteger(pull.maxOutputTokens, GIT_DEFAULTS.pull.maxOutputTokens, { min: 256, max: 32768 }),
+        contextBytes: asPositiveInteger(pull.contextBytes, GIT_DEFAULTS.pull.contextBytes, { min: 1024 }),
+        commitLimit: asPositiveInteger(pull.commitLimit, GIT_DEFAULTS.pull.commitLimit, { min: 1, max: 200 }),
+      },
+      worktree: {
+        enabled: asBoolean(worktree.enabled, GIT_DEFAULTS.worktree.enabled),
+        directory: asString(worktree.directory, GIT_DEFAULTS.worktree.directory).trim() || GIT_DEFAULTS.worktree.directory,
+        namePrefix: asString(worktree.namePrefix, GIT_DEFAULTS.worktree.namePrefix).trim(),
+        naming: asChoice(worktree.naming, ['id', 'semantic'], GIT_DEFAULTS.worktree.naming),
+        nameInstructions: asString(worktree.nameInstructions, GIT_DEFAULTS.worktree.nameInstructions).trim(),
+        base: asString(worktree.base, GIT_DEFAULTS.worktree.base).trim(),
+        source: asChoice(worktree.source, ['local', 'remote'], GIT_DEFAULTS.worktree.source),
+        remote: asString(worktree.remote, GIT_DEFAULTS.worktree.remote).trim(),
+        cleanup: {
+          enabled: asBoolean(cleanup.enabled, GIT_DEFAULTS.worktree.cleanup.enabled),
+          checkMs: asPositiveInteger(cleanup.checkMs, GIT_DEFAULTS.worktree.cleanup.checkMs, { min: 300000, max: 86400000 }),
+          inactiveDays: asPositiveInteger(cleanup.inactiveDays, GIT_DEFAULTS.worktree.cleanup.inactiveDays, { min: 0, max: 3650 }),
+          whenNoCommits: asBoolean(cleanup.whenNoCommits, GIT_DEFAULTS.worktree.cleanup.whenNoCommits),
+          noCommitsAfterHours: asPositiveInteger(cleanup.noCommitsAfterHours, GIT_DEFAULTS.worktree.cleanup.noCommitsAfterHours, { min: 0, max: 8760 }),
+          keepChanges: asChoice(cleanup.keepChanges, ['tracked', 'any', 'none'], GIT_DEFAULTS.worktree.cleanup.keepChanges),
+          deleteBranch: asBoolean(cleanup.deleteBranch, GIT_DEFAULTS.worktree.cleanup.deleteBranch),
+        },
+      },
+      merged: {
+        enabled: asBoolean(merged.enabled, GIT_DEFAULTS.merged.enabled),
+        removeWorktree: asBoolean(merged.removeWorktree, GIT_DEFAULTS.merged.removeWorktree),
+        deleteBranch: asBoolean(merged.deleteBranch, GIT_DEFAULTS.merged.deleteBranch),
+        archiveSession: asBoolean(merged.archiveSession, GIT_DEFAULTS.merged.archiveSession),
+        checkMs: asPositiveInteger(merged.checkMs, GIT_DEFAULTS.merged.checkMs, { min: 15000, max: 3600000 }),
+      },
     },
   }
 }

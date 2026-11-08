@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { rmSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,11 @@ import { test } from 'node:test'
 
 import { mountGit } from '../features/git.js'
 import { normalizeConfig } from '../lib/config.js'
+
+/** Keep the plugin's durable state out of the real Harness home. */
+const testHome = await mkdtemp(join(tmpdir(), 'personal-hub-home-'))
+process.env.DSH_HOME = testHome
+process.once('exit', () => rmSync(testHome, { recursive: true, force: true }))
 
 /**
  * End-to-end contract test: the Host channel answers from a real repository and
@@ -84,21 +90,30 @@ async function makeRepository() {
   return root
 }
 
-/** Mount the Host feature over a fake connection and return its dispatcher. */
+/** Mount the Host feature over a fake Connection fetch registry and return its caller. */
 function mountFeature() {
-  let handler
+  const routes = new Map()
   const connection = {
-    rpc: {
-      handle(_channel, fn) {
-        handler = fn
-        return () => {}
+    fetch: {
+      register(route) {
+        routes.set(route.path, route)
+        return () => routes.delete(route.path)
       },
     },
   }
   const ctx = { get: (name) => (name === 'connection' ? connection : undefined) }
   const logger = { info: () => {}, warn: () => {}, error: () => {} }
   mountGit(ctx, normalizeConfig({}).git, { logger })
-  return (endpoint, payload) => handler(endpoint, payload, new AbortController().signal)
+  return async (endpoint, payload) => {
+    const route = routes.get(`/api/personal-hub-git/${endpoint}`)
+    assert.ok(route, `the ${endpoint} route is registered`)
+    const request = new Request(`http://dsh.internal/api/personal-hub-git/${endpoint}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload ?? {}),
+    })
+    return await route.fetch(request).then((response) => response.json())
+  }
 }
 
 test('the panel draws what the Host channel answers for a real repository', async () => {

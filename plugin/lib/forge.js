@@ -8,6 +8,7 @@
  * issues.
  */
 import { CommandError } from './git-run.js'
+import { resolveDefaultBase } from './worktree.js'
 import {
   describeChecks,
   normalizeComment,
@@ -514,7 +515,198 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
     })
   }
 
-  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail }
+  /**
+   * Write one GitHub REST resource.
+   * @param {string} path API path beginning with `/`.
+   * @param {Record<string, unknown>} body JSON request body.
+   * @param {{ signal?: AbortSignal }} options request options.
+   * @returns {Promise<Record<string, unknown>>}
+   */
+  async function restWrite(path, body, options = {}) {
+    const headers = {
+      accept: 'application/vnd.github+json',
+      'content-type': 'application/json',
+      'user-agent': 'dsh-personal-hub',
+      'x-github-api-version': '2022-11-28',
+    }
+    const value = await token()
+    if (value.length > 0) headers.authorization = `Bearer ${value}`
+    let response
+    try {
+      response = await fetch(`https://api.github.com${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (error) {
+      throw new CommandError('forge/offline', `Không gọi được GitHub: ${messageOf(error)}`)
+    }
+    if (response.status === 401) throw new CommandError('forge/not-signed-in', 'Token GitHub không hợp lệ')
+    if (response.status === 422) {
+      const detail = await response.text().catch(() => '')
+      throw new CommandError('pr/rejected', 'GitHub từ chối yêu cầu tạo pull request', { detail: detail.slice(0, 2000) })
+    }
+    if (!response.ok) throw new CommandError('forge/failed', `GitHub trả về HTTP ${response.status}`)
+    const payload = await response.json()
+    return payload !== null && typeof payload === 'object' ? payload : {}
+  }
+
+  /**
+   * The default base branch of the code host, when the repository names one.
+   * @param {{ root: string, remote: Record<string, unknown> | null, signal?: AbortSignal }} options
+   * @returns {Promise<string | null>}
+   */
+  async function defaultBase({ root, remote, signal }) {
+    return await resolveDefaultBase(runner, { root, remote: String(remote?.name ?? ''), signal })
+  }
+
+  /**
+   * Open one change request from an already pushed branch.
+   *
+   * The provider CLI is preferred because it carries the user's own sign-in;
+   * the GitHub REST API is the fallback when no signed-in CLI answers.
+   *
+   * @param {{
+   *   root: string,
+   *   remote: Record<string, unknown>,
+   *   head: string,
+   *   base: string,
+   *   title: string,
+   *   body: string,
+   *   signal?: AbortSignal,
+   * }} options
+   * @returns {Promise<{ number: number | null, url: string, provider: string, backend: string, head: string, base: string }>}
+   */
+  async function createPull({ root, remote, head, base, title, body, signal }) {
+    const info = await describe({ root, remote, signal })
+    if (info.available !== true) {
+      throw new CommandError('pr/forge-unavailable', info.reason ?? 'Máy chủ mã nguồn chưa dùng được')
+    }
+    if (info.backend === 'cli') {
+      const program = info.cli
+      const args = info.provider === 'gitlab'
+        ? [
+            'mr', 'create',
+            '--repo', String(remote.slug),
+            '--source-branch', head,
+            '--target-branch', base,
+            '--title', title,
+            '--description', body,
+            '--yes',
+            '--no-editor',
+          ]
+        : [
+            'pr', 'create',
+            '--repo', String(remote.slug),
+            '--head', head,
+            '--base', base,
+            '--title', title,
+            '--body', body,
+          ]
+      const result = await exec(program, args, { cwd: root, signal })
+      if (result.code !== 0) throw ghFailure(result.stderr, program)
+      const url = firstUrl(result.stdout) ?? firstUrl(result.stderr) ?? ''
+      return {
+        number: numberFromUrl(url),
+        url,
+        provider: info.provider,
+        backend: 'cli',
+        head,
+        base,
+      }
+    }
+    const node = await restWrite(`/repos/${remote.slug}/pulls`, { title, head, base, body }, { signal })
+    return {
+      number: typeof node.number === 'number' ? node.number : numberFromUrl(String(node.html_url ?? '')),
+      url: String(node.html_url ?? ''),
+      provider: info.provider,
+      backend: 'rest',
+      head,
+      base,
+    }
+  }
+
+  /**
+   * Read one change request's current state, which merge tracking polls.
+   * @param {{ root: string, remote: Record<string, unknown>, number: number, signal?: AbortSignal }} options
+   * @returns {Promise<{ number: number, state: string, url: string, mergedAt: string | null } | null>}
+   */
+  async function pullState({ root, remote, number, signal }) {
+    const info = await describe({ root, remote, signal })
+    if (info.available !== true) return null
+    if (info.backend === 'cli') {
+      if (info.provider === 'gitlab') {
+        const raw = await ghJson(info.cli, [
+          'api',
+          `projects/${encodeURIComponent(String(remote.slug))}/merge_requests/${number}`,
+        ], { cwd: root, signal })
+        const node = raw !== null && typeof raw === 'object' ? raw : {}
+        return {
+          number,
+          state: gitlabState(node.state),
+          url: String(node.web_url ?? ''),
+          mergedAt: typeof node.merged_at === 'string' ? node.merged_at : null,
+        }
+      }
+      const raw = await ghJson(info.cli, [
+        'pr',
+        'view',
+        String(number),
+        '--repo',
+        String(remote.slug),
+        '--json',
+        STATE_FIELDS,
+      ], { cwd: root, signal })
+      const node = raw !== null && typeof raw === 'object' ? raw : {}
+      const pull = normalizePull(node)
+      return {
+        number: pull.number,
+        state: pull.state,
+        url: pull.url,
+        mergedAt: typeof node.mergedAt === 'string' ? node.mergedAt : null,
+      }
+    }
+    const node = await rest(`/repos/${remote.slug}/pulls/${number}`, { signal })
+    const pull = normalizePull(restPull(node))
+    return {
+      number: pull.number,
+      state: pull.state,
+      url: pull.url,
+      mergedAt: typeof node?.merged_at === 'string' ? node.merged_at : null,
+    }
+  }
+
+  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, pullState }
+}
+
+/** Fields `pullState` asks `gh` for. */
+const STATE_FIELDS = ['number', 'url', 'state', 'isDraft', 'mergedAt', 'headRefName', 'baseRefName', 'mergeable'].join(',')
+
+/**
+ * Map a GitLab merge-request state onto the panel's vocabulary.
+ * @param {unknown} value GitLab `state` field.
+ * @returns {string} open, draft, merged, or closed.
+ */
+function gitlabState(value) {
+  switch (String(value ?? '')) {
+    case 'merged': return 'merged'
+    case 'closed': return 'closed'
+    case 'locked': return 'open'
+    default: return 'open'
+  }
+}
+
+/** First HTTP(S) URL in command output. */
+function firstUrl(text) {
+  const match = /https?:\/\/[^\s'"]+/.exec(String(text ?? ''))
+  return match?.[0] ?? null
+}
+
+/** Pull or merge-request number from one change-request URL. */
+function numberFromUrl(url) {
+  const match = /\/(?:pull|pulls|merge_requests)\/(\d+)/.exec(String(url ?? ''))
+  return match === null ? null : Number.parseInt(match[1], 10)
 }
 
 /**

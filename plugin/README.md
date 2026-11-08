@@ -2,6 +2,8 @@
 
 Một bundle duy nhất, nhiều tính năng: **điều khiển DSH từ xa qua Telegram**, và **bảng Git** ở
 thanh bên phải (thay đổi, diff từng tệp, commit, pull request kèm trạng thái, issue).
+Bảng Git còn **tạo pull request bằng model của phiên** (effort thấp nhất), **worktree riêng cho
+phiên mới** (bắt đầu từ nhánh local hoặc nhánh remote đã fetch), và **dọn dẹp sau khi PR được gộp**.
 
 Gửi tin nhắn trong chat Telegram đã ghép nối → tin nhắn thành prompt cho một phiên DSH →
 câu trả lời được đẩy về chat thành các tin riêng: phản hồi trung gian, tóm tắt thay đổi chính,
@@ -131,6 +133,113 @@ cửa sổ DSH.
 - Issue: danh sách lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả và bình luận.
 - Tab **Commit**: lịch sử gần nhất; bấm một commit để xem mô tả, tệp thay đổi và toàn bộ patch.
 
+### Tạo pull request bằng AI
+
+Trong tab **Pull request** có nút **Tạo pull request**. Bấm lần thứ nhất để xem xác nhận (nhánh
+nguồn → nhánh nền, chọn được nhánh nền), bấm **Tạo** để chạy:
+
+1. Plugin đẩy nhánh hiện tại lên remote (`git push --set-upstream`); đặt `git.pull.push: false` nếu
+   bạn tự đẩy trước.
+2. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ các commit cùng diff của nhánh, với
+   **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`). Có thể ghim route
+   khác bằng `git.pull.provider` + `git.pull.model`.
+3. Pull request được mở bằng `gh pr create` (GitLab: `glab mr create`), hoặc REST API GitHub khi
+   không có CLI đã đăng nhập.
+4. Pull request vừa tạo được **gắn với phiên** để theo dõi việc gộp.
+
+Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì plugin vẫn tạo PR bằng bản nháp dựng
+từ commit và tên tệp, và ghi lý do vào `draft.error` trong câu trả lời — không chặn thao tác.
+Nhánh chưa có commit mới so với nhánh nền sẽ bị từ chối với `pr/no-commits`.
+
+### Worktree cho phiên mới
+
+Ở màn hình **New Session**, cạnh bộ chọn workspace có một hàng giống T3 Code: nút **Worktree mới**,
+ông chọn **nhánh nền** (mặc định là nhánh mặc định của kho, hoặc `git.worktree.base`), và hai nút
+**Nhánh local** / **Nhánh remote**.
+
+- Bấm **Worktree mới** là checkout được tạo ngay: `<kho>/.agents/worktrees/dsh-<8 ký tự id>-<4 ký
+  tự>` trên nhánh mới cùng tên, rồi **thư mục làm việc của phiên** chuyển sang đó. Hàng đổi thành
+  chip tên nhánh kèm ✕ để xoá và quay về dự án.
+- Đổi nhánh nền (hoặc nguồn local/remote) khi đã tạo thì checkout được tạo lại từ nhánh mới — an
+  toàn vì phiên chưa chạy lượt nào.
+- Với nguồn remote, plugin chạy `git fetch <remote> <nhánh>` trước, nên worktree bắt đầu từ đúng
+  commit trên máy chủ mã nguồn, không phải bản fetch cũ trên máy.
+- Thư mục `.agents/worktrees/` tự sinh `.gitignore` chứa `*` nên checkout không hiện trong
+  `git status` của dự án.
+
+Tính năng cần một git checkout thường (không phải worktree liên kết), phiên đã mở, và
+`git.worktree.enabled: true`. Các lý do từ chối đều có mã riêng: `worktree/no-agent`,
+`worktree/already`, `worktree/linked-project`, `worktree/unknown-base`, `worktree/fetch-failed`,
+`worktree/dirty` (xoá khi còn thay đổi chưa commit).
+
+**Vì sao tạo ngay khi bật, không phải lúc gửi tin nhắn:** T3 Code tạo worktree khi bạn gửi tin đầu
+tiên và giữ tin đó lại cho tới khi xong. Trên DSH, prompt của một bước được lắp (`systemPrompt.assemble`)
+**trước** hook `agent/pre-step` — hook duy nhất mà plugin có thể `await` — nên nếu tạo lúc gửi thì
+bước đầu tiên vẫn được mô tả thư mục cũ. Vì vậy plugin tạo ngay khi bạn bật, để thư mục đúng trước
+khi model chạy.
+
+#### Đặt tên nhánh theo việc đang làm
+
+`git.worktree.naming: semantic` đổi cách đặt tên nhánh: checkout vẫn bắt đầu bằng tên tạm
+`dsh-<id phiên>`, nhưng khi tin nhắn đầu tiên vào phiên, model (model hiện tại của phiên, effort thấp
+nhất) đọc tin nhắn đó và đổi nhánh thành `feat/<việc>`, `fix/<việc>`… (`feat/add-login-guard`).
+
+- Thư mục checkout **giữ nguyên tên tạm** — chỉ nhánh đổi, khớp cách T3 Code làm.
+- Nếu tên đã tồn tại thì thêm hậu tố 4 ký tự hex; nếu model lỗi hoặc trả lời không dùng được thì
+  **giữ nguyên tên tạm** và ghi lý do vào `namingError` của bản ghi trong `git.json`.
+- Tiền tố hợp lệ: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`. Thêm
+  `git.worktree.nameInstructions` để lái cách đặt tên (ví dụ bắt đầu bằng mã issue).
+- Slug được chuyển sang ASCII không dấu, nên tin nhắn tiếng Việt vẫn ra nhánh đọc được
+  (`sửa lỗi đăng nhập` → `fix/sua-loi-dang-nhap`).
+
+#### Chat mới trong worktree hiện có
+
+Khi phiên đang làm trong worktree của plugin, đầu bảng Git có nút **Chat mới trong worktree này**
+(cạnh chip nhánh). Bấm là một phiên mới được tạo với cùng thư mục checkout — giống *New thread in
+this worktree* của T3 Code — nên hai chat làm chung một nhánh; chat mới xuất hiện ở thanh bên.
+
+#### Dọn worktree không dùng
+
+Ngoài việc dọn khi PR được gộp, plugin có policy dọn riêng, mặc định tắt:
+
+```yaml
+git:
+  worktree:
+    cleanup:
+      enabled: false
+      inactiveDays: 7           # xoá sau N ngày không đụng tới; 0 = tắt quy tắc này
+      whenNoCommits: true       # xoá khi nhánh chưa có commit nào mới so với nhánh nền
+      noCommitsAfterHours: 6    # ân hạn cho checkout vừa tạo
+      keepChanges: tracked      # tracked | any | none
+      deleteBranch: false
+      checkMs: 3600000
+```
+
+Chỉ xoá checkout do plugin tạo. Phiên đang mở luôn được giữ; `keepChanges: tracked` giữ khi còn
+thay đổi chưa commit của tệp được theo dõi, `any` giữ cả khi chỉ có tệp chưa theo dõi, `none` bỏ qua
+cả hai. "Không hoạt động" đo bằng thời điểm tạo checkout và mtime thư mục. Kết quả mỗi lượt được ghi
+vào `cleanup` trong `git.json`, và thẻ cấu hình có nút **Dọn ngay** cùng dòng tóm tắt lần gần nhất.
+
+### Dọn dẹp sau khi PR được gộp
+
+Bật trong cấu hình (hoặc trong thẻ cấu hình của plugin ở trang **Plugins**):
+
+```yaml
+git:
+  merged:
+    enabled: true          # mặc định tắt
+    removeWorktree: true   # xoá worktree plugin đã tạo cho phiên
+    deleteBranch: false    # xoá luôn nhánh đã gộp
+    archiveSession: true   # ẩn phiên khỏi danh sách đang hoạt động
+    checkMs: 60000         # nhịp kiểm tra trạng thái PR
+```
+
+Plugin giữ liên kết phiên ↔ pull request trong `git.json` và hỏi máy chủ mã nguồn theo
+`checkMs`. Khi PR **đã gộp**: xoá worktree (và nhánh nếu bật), rồi lưu trữ phiên — phiên biến khỏi
+danh sách đang hoạt động nhưng vẫn khôi phục được. PR **đã đóng** thì ngừng theo dõi mà không dọn.
+Mỗi liên kết chỉ xử lý một lần, nên khởi động lại DSH không lặp lại thao tác. Nếu worktree còn thay
+đổi chưa commit, plugin **không** xoá: nó ghi lý do vào `git.json` và để bạn quyết định.
+
 ### Nguồn dữ liệu
 
 Git chạy qua dịch vụ `subprocess` của DSH (có dự phòng `child_process`), với timeout và giới hạn
@@ -138,6 +247,22 @@ kích thước đầu ra cho mỗi lệnh. Pull request và issue đọc qua **G
 phiên đăng nhập của bạn. Nếu `gh` không có hoặc chưa đăng nhập, plugin dùng REST API công khai của
 GitHub (60 lượt/giờ khi không có token; đặt token ở `GITHUB_TOKEN`, `GH_TOKEN` hoặc credential
 `DSH_GITHUB_TOKEN` để tăng hạn mức). Với GitLab, plugin gọi `glab` nếu có.
+
+### Cầu nối với Host (lưu ý khi nâng cấp DSH)
+
+Giao diện gọi Host qua **route Fetch chính xác** dưới kênh dùng chung của Connection:
+`POST /api/personal-hub-git/<thao-tác>` cho 19 thao tác (`overview`, `diff`, `commits`, `commit`,
+`branches`, `forge`, `pulls`, `pull`, `branchPull`, `issues`, `issue`, `createPull`,
+`worktreeState`, `worktreeCreate`, `worktreeRemove`, `mergeSettings`, `mergeSettingsSet`,
+`cleanupState`, `cleanupRun`), đăng ký
+bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin và bước xác thực Peer của
+Connection, nên chỉ trang loopback đã đăng nhập mới đọc được kho mã trên máy này.
+
+Không dùng `connection.rpc.handle()` nữa: trên DSH 0.2.2-rc.1, hàm đăng ký đó đọc `ctx.webServer`
+trong context của chính plugin Connection — context này không `inject` `webServer` — nên mọi lần
+đăng ký kênh đều ném `cannot get property "webServer" without inject`; bảng Git khi đó báo
+`connection/failed` kèm `HTTP 405` dù Host đã nạp. Nếu DSH sửa lỗi này ở bản sau, có thể quay lại
+kênh RPC riêng, nhưng route Fetch vẫn hợp lệ và ổn định.
 
 ```yaml
 git:
@@ -147,6 +272,7 @@ git:
   cliPath: ''            # đường dẫn gh/glab; rỗng = tự chọn theo máy chủ
   tokenEnv: GITHUB_TOKEN
   commandTimeoutMs: 15000
+  worktreeTimeoutMs: 180000   # thời gian cho git fetch / git worktree
   maxDiffBytes: 393216   # bytes diff giữ cho mỗi tệp
   maxUntrackedBytes: 131072
   maxUntrackedFiles: 60
@@ -155,7 +281,47 @@ git:
   issueLimit: 20
   cacheMs: 20000         # thời gian dùng lại câu trả lời của máy chủ mã nguồn
   refreshMs: 30000       # nhịp làm mới gợi ý cho bảng
+
+  pull:                  # tạo pull request bằng AI
+    enabled: true
+    base: ''             # nhánh nền mặc định; rỗng = nhánh mặc định của kho
+    provider: ''         # ghim route; rỗng = model hiện tại của phiên
+    model: ''
+    push: true           # đẩy nhánh trước khi tạo PR
+    timeoutMs: 90000
+    maxOutputTokens: 4096
+    contextBytes: 60000  # bytes diff đưa vào prompt
+    commitLimit: 40
+
+  worktree:              # worktree cho phiên mới
+    enabled: true
+    directory: .agents/worktrees
+    namePrefix: dsh
+    base: ''             # nhánh bắt đầu; rỗng = nhánh mặc định của kho
+    naming: id           # id | semantic (đổi nhánh theo tin nhắn đầu)
+    nameInstructions: '' # dặn thêm cho model đặt tên nhánh
+    source: local        # local | remote  (lựa chọn ban đầu trên giao diện)
+    remote: ''           # remote dùng cho nguồn remote; rỗng = remote của bảng, rồi origin
+    cleanup:             # dọn checkout không dùng (mặc định tắt)
+      enabled: false
+      checkMs: 3600000
+      inactiveDays: 7
+      whenNoCommits: true
+      noCommitsAfterHours: 6
+      keepChanges: tracked   # tracked | any | none
+      deleteBranch: false
+
+  merged:                # dọn dẹp sau khi PR của phiên được gộp
+    enabled: false
+    removeWorktree: true
+    deleteBranch: false
+    archiveSession: true
+    checkMs: 60000
 ```
+
+Các mục `pull`, `worktree`, `merged` có thể đổi ngay trong giao diện: trang **Plugins** → thẻ cấu
+hình của hàng `personal-hub` → phần **Worktree và pull request đã gộp** → **Lưu**. Thao tác này ghi
+vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn sau khi khởi động lại DSH.
 
 ## 7. Tệp dữ liệu
 
@@ -165,6 +331,16 @@ git:
 - `state.json` — `offset` của getUpdates, chat đã ghép nối, phiên đang gắn.
 - `status.json` — trạng thái chạy: `waiting-token`, `polling`, `invalid-token`, `error`, `stopped`,
   bot đã kết nối, lỗi gần nhất. Đây là nơi kiểm tra khi bot im lặng.
+
+`%USERPROFILE%\.dsh\personal-hub\git.json` giữ trạng thái của bảng Git:
+
+- `worktrees` — worktree plugin đã tạo cho từng phiên: `path`, `name` (tên thư mục), `branch`
+  (đổi được khi bật `naming: semantic`), `base`, `source`, `repositoryRoot`, `createdAt`, và
+  `namedAt`/`namingError` khi có đổi tên;
+- `pulls` — pull request đang theo dõi của từng phiên: `number`, `url`, `state`, `done`, cùng kết
+  quả dọn dẹp (`worktreeRemoved`, `archived`, `worktreeError`);
+- `cleanup` — kết quả lượt dọn worktree gần nhất: `at`, `removed`, `kept` (kèm lý do);
+- `probe` — lần cuối giao diện New Session hỏi trạng thái worktree (dùng để kiểm tra bridge).
 
 ## 8. Thêm tính năng mới
 
@@ -179,8 +355,10 @@ node --test
 ```
 
 Bộ test dùng một `fetch` giả lập Telegram và một `sessionController` giả, nên chạy được khi
-không có token thật. Test của bảng Git tạo một kho mã tạm thật (cần `git` trên máy) và gọi thẳng
-kênh RPC của Host, nên không cần DSH đang chạy.
+không có token thật. Test của bảng Git tạo một kho mã tạm thật (cần `git` trên máy), mount Host
+trên một Connection giả rồi gọi thẳng 19 route `/api/personal-hub-git/<thao-tác>`, nên không cần
+DSH đang chạy. Test worktree tạo một remote `--bare` cục bộ nên kiểm được cả nhánh local, nhánh
+remote sau `fetch`, và trường hợp worktree còn thay đổi chưa commit.
 
 ## Giới hạn hiện tại
 
@@ -189,7 +367,14 @@ kênh RPC của Host, nên không cần DSH đang chạy.
 - Phê duyệt và câu hỏi của DSH chỉ được báo về chat, chưa trả lời được từ Telegram.
 - Chưa có API xoá phiên: chỉ lưu trữ/khôi phục, không xoá tệp phiên.
 - Phiên đang chạy phải dừng (`/cancel`) trước khi lưu trữ.
-- Bảng Git là **chỉ đọc**: chưa stage/unstage, commit, checkout hay tạo PR từ bảng.
+- Bảng Git chỉ đọc với thay đổi và commit: chưa stage/unstage, commit hay checkout. Thao tác ghi duy
+  nhất là tạo pull request, tạo/xoá worktree, và đổi thiết lập dọn dẹp.
+- Worktree được tạo **ngay khi bấm Tạo**, trước tin nhắn đầu tiên, nên phiên chưa mở hoặc kho mã là
+  worktree liên kết sẽ bị từ chối thay vì chờ. Worktree đã tạo không tự xoá khi bạn đổi ý: dùng nút ✕.
+- Tạo pull request cần đẩy được nhánh lên remote và `gh`/`glab` đã đăng nhập (GitHub không có CLI
+  vẫn tạo được bằng REST nếu có token, nhưng không đọc được chi tiết kiểm tra).
+- Dọn dẹp sau khi gộp chỉ chạy khi PR đó đã được plugin nhìn thấy (do chính nó tạo, hoặc đọc được ở
+  chip PR của nhánh lúc bảng làm mới) và khi `git.merged.enabled` bật.
 - Diff dừng sau 4000 dòng và bị cắt theo `maxDiffBytes` để giao diện giữ được nhịp.
 - PR/issue cần remote GitHub/GitLab và `gh` (hoặc `glab`); thiếu CLI thì GitHub vẫn đọc được bằng
   REST công khai nhưng **không có chi tiết kiểm tra** và hạn mức thấp.

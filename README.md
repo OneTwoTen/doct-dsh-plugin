@@ -6,6 +6,11 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
   phiên, câu trả lời được gửi ngược về chat.
 - **Git** — bảng Git ở thanh bên phải: thay đổi cục bộ kèm diff từng tệp, lịch sử commit,
   pull request với trạng thái kiểm tra/đánh giá, và issue.
+- **Pull request bằng AI** — nút trong tab Pull request: đẩy nhánh, để model hiện tại của phiên
+  (effort thấp nhất) viết tiêu đề/mô tả, rồi mở PR.
+- **Worktree cho phiên mới** — chọn ở màn hình New Session: worktree riêng, bắt đầu từ nhánh local
+  hoặc nhánh remote đã fetch.
+- **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
 
 ## Cấu trúc
 

@@ -10,8 +10,8 @@ window.__ModuleLoader__.load({
     const TOKEN_REF = 'DSH_TELEGRAM_BOT_TOKEN'
     /** The `plugins.row.config` key: bundle package name and row id. */
     const ROW_KEY = '@local/personal-hub#personal-hub'
-    /** Connection channel the Host feature mounts. */
-    const GIT_CHANNEL = '/personal-hub-git'
+    /** Host route prefix the panel posts to, relative to the page. */
+    const GIT_PATH = 'api/personal-hub-git'
     /** This plugin's tab-type identity in the right Sidebar. */
     const GIT_ID = '@local/personal-hub/git'
     /** The tab kind the guide and the header button open. */
@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
     const MAX_DIFF_LINES = 4000
 
     const en = {
+      cardTitle: 'Personal hub',
       title: 'Telegram remote control',
       summary: 'Send messages to a Telegram bot and they become prompts in a bound DSH session.',
       stateOn: 'Token configured',
@@ -116,9 +117,69 @@ window.__ModuleLoader__.load({
       gitChecksFailure: '{count} failed',
       gitChecksPending: '{count} running',
       gitChecksSuccess: '{count} passed',
+
+      gitPrAction: 'Create pull request',
+      gitPrConfirm: 'Create a pull request from {branch} into {base}?',
+      gitPrConfirmHint: 'The branch is pushed, then this chat’s model drafts the title and description before the request opens.',
+      gitPrCreate: 'Create',
+      gitPrCancel: 'Cancel',
+      gitPrBusy: 'Drafting the pull request…',
+      gitPrCreated: 'Pull request #{number} created',
+      gitPrOpen: 'Open on the web',
+      gitPrFailed: 'Could not create the pull request',
+      gitPrBase: 'Base branch',
+      gitPrNoForge: 'Pull requests need a signed-in code host CLI',
+      gitPrNoBranch: 'This checkout has no named branch',
+
+      wtOption: 'New worktree',
+      wtSource: 'Start from',
+      wtLocal: 'Local branch',
+      wtRemote: 'Remote branch',
+      wtBase: 'Base branch',
+      wtBusy: 'Creating the worktree…',
+      wtCreated: 'This chat now works in {branch}',
+      wtRemove: 'Remove worktree',
+      wtRemoved: 'Worktree removed; the chat is back in the project',
+      wtFailed: 'Could not create the worktree',
+      wtNoBase: 'No branch to start from yet',
+      wtHint: 'The checkout lives under the repository and starts from the branch you pick.',
+
+      gitSettingsTitle: 'Worktrees and merged pull requests',
+      gitSettingsSummary: 'Clean up after a chat’s pull request merges',
+      gitSettingsMerged: 'When the pull request of a chat is merged',
+      gitSettingsRemove: 'Delete the worktree',
+      gitSettingsDeleteBranch: 'Delete its branch too',
+      gitSettingsArchive: 'Hide the chat from the list',
+      gitSettingsSave: 'Save',
+      gitSettingsSaving: 'Saving…',
+      gitSettingsSaved: 'Saved. The panel reloads with the new setting.',
+      gitSettingsReadOnly: 'This deployment does not allow configuration edits.',
+      gitSettingsOff: 'Off',
+      gitSettingsFailed: 'Could not save the setting',
+      gitSettingsError: 'Could not read the setting',
+
+      gitNewChat: 'New chat in this worktree',
+      gitNewChatCreated: 'A new chat now works in {branch}',
+      gitNewChatHint: 'Open it from the sidebar; this chat keeps its own checkout.',
+      gitNewChatFailed: 'Could not start a chat in the worktree',
+
+      cleanupTitle: 'Worktree cleanup',
+      cleanupEnabled: 'Remove checkouts nobody uses',
+      cleanupInactiveDays: 'idle days before removal (0 turns this rule off)',
+      cleanupNoCommits: 'Remove when the branch has no commit over its base',
+      cleanupKeep: 'Keep a checkout with',
+      cleanupKeepTracked: 'Uncommitted tracked edits',
+      cleanupKeepAny: 'Any local file',
+      cleanupKeepNone: 'Nothing — remove anyway',
+      cleanupRun: 'Clean up now',
+      cleanupRunning: 'Cleaning…',
+      cleanupLast: 'Last pass: {removed} removed, {kept} kept',
+      cleanupNever: 'No cleanup pass has run yet.',
+      cleanupOff: 'Cleanup is off.',
     }
 
     const vi = {
+      cardTitle: 'Trung tâm cá nhân',
       title: 'Điều khiển DSH qua Telegram',
       summary: 'Nhắn tin cho bot Telegram, tin nhắn trở thành prompt trong phiên DSH đã gắn.',
       stateOn: 'Đã có token',
@@ -215,6 +276,65 @@ window.__ModuleLoader__.load({
       gitChecksFailure: '{count} lỗi',
       gitChecksPending: '{count} đang chạy',
       gitChecksSuccess: '{count} đạt',
+
+      gitPrAction: 'Tạo pull request',
+      gitPrConfirm: 'Tạo pull request từ {branch} vào {base}?',
+      gitPrConfirmHint: 'Nhánh được đẩy lên trước, sau đó model của phiên này viết tiêu đề và mô tả rồi pull request mới được mở.',
+      gitPrCreate: 'Tạo',
+      gitPrCancel: 'Huỷ',
+      gitPrBusy: 'Đang soạn pull request…',
+      gitPrCreated: 'Đã tạo pull request #{number}',
+      gitPrOpen: 'Mở trên web',
+      gitPrFailed: 'Không tạo được pull request',
+      gitPrBase: 'Nhánh nền',
+      gitPrNoForge: 'Cần CLI của máy chủ mã nguồn đã đăng nhập để tạo pull request',
+      gitPrNoBranch: 'Bản checkout này không ở trên nhánh nào',
+
+      wtOption: 'Worktree mới',
+      wtSource: 'Bắt đầu từ',
+      wtLocal: 'Nhánh local',
+      wtRemote: 'Nhánh remote',
+      wtBase: 'Nhánh nền',
+      wtBusy: 'Đang tạo worktree…',
+      wtCreated: 'Phiên này giờ làm việc trong {branch}',
+      wtRemove: 'Xoá worktree',
+      wtRemoved: 'Đã xoá worktree; phiên quay lại thư mục dự án',
+      wtFailed: 'Không tạo được worktree',
+      wtNoBase: 'Chưa có nhánh nào để bắt đầu',
+      wtHint: 'Checkout nằm trong kho mã và bắt đầu từ nhánh bạn chọn.',
+
+      gitSettingsTitle: 'Worktree và pull request đã gộp',
+      gitSettingsSummary: 'Dọn dẹp sau khi pull request của phiên được gộp',
+      gitSettingsMerged: 'Khi pull request của một phiên được gộp',
+      gitSettingsRemove: 'Xoá worktree',
+      gitSettingsDeleteBranch: 'Xoá luôn nhánh',
+      gitSettingsArchive: 'Ẩn phiên khỏi danh sách',
+      gitSettingsSave: 'Lưu',
+      gitSettingsSaving: 'Đang lưu…',
+      gitSettingsSaved: 'Đã lưu. Bảng sẽ nạp lại với thiết lập mới.',
+      gitSettingsReadOnly: 'Bản cài này không cho sửa cấu hình từ giao diện.',
+      gitSettingsOff: 'Tắt',
+      gitSettingsFailed: 'Không lưu được thiết lập',
+      gitSettingsError: 'Không đọc được thiết lập',
+
+      gitNewChat: 'Chat mới trong worktree này',
+      gitNewChatCreated: 'Đã tạo chat mới làm việc trong {branch}',
+      gitNewChatHint: 'Mở chat đó ở thanh bên; chat này giữ checkout riêng của nó.',
+      gitNewChatFailed: 'Không tạo được chat trong worktree',
+
+      cleanupTitle: 'Dọn worktree',
+      cleanupEnabled: 'Xoá checkout không ai dùng',
+      cleanupInactiveDays: 'ngày không hoạt động trước khi xoá (0 = tắt quy tắc này)',
+      cleanupNoCommits: 'Xoá khi nhánh chưa có commit nào mới so với nhánh nền',
+      cleanupKeep: 'Giữ checkout khi còn',
+      cleanupKeepTracked: 'Thay đổi chưa commit của tệp được theo dõi',
+      cleanupKeepAny: 'Bất kỳ tệp cục bộ nào',
+      cleanupKeepNone: 'Không giữ gì — vẫn xoá',
+      cleanupRun: 'Dọn ngay',
+      cleanupRunning: 'Đang dọn…',
+      cleanupLast: 'Lần gần nhất: xoá {removed}, giữ {kept}',
+      cleanupNever: 'Chưa lần dọn nào chạy.',
+      cleanupOff: 'Dọn worktree đang tắt.',
     }
 
     const style = {
@@ -374,6 +494,34 @@ window.__ModuleLoader__.load({
 .ph-comment-author{color:var(--dsw-alias-label-primary);font-weight:500}
 .ph-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .ph-split{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ph-wrap{position:relative;display:inline-flex;align-items:center}
+.ph-option{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
+.ph-option:hover:enabled{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.ph-option[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
+.ph-option:disabled{cursor:default;opacity:.6}
+.ph-pop{position:absolute;right:0;bottom:calc(100% + 6px);z-index:40;display:flex;flex-direction:column;gap:8px;width:268px;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);box-shadow:0 10px 28px rgba(0,0,0,.22);font-size:12px}
+.ph-pop-title{font-size:12px;font-weight:600}
+.ph-pop-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.45}
+.ph-seg{display:inline-flex;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;overflow:hidden}
+.ph-seg button{padding:3px 9px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;cursor:pointer}
+.ph-seg button[aria-pressed=true]{background:var(--dsw-alias-brand-primary);color:#fff}
+.ph-select{width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
+.ph-pop-row{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.ph-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none}
+.ph-toolbar .ph-spacer{flex:1 1 auto}
+.ph-confirm{display:flex;flex-direction:column;gap:8px;margin:8px 12px;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.ph-confirm-text{font-size:12.5px}
+.ph-confirm-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:1.45}
+.ph-setting{display:flex;flex-direction:column;gap:8px;padding:10px 0}
+.ph-setting-head{font-size:12.5px;font-weight:500}
+.ph-check-row{display:flex;align-items:center;gap:8px;font-size:12px}
+.ph-check-row input{flex:none;margin:0}
+.ph-check-row input:disabled+span{opacity:.6}
+.ph-primary{padding:3px 10px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;font:inherit;font-size:11.5px;cursor:pointer}
+.ph-primary:disabled{opacity:.6;cursor:default}
+.ph-field{display:flex;flex-direction:column;gap:4px}
+.ph-field-label{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.ph-ok{margin:0;color:var(--dsw-alias-state-success-primary);font-size:12px}
 `
 
     /** Tiny stroke icons, drawn with `currentColor` so they follow the theme. */
@@ -617,16 +765,35 @@ window.__ModuleLoader__.load({
     /* Git panel                                                          */
     /* ------------------------------------------------------------------ */
 
-    /** One caller for the Host channel, folding every failure into a thrown error. */
-    function createGitCaller(connection) {
+    /**
+     * One caller for the Host routes, folding every failure into a thrown error.
+     *
+     * The request rides the Connection shared channel, so the browser's session
+     * cookie is the only credential it needs; a page that cannot reach the Host
+     * half sees a transport failure and the panel says so.
+     */
+    function createGitCaller() {
       return async function call(endpoint, payload) {
-        let result
+        let response
         try {
-          result = await connection.rpc.call(GIT_CHANNEL, endpoint, payload)
+          response = await fetch(`${GIT_PATH}/${endpoint}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload ?? {}),
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
         } catch (error) {
           throw failureOf('connection/failed', messageOf(error))
         }
-        if (result === undefined || result === null) throw failureOf('connection/empty', 'The Host sent no answer')
+        if (!response.ok) throw failureOf('connection/failed', `transport failure for ${endpoint}: HTTP ${response.status}`)
+        let result
+        try {
+          result = await response.json()
+        } catch {
+          throw failureOf('connection/empty', 'The Host sent no answer')
+        }
+        if (result === null || typeof result !== 'object') throw failureOf('connection/empty', 'The Host sent no answer')
         if (result.ok !== true) {
           const detail = result.error ?? {}
           throw failureOf(detail.code ?? 'system/failed', detail.message ?? 'Git request failed')
@@ -793,7 +960,15 @@ window.__ModuleLoader__.load({
             'data-tone': pull.state === 'merged' ? 'business' : pull.state === 'closed' ? 'error' : pull.state === 'draft' ? undefined : 'success',
             title: pull.title,
             onClick: () => props.onOpenPull(pull.number),
-          }, h('span', { className: 'ph-dot', 'data-state': pull.state }), `#${pull.number}`, stateLabel(t, pull.state))))
+          }, h('span', { className: 'ph-dot', 'data-state': pull.state }), `#${pull.number}`, stateLabel(t, pull.state)),
+          overview?.worktree === null || overview?.worktree === undefined || typeof props.onNewChat !== 'function'
+            ? null
+            : h('button', {
+                type: 'button',
+                className: 'ph-option',
+                title: t('gitNewChatHint'),
+                onClick: () => props.onNewChat(overview.worktree),
+              }, h(Icon, { name: 'branch', size: 11 }), t('gitNewChat'))))
     }
 
     /** The four views' tab strip. */
@@ -1022,9 +1197,9 @@ window.__ModuleLoader__.load({
           h('span', null, relativeTime(pull.updatedAt))))
     }
 
-    /** The change-request list. */
+    /** The change-request list, with the create action above it. */
     function PullsView(props) {
-      const { t, call, sessionId, cwd, refreshKey, filter, onFilter, onSelect, forgeState } = props
+      const { t, call, sessionId, cwd, refreshKey, filter, onFilter, onSelect, forgeState, overview } = props
       const state = useLoader(() => call('pulls', { sessionId, cwd: cwd || undefined, state: filter, limit: 30 }), [sessionId, cwd, filter, refreshKey])
       const value = state.value
       if (state.status === 'error') return h(Failure, { error: state.error, title: t('gitReadError'), retryLabel: t('gitRetry'), onRetry: () => props.reload() })
@@ -1035,6 +1210,7 @@ window.__ModuleLoader__.load({
       }
       const pulls = value.pulls ?? []
       return h('div', null,
+        h(CreatePullBar, { t, call, sessionId, cwd, overview, onCreated: () => props.reload() }),
         h(Filters, {
           value: filter,
           onChange: onFilter,
@@ -1218,6 +1394,566 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The New Session worktree row: one toggle, the branch it starts from, and
+     * where that branch is read from.
+     *
+     * Pure presentation, so the Host answer and the choices it offers can be
+     * rendered and checked without a browser.
+     */
+    function WorktreeOption(props) {
+      const { t, info, source, base, busy, error, notice } = props
+      const current = info?.current ?? null
+      const bases = source === 'remote' ? info?.bases?.remote ?? [] : info?.bases?.local ?? []
+      const options = bases.map((item) => ({
+        value: source === 'remote' ? item.branch : item.name,
+        label: item.name,
+      }))
+      if (base.length > 0 && !options.some((option) => option.value === base)) {
+        options.unshift({ value: base, label: base })
+      }
+      return h('span', { className: 'ph-wrap', 'data-personal-hub-worktree': true },
+        current === null
+          ? h('button', {
+              type: 'button',
+              className: 'ph-option',
+              'aria-pressed': busy ? 'true' : 'false',
+              title: t('wtHint'),
+              disabled: busy || options.length === 0,
+              onClick: () => props.onEnable(),
+            }, h(Icon, { name: 'folder', size: 11 }), busy ? t('wtBusy') : t('wtOption'))
+          : h('span', { className: 'ph-chip ph-mono', title: String(current.path ?? '') },
+              h(Icon, { name: 'branch', size: 11 }),
+              h('span', { className: 'ph-ellipsis' }, String(current.branch ?? '')),
+              h('button', {
+                type: 'button',
+                className: 'ph-option',
+                style: { padding: '0 6px', border: '0', background: 'transparent', color: 'inherit' },
+                title: t('wtRemove'),
+                'aria-label': t('wtRemove'),
+                disabled: busy,
+                onClick: () => props.onRemove(),
+              }, h(Icon, { name: 'cross', size: 10 }))),
+        h('select', {
+          className: 'ph-select',
+          style: { width: 'auto', maxWidth: '168px' },
+          value: base,
+          disabled: busy || options.length === 0,
+          'aria-label': t('wtBase'),
+          title: t('wtBase'),
+          onChange: (event) => props.onBase(event.target.value),
+        }, options.length === 0
+          ? h('option', { value: '' }, t('wtNoBase'))
+          : options.map((option) => h('option', { key: option.value, value: option.value }, option.label))),
+        current === null
+          ? h('div', { className: 'ph-seg', role: 'group', 'aria-label': t('wtSource') },
+              ['local', 'remote'].map((kind) => h('button', {
+                key: kind,
+                type: 'button',
+                'aria-pressed': source === kind ? 'true' : 'false',
+                disabled: busy,
+                onClick: () => props.onSource(kind),
+              }, kind === 'remote' ? t('wtRemote') : t('wtLocal'))))
+          : null,
+        error.length > 0 ? h('span', { className: 'ph-error ph-tiny' }, error) : null,
+        current !== null && notice.length > 0 ? h('span', { className: 'ph-ok ph-tiny' }, notice) : null)
+    }
+
+    /**
+     * The worktree option in the New Session row.
+     *
+     * Turning the toggle on creates the checkout at once, because DSH assembles
+     * a step's prompt before any hook this plugin may await, so a checkout
+     * created "at send" would leave the model's first step describing the old
+     * directory. Changing the branch or its source recreates the checkout,
+     * which is safe because the Session has not started a turn yet.
+     */
+    function WorktreeHero(props) {
+      const t = props.t
+      const call = props.call
+      const sessionId = typeof props.sessionId === 'string'
+        ? props.sessionId
+        : typeof props.session?.id === 'string'
+          ? props.session.id
+          : ''
+      const useSessions = props.useSessions
+      const cwd = typeof useSessions === 'function'
+        ? useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? '')
+        : ''
+
+      const [info, setInfo] = React.useState(undefined)
+      const [source, setSource] = React.useState('local')
+      const [base, setBase] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState('')
+      const [notice, setNotice] = React.useState('')
+
+      React.useEffect(() => {
+        if (sessionId.length === 0) return undefined
+        let alive = true
+        call('worktreeState', { sessionId, cwd: cwd || undefined, probe: true })
+          .then((value) => {
+            if (!alive) return
+            setInfo(value)
+            setSource(value?.sourceDefault === 'remote' ? 'remote' : 'local')
+            setBase(value?.bases?.defaultBase ?? '')
+          })
+          .catch(() => {
+            if (alive) setInfo({ supported: false, current: null })
+          })
+        return () => {
+          alive = false
+        }
+      }, [call, sessionId, cwd])
+
+      const create = React.useCallback(async (nextBase, nextSource) => {
+        setBusy(true)
+        setError('')
+        setNotice('')
+        try {
+          if ((info?.current ?? null) !== null) {
+            await call('worktreeRemove', { sessionId, deleteBranch: true })
+            setInfo((previous) => ({ ...(previous ?? {}), current: null }))
+          }
+          const answer = await call('worktreeCreate', {
+            sessionId,
+            cwd: cwd || undefined,
+            base: nextBase,
+            source: nextSource,
+          })
+          setBase(nextBase)
+          setSource(nextSource)
+          setInfo((previous) => ({ ...(previous ?? {}), current: answer.worktree }))
+          setNotice(t('wtCreated', { branch: String(answer.worktree?.branch ?? '') }))
+        } catch (failure) {
+          setError(`${t('wtFailed')}: ${messageOf(failure)}`)
+        } finally {
+          setBusy(false)
+        }
+      }, [call, sessionId, cwd, info, t])
+
+      const remove = React.useCallback(async () => {
+        setBusy(true)
+        setError('')
+        setNotice('')
+        try {
+          await call('worktreeRemove', { sessionId, deleteBranch: false })
+          setInfo((previous) => ({ ...(previous ?? {}), current: null }))
+          setNotice(t('wtRemoved'))
+        } catch (failure) {
+          setError(`${t('wtFailed')}: ${messageOf(failure)}`)
+        } finally {
+          setBusy(false)
+        }
+      }, [call, sessionId, t])
+
+      if (sessionId.length === 0 || info === undefined) return null
+      const current = info.current ?? null
+
+      return h(WorktreeOption, {
+        t,
+        info,
+        source,
+        base,
+        busy,
+        error,
+        notice,
+        onEnable: () => create(base, source),
+        onRemove: remove,
+        onBase: (value) => {
+          setBase(value)
+          if (current !== null) void create(value, source)
+        },
+        onSource: (kind) => {
+          const list = kind === 'remote' ? info?.bases?.remote ?? [] : info?.bases?.local ?? []
+          const preferred = info?.bases?.defaultBase ?? ''
+          const next = list.some((item) => (kind === 'remote' ? item.branch : item.name) === preferred)
+            ? preferred
+            : (list[0] === undefined ? '' : (kind === 'remote' ? list[0].branch : list[0].name))
+          setSource(kind)
+          setBase(next)
+          if (current !== null) void create(next, kind)
+        },
+      })
+    }
+
+    /**
+     * The confirmation a pull-request creation shows before anything is
+     * pushed, with the base branch the request targets.
+     */
+    function PullConfirm(props) {
+      const { t, branch, base, busy, error, notice, url, number } = props
+      const created = notice.length > 0 && typeof number === 'number'
+      return h('div', { className: 'ph-confirm', 'data-personal-hub-pull': true },
+        h('div', { className: 'ph-confirm-text' },
+          created ? notice : t('gitPrConfirm', { branch, base })),
+        created ? null : h('p', { className: 'ph-confirm-hint' }, t('gitPrConfirmHint')),
+        error.length > 0 ? h('p', { className: 'ph-error' }, error) : null,
+        h('div', { className: 'ph-pop-row' },
+          busy ? h('span', { className: 'ph-dim ph-tiny' }, t('gitPrBusy')) : null,
+          busy ? null : h('button', { type: 'button', className: 'ph-button', onClick: props.onCancel }, t('gitPrCancel')),
+          busy || created ? null : h('button', {
+            type: 'button',
+            className: 'ph-primary',
+            disabled: base.length === 0,
+            onClick: props.onConfirm,
+          }, t('gitPrCreate'))),
+        created && url.length > 0
+          ? h('a', {
+              className: 'ph-button',
+              href: url,
+              target: '_blank',
+              rel: 'noreferrer noopener',
+              style: { alignSelf: 'flex-start', textDecoration: 'none' },
+            }, h(Icon, { name: 'external', size: 12 }), t('gitPrOpen'))
+          : null)
+    }
+
+    /**
+     * The pull-request action: one click opens the confirmation, the next
+     * pushes the branch, drafts the request with this chat's model, and opens
+     * it on the code host.
+     */
+    function CreatePullBar(props) {
+      const { t, call, sessionId, cwd, overview } = props
+      const [open, setOpen] = React.useState(false)
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState('')
+      const [created, setCreated] = React.useState(null)
+      const [bases, setBases] = React.useState(undefined)
+      const [base, setBase] = React.useState('')
+
+      const branch = overview?.repo?.branch ?? ''
+      const forge = overview?.forge
+      const available = forge?.available === true
+      const enabled = available && branch.length > 0
+
+      React.useEffect(() => {
+        if (!open) return undefined
+        let alive = true
+        call('worktreeState', { sessionId, cwd: cwd || undefined })
+          .then((value) => {
+            if (!alive) return
+            setBases(value?.bases ?? null)
+            setBase((current) => (current.length > 0 ? current : value?.bases?.defaultBase ?? ''))
+          })
+          .catch(() => {
+            if (alive) setBases(null)
+          })
+        return () => {
+          alive = false
+        }
+      }, [open, call, sessionId, cwd])
+
+      const submit = React.useCallback(async () => {
+        setBusy(true)
+        setError('')
+        try {
+          const answer = await call('createPull', {
+            sessionId,
+            cwd: cwd || undefined,
+            base,
+            locale: typeof navigator === 'undefined' ? '' : navigator.language,
+          })
+          setCreated(answer)
+          if (typeof props.onCreated === 'function') props.onCreated()
+        } catch (failure) {
+          setError(`${t('gitPrFailed')}: ${messageOf(failure)}`)
+        } finally {
+          setBusy(false)
+        }
+      }, [call, sessionId, cwd, base, t, props])
+
+      const options = [
+        ...(bases?.local ?? []).map((item) => ({ value: item.name, label: item.name })),
+      ]
+      if (base.length > 0 && !options.some((item) => item.value === base)) {
+        options.unshift({ value: base, label: base })
+      }
+
+      return h('div', null,
+        h('div', { className: 'ph-toolbar' },
+          h('button', {
+            type: 'button',
+            className: 'ph-button',
+            disabled: !enabled,
+            title: available ? undefined : t('gitPrNoForge'),
+            onClick: () => {
+              setOpen((value) => !value)
+              setError('')
+              setCreated(null)
+            },
+          }, h(Icon, { name: 'merge', size: 12 }), t('gitPrAction')),
+          options.length === 0 || !open
+            ? null
+            : h('select', {
+                className: 'ph-select',
+                style: { width: 'auto', maxWidth: '180px' },
+                value: base,
+                disabled: busy,
+                'aria-label': t('gitPrBase'),
+                onChange: (event) => setBase(event.target.value),
+              }, options.map((item) => h('option', { key: item.value, value: item.value }, item.label))),
+          h('span', { className: 'ph-spacer' }),
+          branch.length === 0 ? h('span', { className: 'ph-dim ph-tiny' }, t('gitPrNoBranch')) : null),
+        open
+          ? h(PullConfirm, {
+              t,
+              branch: branch.length > 0 ? branch : 'HEAD',
+              base,
+              busy,
+              error,
+              notice: created === null ? '' : t('gitPrCreated', { number: String(created.pull?.number ?? '?') }),
+              number: created?.pull?.number,
+              url: created?.pull?.url ?? '',
+              onConfirm: submit,
+              onCancel: () => {
+                setOpen(false)
+                setError('')
+                setCreated(null)
+              },
+            })
+          : null)
+    }
+
+    /**
+     * The cleanup rules inside the settings card: when a checkout nobody uses
+     * is removed, and what protects one that still holds work.
+     */
+    function CleanupSection(props) {
+      const { t, cleanup, last, writable, running, onChange, onRun } = props
+      const settings = cleanup ?? {}
+      const disabled = writable !== true || running === true
+      return h('div', { className: 'ph-setting' },
+        h('div', { className: 'ph-setting-head' }, t('cleanupTitle')),
+        h('label', { className: 'ph-check-row' },
+          h('input', {
+            type: 'checkbox',
+            checked: settings.enabled === true,
+            disabled: disabled,
+            onChange: (event) => onChange({ enabled: event.target.checked }),
+          }),
+          h('span', null, t('cleanupEnabled'))),
+        h('label', { className: 'ph-check-row' },
+          h('input', {
+            type: 'number',
+            min: 0,
+            max: 3650,
+            value: Number(settings.inactiveDays) || 0,
+            disabled: disabled || settings.enabled !== true,
+            style: { width: '64px' },
+            onChange: (event) => onChange({ inactiveDays: Number(event.target.value) || 0 }),
+          }),
+          h('span', null, t('cleanupInactiveDays'))),
+        h('label', { className: 'ph-check-row' },
+          h('input', {
+            type: 'checkbox',
+            checked: settings.whenNoCommits === true,
+            disabled: disabled || settings.enabled !== true,
+            onChange: (event) => onChange({ whenNoCommits: event.target.checked }),
+          }),
+          h('span', null, t('cleanupNoCommits'))),
+        h('label', { className: 'ph-field' },
+          h('span', { className: 'ph-field-label' }, t('cleanupKeep')),
+          h('select', {
+            className: 'ph-select',
+            value: settings.keepChanges ?? 'tracked',
+            disabled: disabled || settings.enabled !== true,
+            onChange: (event) => onChange({ keepChanges: event.target.value }),
+          },
+          h('option', { value: 'tracked' }, t('cleanupKeepTracked')),
+          h('option', { value: 'any' }, t('cleanupKeepAny')),
+          h('option', { value: 'none' }, t('cleanupKeepNone')))),
+        h('div', { style: style.actions },
+          h('button', {
+            type: 'button',
+            style: style.button,
+            disabled: disabled || settings.enabled !== true,
+            onClick: onRun,
+          }, running === true ? t('cleanupRunning') : t('cleanupRun'))),
+        h('p', { style: style.hint },
+          last === null || last === undefined
+            ? t('cleanupNever')
+            : t('cleanupLast', {
+              removed: (last.removed ?? []).length,
+              kept: (last.kept ?? []).length,
+            })),
+        settings.enabled === true ? null : h('p', { style: style.hint }, t('cleanupOff')))
+    }
+
+    /**
+     * The merge setting form: three independent switches over one enabled one,
+     * then the worktree cleanup rules.
+     *
+     * Pure presentation, so the switches a saved setting produces can be
+     * checked without a browser.
+     */
+    function MergeSettingsForm(props) {
+      const { t, settings, status, error, notice, onChange, onSave, onRunCleanup, runningCleanup } = props
+      const writable = settings?.writable === true
+      const enabled = settings?.enabled === true
+      const busy = status === 'saving'
+      return h('div', { style: style.root, 'data-personal-hub-git-settings': true },
+        h('div', { className: 'ph-setting' },
+          h('div', { className: 'ph-setting-head' }, t('gitSettingsMerged')),
+          h('label', { className: 'ph-check-row' },
+            h('input', {
+              type: 'checkbox',
+              checked: enabled,
+              disabled: !writable || busy,
+              onChange: (event) => onChange({ enabled: event.target.checked }),
+            }),
+            h('span', null, enabled ? t('gitSettingsSave') : t('gitSettingsOff'))),
+          h('label', { className: 'ph-check-row' },
+            h('input', {
+              type: 'checkbox',
+              checked: settings?.removeWorktree === true,
+              disabled: !writable || !enabled || busy,
+              onChange: (event) => onChange({ removeWorktree: event.target.checked }),
+            }),
+            h('span', null, t('gitSettingsRemove'))),
+          h('label', { className: 'ph-check-row' },
+            h('input', {
+              type: 'checkbox',
+              checked: settings?.deleteBranch === true,
+              disabled: !writable || !enabled || settings?.removeWorktree !== true || busy,
+              onChange: (event) => onChange({ deleteBranch: event.target.checked }),
+            }),
+            h('span', null, t('gitSettingsDeleteBranch'))),
+          h('label', { className: 'ph-check-row' },
+            h('input', {
+              type: 'checkbox',
+              checked: settings?.archiveSession === true,
+              disabled: !writable || !enabled || busy,
+              onChange: (event) => onChange({ archiveSession: event.target.checked }),
+            }),
+            h('span', null, t('gitSettingsArchive')))),
+        h(CleanupSection, {
+          t,
+          cleanup: settings?.cleanup,
+          last: settings?.cleanupLast,
+          writable,
+          running: runningCleanup,
+          onChange: (patch) => onChange({ cleanup: patch }),
+          onRun: onRunCleanup,
+        }),
+        writable
+          ? h('div', { style: style.actions },
+              h('button', {
+                type: 'button',
+                style: style.primary,
+                disabled: busy,
+                onClick: onSave,
+              }, busy ? t('gitSettingsSaving') : t('gitSettingsSave')))
+          : h('p', { style: style.hint }, t('gitSettingsReadOnly')),
+        error.length > 0 ? h('p', { style: style.error }, error) : null,
+        notice.length > 0 ? h('p', { style: style.ok }, notice) : null,
+        h('p', { style: style.hint }, t('gitSettingsSummary')))
+    }
+
+    /**
+     * The plugin row's git card: what happens once a chat's pull request is
+     * merged, written into the profile's plugin configuration.
+     */
+    function MergeSettingsCard(props) {
+      const t = props.t
+      const call = props.call
+      const [settings, setSettings] = React.useState(undefined)
+      const [status, setStatus] = React.useState('loading')
+      const [runningCleanup, setRunningCleanup] = React.useState(false)
+      const [error, setError] = React.useState('')
+      const [notice, setNotice] = React.useState('')
+
+      React.useEffect(() => {
+        let alive = true
+        call('mergeSettings')
+          .then((value) => {
+            if (!alive) return
+            setSettings(value)
+            setStatus('ready')
+          })
+          .catch((failure) => {
+            if (!alive) return
+            setError(`${t('gitSettingsError')}: ${messageOf(failure)}`)
+            setStatus('error')
+          })
+        return () => {
+          alive = false
+        }
+      }, [call, t])
+
+      if (props.view === 'summary') return h('span', null, t('gitSettingsSummary'))
+
+      // A cleanup patch is a partial object, so it merges inside `cleanup`
+      // rather than replacing the whole section.
+      const update = (patch) => setSettings((current) => {
+        const base = current ?? {}
+        if (patch.cleanup === undefined) return { ...base, ...patch }
+        return { ...base, ...patch, cleanup: { ...(base.cleanup ?? {}), ...patch.cleanup } }
+      })
+
+      const save = async () => {
+        setStatus('saving')
+        setError('')
+        setNotice('')
+        try {
+          const value = await call('mergeSettingsSet', {
+            enabled: settings?.enabled === true,
+            removeWorktree: settings?.removeWorktree === true,
+            deleteBranch: settings?.deleteBranch === true,
+            archiveSession: settings?.archiveSession === true,
+            cleanup: settings?.cleanup ?? {},
+          })
+          setSettings((current) => ({
+            ...(current ?? {}),
+            ...(value?.merged ?? {}),
+            cleanup: value?.cleanup ?? current?.cleanup,
+          }))
+          setStatus('ready')
+          setNotice(t('gitSettingsSaved'))
+        } catch (failure) {
+          setStatus('ready')
+          setError(`${t('gitSettingsFailed')}: ${messageOf(failure)}`)
+        }
+      }
+
+      const runCleanup = async () => {
+        setRunningCleanup(true)
+        setError('')
+        setNotice('')
+        try {
+          const value = await call('cleanupRun', {})
+          const last = value?.last ?? null
+          setSettings((current) => ({ ...(current ?? {}), cleanupLast: last }))
+          if (value?.ran === false) {
+            setError(t('cleanupOff'))
+          } else if (last !== null) {
+            setNotice(t('cleanupLast', {
+              removed: (last.removed ?? []).length,
+              kept: (last.kept ?? []).length,
+            }))
+          }
+        } catch (failure) {
+          setError(`${t('gitSettingsFailed')}: ${messageOf(failure)}`)
+        } finally {
+          setRunningCleanup(false)
+        }
+      }
+
+      if (status === 'loading') return h('p', { style: style.hint }, t('gitLoading'))
+      return h(MergeSettingsForm, {
+        t,
+        settings,
+        status,
+        error,
+        notice,
+        onChange: update,
+        onSave: save,
+        onRunCleanup: runCleanup,
+        runningCleanup,
+      })
+    }
+
+    /**
      * The Git panel a right-sidebar tab renders.
      *
      * It owns the overview, the active view, and the open detail; each view
@@ -1309,6 +2045,22 @@ window.__ModuleLoader__.load({
         setView(next)
       }, [])
 
+      const [chatNotice, setChatNotice] = React.useState('')
+
+      /** Start a second chat that works in this Session's checkout. */
+      const startChat = React.useCallback(async (worktree) => {
+        setChatNotice('')
+        try {
+          if (typeof props.newChat !== 'function') {
+            throw failureOf('session/unavailable', 'This build cannot start a chat for the panel')
+          }
+          await props.newChat(String(worktree?.path ?? ''))
+          setChatNotice(t('gitNewChatCreated', { branch: String(worktree?.branch ?? '') }))
+        } catch (failure) {
+          setChatNotice(`${t('gitNewChatFailed')}: ${messageOf(failure)}`)
+        }
+      }, [props, t])
+
       if (status === 'loading' && overview === undefined) {
         return h('div', { className: 'ph-git' }, h(Loading, { label: t('gitLoadingLong') }))
       }
@@ -1339,7 +2091,7 @@ window.__ModuleLoader__.load({
       } else if (selection !== null && view === 'issues' && selection.type === 'issue') {
         body = h(IssuePane, { t, call, sessionId, cwd, selection, refreshKey: revision, onBack: back, reload })
       } else if (view === 'pulls') {
-        body = h(PullsView, { t, call, sessionId, cwd, refreshKey: revision, filter: pullFilter, onFilter: setPullFilter, onSelect: openDetail, forgeState, reload })
+        body = h(PullsView, { t, call, sessionId, cwd, refreshKey: revision, filter: pullFilter, onFilter: setPullFilter, onSelect: openDetail, forgeState, overview, reload })
       } else if (view === 'issues') {
         body = h(IssuesView, { t, call, sessionId, cwd, refreshKey: revision, filter: issueFilter, onFilter: setIssueFilter, onSelect: openDetail, forgeState, reload })
       } else if (view === 'commits') {
@@ -1351,13 +2103,14 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { className: 'ph-git', 'data-personal-hub-git': true },
-        h(GitHeader, { t, overview, refreshing, onRefresh: reload, onOpenPull: selectPull }),
+        h(GitHeader, { t, overview, refreshing, onRefresh: reload, onOpenPull: selectPull, onNewChat: startChat }),
         h(GitNav, { t, value: view, onChange: changeView, overview }),
         status === 'error' && overview !== undefined
           ? h('div', { className: 'ph-notice' },
               h('div', null, t('gitReadError')),
               h('div', { className: 'ph-tiny ph-dim' }, messageOf(error)))
           : null,
+        chatNotice.length > 0 ? h('div', { className: 'ph-notice' }, chatNotice) : null,
         h('div', { className: 'ph-body' }, body))
     }
 
@@ -1377,9 +2130,56 @@ window.__ModuleLoader__.load({
       }, h(Icon, { name: 'git', size: 15 }))
     }
 
+    /**
+     * The plugin row's configuration card: the Telegram binding, then the
+     * worktree and merge cleanup settings.
+     *
+     * Both sections share one registration because `plugins.row.config` keeps a
+     * single occupant per row key.
+     */
+    function PersonalHubCard(props) {
+      const t = props.t
+      if (props.view === 'summary') {
+        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+          h('span', null, t('summary')),
+          h('span', { style: style.hint }, t('gitSettingsSummary')))
+      }
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' }, 'data-personal-hub-card': true },
+        h(TelegramCard, props),
+        h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
+        h(MergeSettingsCard, { t, call: props.call }))
+    }
+
+    /**
+     * Register one slot entry, turning a rejected registration into a warning.
+     *
+     * A registration throws on a taken key or a shape mismatch. Letting that
+     * reach the plugin's `apply` would take every other surface of this bundle
+     * down with it, so the failure is logged and only this entry is lost.
+     *
+     * @param {Record<string, unknown>} slots the slots service.
+     * @param {Record<string, unknown>} options slot registration options.
+     * @param {Function} component the renderer.
+     * @returns {() => void} disposer.
+     */
+    function registerSlot(slots, options, component) {
+      try {
+        return slots.register(options, component)
+      } catch (error) {
+        console.warn(
+          `[personal-hub] cannot register ${String(options.name)}${options.id === undefined ? '' : `#${String(options.id)}`}:`,
+          messageOf(error),
+        )
+        return () => {}
+      }
+    }
+
     /** Install the panel's stylesheet once, and remove it with the plugin. */
-    function installGitStyles() {
-      if (typeof document === 'undefined') return () => {}
+    function installGitStyles() {      if (typeof document === 'undefined') return () => {}
+      // The worktree option renders outside the Git tab, so both entry points
+      // install the sheet and the second one must not add a copy.
+      const installed = document.querySelector('style[data-personal-hub=git]')
+      if (installed !== null) return () => {}
       const style = document.createElement('style')
       style.dataset.personalHub = 'git'
       style.textContent = GIT_CSS
@@ -1391,7 +2191,25 @@ window.__ModuleLoader__.load({
       name: 'personal-hub-client',
       inject: ['slots', 'locale', 'remote', 'remote.credentials'],
       /** Rendering helpers the Node test harness exercises with a stand-in React. */
-      __internal: { GitHeader, GitNav, ChangesView, FileRow, PatchBody, PullRow, CheckRow, Empty, Failure, installGitStyles },
+      __internal: {
+        GitHeader,
+        GitNav,
+        ChangesView,
+        FileRow,
+        PatchBody,
+        PullRow,
+        CheckRow,
+        Empty,
+        Failure,
+        WorktreeOption,
+        WorktreeHero,
+        PullConfirm,
+        CreatePullBar,
+        MergeSettingsForm,
+        MergeSettingsCard,
+        PersonalHubCard,
+        installGitStyles,
+      },
       apply(ctx) {
         const t = ctx.locale.bind(NS)
         ctx.effect(() => ctx.locale.register(NS, { en, vi }), 'personal-hub: dictionaries')
@@ -1408,39 +2226,57 @@ window.__ModuleLoader__.load({
           }
         }, 'personal-hub: credential watch')
 
+        const call = createGitCaller()
+        ctx.effect(() => installGitStyles(), 'personal-hub: git styles')
+
+        // `plugins.row.config` is a keyed slot with exactly one occupant per
+        // row key: a second registration for the same row throws and would take
+        // the whole client plugin down, so both sections live in one card.
         ctx.effect(
           () =>
             ctx.slots.inject('plugins.row.config', () =>
-              ctx.slots.register(
-                {
-                  name: 'plugins.row.config',
-                  id: 'personal-hub-telegram',
-                  key: ROW_KEY,
-                  order: 10,
-                  label: () => t('title'),
-                  locale: NS,
-                  inject: () => ({
-                    subscribe: controller.subscribe,
-                    getState: controller.getState,
-                    save: controller.save,
-                    clear: controller.clear,
-                  }),
-                },
-                TelegramCard,
-              ),
+              registerSlot(ctx.slots, {
+                name: 'plugins.row.config',
+                id: 'personal-hub',
+                key: ROW_KEY,
+                order: 10,
+                label: () => t('cardTitle'),
+                locale: NS,
+                inject: () => ({
+                  subscribe: controller.subscribe,
+                  getState: controller.getState,
+                  save: controller.save,
+                  clear: controller.clear,
+                  call,
+                }),
+              }, PersonalHubCard),
             ),
           'personal-hub: row config card',
         )
 
-        // The Git panel needs the right Sidebar and the Connection RPC face.
-        // They are optional services: the Telegram card above mounts either way.
+        // The New Session worktree option belongs to the conversation, not to a
+        // side panel, so it mounts on its own and stays hidden outside a
+        // repository. A session-scoped slot injects the Session identity, which
+        // is what the Host needs to move that Session into a checkout.
+        ctx.effect(
+          () =>
+            ctx.slots.inject('conversation.hero.options', () =>
+              registerSlot(ctx.slots, {
+                name: 'conversation.hero.options',
+                id: 'personal-hub-worktree',
+                order: 20,
+                label: () => t('wtOption'),
+                locale: NS,
+                inject: (sessionId) => ({ call, sessionId }),
+              }, WorktreeHero),
+            ),
+          'personal-hub: worktree option',
+        )
+
+        // The Git panel needs the right Sidebar. It is an optional service: the
+        // cards above mount either way.
         if (typeof ctx.inject !== 'function') return
-        ctx.inject(['connection', 'sidebarRightTabs', 'sidebarRight'], (gitCtx) => {
-          if (typeof gitCtx.connection?.rpc?.call !== 'function') return
-          const call = createGitCaller(gitCtx.connection)
-
-          gitCtx.effect(() => installGitStyles(), 'personal-hub: git styles')
-
+        ctx.inject(['sidebarRightTabs', 'sidebarRight'], (gitCtx) => {
           gitCtx.effect(() => gitCtx.sidebarRightTabs.register({
             id: GIT_ID,
             kind: GIT_KIND,
@@ -1456,14 +2292,35 @@ window.__ModuleLoader__.load({
             }],
           }), 'personal-hub: git tab type')
 
-          gitCtx.effect(() => gitCtx.slots.inject('sidebar.right.pane.tab', () => gitCtx.slots.register({
+          gitCtx.effect(() => gitCtx.slots.inject('sidebar.right.pane.tab', () => registerSlot(gitCtx.slots, {
             name: 'sidebar.right.pane.tab',
             key: GIT_ID,
             locale: NS,
-            inject: () => ({ call }),
+            inject: () => ({
+              call,
+              /**
+               * Start a new chat whose working directory is an existing
+               * checkout, so two chats can share one worktree.
+               * @param {string} path absolute checkout directory.
+               */
+              newChat: async (path) => {
+                const remoteSession = ctx.remote?.session
+                if (typeof remoteSession?.create !== 'function') {
+                  throw failureOf('session/unavailable', 'This build exposes no session creator')
+                }
+                const response = await remoteSession.create({ cwd: path })
+                if (response === null || typeof response !== 'object' || response.ok !== true) {
+                  throw failureOf(
+                    response?.error?.code ?? 'session/failed',
+                    response?.error?.message ?? 'The Host could not create a chat',
+                  )
+                }
+                return response.value
+              },
+            }),
           }, GitPanel)), 'personal-hub: git tab body')
 
-          gitCtx.effect(() => gitCtx.slots.inject('conversation.session.header.utilities', () => gitCtx.slots.register({
+          gitCtx.effect(() => gitCtx.slots.inject('conversation.session.header.utilities', () => registerSlot(gitCtx.slots, {
             name: 'conversation.session.header.utilities',
             id: 'personal-hub-git',
             order: 40,

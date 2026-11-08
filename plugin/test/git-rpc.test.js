@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { rmSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,11 @@ import { test } from 'node:test'
 
 import { mountGit } from '../features/git.js'
 import { normalizeConfig } from '../lib/config.js'
+
+/** Keep the plugin's durable state out of the real Harness home. */
+const testHome = await mkdtemp(join(tmpdir(), 'personal-hub-home-'))
+process.env.DSH_HOME = testHome
+process.once('exit', () => rmSync(testHome, { recursive: true, force: true }))
 
 /** Initialize a repository with a committed file, a modified file, a staged file, and an untracked file. */
 async function makeRepository() {
@@ -26,17 +32,24 @@ async function makeRepository() {
   return root
 }
 
-/** Mount the feature over a fake connection and return its dispatcher. */
+/** Mount the feature over a fake Connection fetch registry and return its routes. */
 function mountFeature({ config = {}, agents } = {}) {
   const settings = { ...normalizeConfig({}).git, ...config }
-  let handler
+  const routes = new Map()
   const notices = []
   const connection = {
+    // The legacy registrar is what broke: touching it must never happen again.
     rpc: {
-      handle(channel, fn) {
-        notices.push(channel)
-        handler = fn
-        return () => {}
+      handle() {
+        throw new Error('connection.rpc.handle must not be used')
+      },
+    },
+    fetch: {
+      register(route) {
+        if (routes.has(route.path)) throw new Error(`duplicate route ${route.path}`)
+        routes.set(route.path, route)
+        notices.push(route.path)
+        return () => routes.delete(route.path)
       },
     },
   }
@@ -55,8 +68,18 @@ function mountFeature({ config = {}, agents } = {}) {
   const dispose = mountGit(ctx, settings, { logger })
   return {
     notices,
+    routes,
     dispose,
-    call: (endpoint, payload) => handler(endpoint, payload, new AbortController().signal),
+    call: async (endpoint, payload) => {
+      const route = routes.get(`/api/personal-hub-git/${endpoint}`)
+      if (route === undefined) return { ok: false, error: { code: 'gateway/not-found', message: 'no such route' } }
+      const request = new Request(`http://dsh.internal/api/personal-hub-git/${endpoint}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload ?? {}),
+      })
+      return await route.fetch(request).then((response) => response.json())
+    },
   }
 }
 
@@ -64,7 +87,7 @@ test('overview reports the branch, the changed files, and their line counts', as
   const root = await makeRepository()
   const feature = mountFeature()
   try {
-    assert.ok(feature.notices.includes('/personal-hub-git'), 'the channel is registered')
+    assert.ok(feature.routes.has('/api/personal-hub-git/overview'), 'the overview route is registered')
 
     const result = await feature.call('overview', { cwd: root })
     assert.equal(result.ok, true, JSON.stringify(result))
@@ -171,9 +194,30 @@ test('failures carry a code the panel can act on', async () => {
   const outside = await mkdtemp(join(tmpdir(), 'personal-hub-plain-'))
   const feature = mountFeature()
   try {
-    const unknown = await feature.call('nope', { cwd: root })
-    assert.equal(unknown.ok, false)
-    assert.equal(unknown.error.code, 'input/unknown-endpoint')
+    // Only the documented actions are routed; an unknown one never reaches the Host.
+    assert.equal(feature.routes.has('/api/personal-hub-git/nope'), false)
+    assert.equal(feature.routes.size, 19)
+    assert.deepEqual(
+      [...feature.routes.keys()].sort(),
+      [
+        'branchPull', 'branches', 'cleanupRun', 'cleanupState', 'commit', 'commits', 'createPull', 'diff', 'forge',
+        'issue', 'issues', 'mergeSettings', 'mergeSettingsSet', 'overview', 'pull', 'pulls', 'worktreeCreate',
+        'worktreeRemove', 'worktreeState',
+      ]
+        .map((endpoint) => `/api/personal-hub-git/${endpoint}`)
+        .sort(),
+    )
+
+    // A body that is not JSON is refused before any repository work starts.
+    const route = feature.routes.get('/api/personal-hub-git/overview')
+    const response = await route.fetch(new Request('http://dsh.internal/api/personal-hub-git/overview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    }))
+    const refused = await response.json()
+    assert.equal(refused.ok, false)
+    assert.equal(refused.error.code, 'input/invalid')
 
     const missing = await feature.call('overview', {})
     assert.equal(missing.ok, false)

@@ -9,3 +9,32 @@
           enabled: true
           forge: auto
           refreshMs: 30000
+          # Tạo pull request: model hiện tại của phiên, effort thấp nhất.
+          pull:
+            enabled: true
+            base: ''
+            push: true
+          # Worktree riêng cho phiên mới; nguồn local hoặc nhánh remote đã fetch.
+          worktree:
+            enabled: true
+            source: local
+            # Nhánh bắt đầu mặc định; để trống = nhánh mặc định của kho mã.
+            base: ''
+            # id = dsh-<id phiên>; semantic = đổi thành feat/... theo tin nhắn đầu.
+            naming: id
+            nameInstructions: ''
+            # Dọn checkout không ai dùng (mặc định tắt).
+            cleanup:
+              enabled: false
+              inactiveDays: 7
+              whenNoCommits: true
+              noCommitsAfterHours: 6
+              keepChanges: tracked
+              deleteBranch: false
+          # Dọn dẹp khi pull request của phiên được gộp.
+          merged:
+            enabled: false
+            removeWorktree: true
+            deleteBranch: false
+            archiveSession: true
+            checkMs: 60000
