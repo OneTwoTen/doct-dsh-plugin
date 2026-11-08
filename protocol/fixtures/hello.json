@@ -1,0 +1,18 @@
+{
+  "frames": [
+    {
+      "t": "hello",
+      "v": 1,
+      "deviceId": "dev_8f2a91c4d0b7e653",
+      "ts": 1762560000000,
+      "nonce": "q3VtYjJmZ2h4c2FtcGxl",
+      "sig": "c2lnbmF0dXJlLXNhbXBsZS1iYXNlNjR1cmwtZm9yLWZpeHR1cmU"
+    },
+    {
+      "t": "hello.ok",
+      "v": 1,
+      "serverTime": 1762560000123,
+      "limits": { "maxFrameBytes": 262144, "maxStreams": 8, "maxInflight": 32 }
+    }
+  ]
+}

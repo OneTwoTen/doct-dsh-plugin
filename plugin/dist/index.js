@@ -14,6 +14,25 @@ var TELEGRAM_DEFAULTS = Object.freeze({
   /** Push the turn's changed-files summary into the chat. */
   pushChanges: true
 });
+var WEB_REMOTE_DEFAULTS = Object.freeze({
+  enabled: false,
+  /** Relay base URL, e.g. `https://chat.example.com` or `wss://host/ws`. */
+  relayUrl: "",
+  /** Machine name shown on the approval screen; empty uses the OS hostname. */
+  deviceName: "",
+  /** Data directory; empty uses `<DSH_HOME>/personal-hub/web-remote`. */
+  dataDir: "",
+  /** Start the device pairing flow automatically when no token is stored. */
+  autoPair: true,
+  /** Scopes requested during pairing. */
+  scopes: ["chat", "approval"],
+  approvalTimeoutMs: 3e5,
+  questionTimeoutMs: 3e5,
+  requestTimeoutMs: 6e4,
+  heartbeatMs: 25e3,
+  reconnectMinMs: 1e3,
+  reconnectMaxMs: 3e4
+});
 var GIT_DEFAULTS = Object.freeze({
   enabled: true,
   /** `auto` detects the code host from the remote; `none` disables pull requests and issues. */
@@ -137,6 +156,11 @@ function asPositiveInteger(value, fallback, { min = 1, max = Number.MAX_SAFE_INT
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
+function asStringList(value, fallback) {
+  if (!Array.isArray(value)) return [...fallback];
+  const list = value.map((item) => String(item).trim()).filter((item) => item.length > 0);
+  return list.length > 0 ? list : [...fallback];
+}
 function asChoice(value, choices, fallback) {
   const text = typeof value === "string" ? value.trim().toLowerCase() : "";
   return choices.includes(text) ? text : fallback;
@@ -151,6 +175,9 @@ function normalizeConfig(raw) {
   const worktree = asRecord(git.worktree);
   const cleanup = asRecord(worktree.cleanup);
   const merged = asRecord(git.merged);
+  const webRemote = asRecord(root.webRemote);
+  const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 6e4 });
+  const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 3e5 });
   return {
     telegram: {
       enabled: asBoolean(telegram.enabled, TELEGRAM_DEFAULTS.enabled),
@@ -164,6 +191,32 @@ function normalizeConfig(raw) {
       progressIntervalMs: asPositiveInteger(telegram.progressIntervalMs, TELEGRAM_DEFAULTS.progressIntervalMs, { min: 250 }),
       pushResponses: asBoolean(telegram.pushResponses, TELEGRAM_DEFAULTS.pushResponses),
       pushChanges: asBoolean(telegram.pushChanges, TELEGRAM_DEFAULTS.pushChanges)
+    },
+    webRemote: {
+      enabled: asBoolean(webRemote.enabled, WEB_REMOTE_DEFAULTS.enabled),
+      relayUrl: asString(webRemote.relayUrl, WEB_REMOTE_DEFAULTS.relayUrl).trim(),
+      deviceName: asString(webRemote.deviceName, WEB_REMOTE_DEFAULTS.deviceName).trim(),
+      dataDir: asString(webRemote.dataDir, WEB_REMOTE_DEFAULTS.dataDir).trim(),
+      autoPair: asBoolean(webRemote.autoPair, WEB_REMOTE_DEFAULTS.autoPair),
+      scopes: asStringList(webRemote.scopes, WEB_REMOTE_DEFAULTS.scopes),
+      approvalTimeoutMs: asPositiveInteger(
+        webRemote.approvalTimeoutMs,
+        WEB_REMOTE_DEFAULTS.approvalTimeoutMs,
+        { min: 5e3, max: 36e5 }
+      ),
+      questionTimeoutMs: asPositiveInteger(
+        webRemote.questionTimeoutMs,
+        WEB_REMOTE_DEFAULTS.questionTimeoutMs,
+        { min: 5e3, max: 36e5 }
+      ),
+      requestTimeoutMs: asPositiveInteger(
+        webRemote.requestTimeoutMs,
+        WEB_REMOTE_DEFAULTS.requestTimeoutMs,
+        { min: 1e3, max: 6e5 }
+      ),
+      heartbeatMs: asPositiveInteger(webRemote.heartbeatMs, WEB_REMOTE_DEFAULTS.heartbeatMs, { min: 1e3, max: 12e4 }),
+      reconnectMinMs,
+      reconnectMaxMs
     },
     git: {
       enabled: asBoolean(git.enabled, GIT_DEFAULTS.enabled),
@@ -732,8 +785,8 @@ var CommandError = class extends Error {
   code;
   /** Machine-readable extras for the panel. */
   details;
-  constructor(code, message2, details = {}) {
-    super(message2);
+  constructor(code, message3, details = {}) {
+    super(message3);
     this.name = "CommandError";
     this.code = code;
     this.details = details;
@@ -1530,8 +1583,8 @@ async function discardPaths(runner, options) {
 }
 async function commitChanges(runner, options) {
   const { root, signal, onLine } = options;
-  const message2 = String(options.message ?? "").trim();
-  if (message2.length === 0) throw new CommandError("commit/empty-message", "A commit message is required");
+  const message3 = String(options.message ?? "").trim();
+  if (message3.length === 0) throw new CommandError("commit/empty-message", "A commit message is required");
   const paths = (options.paths ?? []).filter((path) => typeof path === "string" && path.length > 0);
   if (paths.length > 0) {
     const mergeHead = await runner.run("git", ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], { cwd: root, signal });
@@ -1552,7 +1605,7 @@ async function commitChanges(runner, options) {
     const added = await runner.run("git", ["add", "-A"], { cwd: root, signal });
     if (added.code !== 0) throwWriteFailure("stage", added);
   }
-  const [subjectLine, ...rest] = message2.split(/\r?\n/);
+  const [subjectLine, ...rest] = message3.split(/\r?\n/);
   const body = rest.join("\n").trim();
   const args = ["commit", "-m", subjectLine];
   if (body.length > 0) args.push("-m", body);
@@ -1570,7 +1623,7 @@ ${result.stderr}`;
   if (/nothing to commit|no changes added to commit|nothing added to commit/i.test(combined)) {
     return { status: "skipped_no_changes", sha: "", subject: subjectLine, branch: null };
   }
-  if (result.code !== 0) throwWriteFailure("commit", result, { message: message2 });
+  if (result.code !== 0) throwWriteFailure("commit", result, { message: message3 });
   const head = await runner.run("git", ["rev-parse", "HEAD"], { cwd: root, signal });
   const branchRead = await runner.run("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root, signal });
   const branch = branchRead.code === 0 ? String(branchRead.stdout ?? "").trim() : null;
@@ -3637,10 +3690,10 @@ function parseBranchDraft(text, options = {}) {
   return null;
 }
 async function suggestBranchName({ llm, route, text, sessionId = "", instructions = "", fallbackPrefix = "dsh", config, signal, logger }) {
-  const message2 = String(text ?? "").trim();
+  const message3 = String(text ?? "").trim();
   if (llm === void 0 || typeof llm.prepareCall !== "function") return null;
   if (route === null || typeof route?.provider !== "string" || typeof route?.model !== "string") return null;
-  if (message2.length === 0) return null;
+  if (message3.length === 0) return null;
   const timeoutMs = Math.max(5e3, Number(config?.timeoutMs) || 3e4);
   const deadline = AbortSignal.timeout(timeoutMs);
   const combined = signal === void 0 ? deadline : AbortSignal.any([signal, deadline]);
@@ -3654,7 +3707,7 @@ async function suggestBranchName({ llm, route, text, sessionId = "", instruction
       }
     );
     const input = `Name this task from its first message:
-${JSON.stringify({ message: message2.slice(0, 2e3) })}`;
+${JSON.stringify({ message: message3.slice(0, 2e3) })}`;
     let streamed = "";
     const blocks = [];
     for await (const chunk of call.stream({
@@ -3844,10 +3897,10 @@ function mountRoutes(ctx, connection, config, deps) {
     }
   });
   const naming = /* @__PURE__ */ new Set();
-  async function nameWorktreeFromMessage(sessionId, message2) {
+  async function nameWorktreeFromMessage(sessionId, message3) {
     if (config.worktree.naming !== "semantic") return;
     if (naming.has(sessionId)) return;
-    const text = textOfUserMessage(message2);
+    const text = textOfUserMessage(message3);
     if (text.length === 0) return;
     const value = await state();
     const record = value.worktrees?.[sessionId];
@@ -4013,10 +4066,10 @@ function mountRoutes(ctx, connection, config, deps) {
         );
       }
       const overview = await readOverview(runner, { root, config, signal });
-      let message2 = String(payload.commitMessage ?? "").trim();
+      let message3 = String(payload.commitMessage ?? "").trim();
       if (payload.featureBranch === true) {
         enterPhase(progress, "branch", "Preparing feature branch\xE2\u20AC\xA6");
-        if (message2.length === 0) {
+        if (message3.length === 0) {
           progress.label = "Generating commit message\xE2\u20AC\xA6";
           const facts = await readCommitMessageFacts(runner, {
             root,
@@ -4038,9 +4091,9 @@ function mountRoutes(ctx, connection, config, deps) {
             signal,
             logger
           });
-          message2 = draft.message;
+          message3 = draft.message;
         }
-        const subject = message2.split(/\r?\n/)[0] ?? "";
+        const subject = message3.split(/\r?\n/)[0] ?? "";
         const refs = await readBranchRefs(runner, { root, limit: 200, signal });
         const localNames = refs.branches.filter((item) => !item.isRemote).map((item) => item.name);
         const name2 = resolveAutoFeatureBranchName(localNames, sanitizeFeatureBranchName(subject));
@@ -4051,7 +4104,7 @@ function mountRoutes(ctx, connection, config, deps) {
       let commit = { status: "skipped_not_requested" };
       if (wantsCommit) {
         enterPhase(progress, "commit", "Committing\xE2\u20AC\xA6");
-        if (message2.length === 0) {
+        if (message3.length === 0) {
           progress.label = "Generating commit message\xE2\u20AC\xA6";
           const facts = await readCommitMessageFacts(runner, {
             root,
@@ -4073,12 +4126,12 @@ function mountRoutes(ctx, connection, config, deps) {
             signal,
             logger
           });
-          message2 = draft.message;
+          message3 = draft.message;
           progress.label = "Committing\xE2\u20AC\xA6";
         }
         const outcome = await commitChanges(runner, {
           root,
-          message: message2,
+          message: message3,
           paths: payload.paths,
           signal,
           timeoutMs: 6e5,
@@ -5280,8 +5333,8 @@ function clampLimit(value, configured, hard) {
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.min(hard, Math.round(numeric));
 }
-function failure(code, message2, details) {
-  return { ok: false, error: { code, message: message2, ...details === void 0 ? {} : { details } } };
+function failure(code, message3, details) {
+  return { ok: false, error: { code, message: message3, ...details === void 0 ? {} : { details } } };
 }
 function failureOf(error) {
   return error instanceof CommandError ? { code: error.code, message: error.message } : { code: "system/failed", message: messageOf5(error) };
@@ -5289,8 +5342,8 @@ function failureOf(error) {
 function messageOf5(error) {
   return error instanceof Error ? error.message : String(error);
 }
-function textOfUserMessage(message2) {
-  const content = message2?.content;
+function textOfUserMessage(message3) {
+  const content = message3?.content;
   if (!Array.isArray(content)) return "";
   return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text).join(" ").trim();
 }
@@ -5888,7 +5941,7 @@ function mountTelegramRemote(ctx, config, deps) {
       logger.warn("telegram-remote: cannot write status file: %s", errorMessage2(error));
     }
   }
-  function sleep(ms) {
+  function sleep2(ms) {
     return new Promise((resolve5) => {
       const timer = setTimeout(done, ms);
       function done() {
@@ -5994,7 +6047,7 @@ function mountTelegramRemote(ctx, config, deps) {
       if (error instanceof TelegramError) {
         if (error.status === 400 && /not modified/i.test(error.description)) return;
         if (error.status === 429) {
-          await sleep(Math.min(5e3, (error.retryAfter ?? 1) * 1e3));
+          await sleep2(Math.min(5e3, (error.retryAfter ?? 1) * 1e3));
           return;
         }
       }
@@ -6846,11 +6899,11 @@ ${entry.providerName} (${entry.provider})`);
         await reply(api, chatId, `L\u1EC7nh /${name2} ch\u01B0a \u0111\u01B0\u1EE3c h\u1ED7 tr\u1EE3. G\u1EEDi /help \u0111\u1EC3 xem danh s\xE1ch.`);
     }
   }
-  async function handleMessage(api, message2) {
-    if (!message2?.chat) return;
-    const chatId = String(message2.chat.id);
-    const text = typeof message2.text === "string" ? message2.text.trim() : "";
-    if (message2.chat.type !== "private") {
+  async function handleMessage(api, message3) {
+    if (!message3?.chat) return;
+    const chatId = String(message3.chat.id);
+    const text = typeof message3.text === "string" ? message3.text.trim() : "";
+    if (message3.chat.type !== "private") {
       await api.sendMessage(chatId, "Bot n\xE0y ch\u1EC9 \u0111i\u1EC1u khi\u1EC3n DSH trong chat ri\xEAng.");
       return;
     }
@@ -6879,7 +6932,7 @@ ${entry.providerName} (${entry.provider})`);
     });
   }
   async function handleCallback(api, query) {
-    const message2 = query?.message;
+    const message3 = query?.message;
     const data = typeof query?.data === "string" ? query.data : "";
     const answer = async (text, showAlert = false) => {
       try {
@@ -6888,15 +6941,15 @@ ${entry.providerName} (${entry.provider})`);
         logger.warn("telegram-remote: answerCallbackQuery failed: %s", errorMessage2(error));
       }
     };
-    if (!message2?.chat) return;
-    const chatId = String(message2.chat.id);
-    if (message2.chat.type !== "private" || !isAllowed(chatId)) {
+    if (!message3?.chat) return;
+    const chatId = String(message3.chat.id);
+    if (message3.chat.type !== "private" || !isAllowed(chatId)) {
       await answer("Chat n\xE0y ch\u01B0a \u0111\u01B0\u1EE3c gh\xE9p n\u1ED1i v\u1EDBi DSH.");
       return;
     }
     if (data === "c") {
       await answer("\u0110\xE3 hu\u1EF7");
-      await editQuietly(api, chatId, message2.message_id, "\u21A9\uFE0F \u0110\xE3 hu\u1EF7 l\u01B0u tr\u1EEF.", {
+      await editQuietly(api, chatId, message3.message_id, "\u21A9\uFE0F \u0110\xE3 hu\u1EF7 l\u01B0u tr\u1EEF.", {
         keyboard: { inline_keyboard: [] }
       });
       return;
@@ -6908,7 +6961,7 @@ ${entry.providerName} (${entry.provider})`);
     }
     const action = match[1];
     const index = Number(match[2]);
-    const messageId = message2.message_id;
+    const messageId = message3.message_id;
     if (action === "p" || action === "P") {
       const kind = action === "p" ? "sessions" : "archived";
       if (cachedList(chatId, kind).length === 0) {
@@ -7111,7 +7164,7 @@ ${entry.providerName} (${entry.provider})`);
           void probeCapabilities().catch(() => {
           });
         }
-        await sleep(3e3);
+        await sleep2(3e3);
         continue;
       }
       const api = new TelegramApi(token, { fetchImpl });
@@ -7176,13 +7229,13 @@ ${entry.providerName} (${entry.provider})`);
           identity = void 0;
           logger.error("telegram-remote: token rejected: %s", errorMessage2(error));
           await publishStatus({ state: "invalid-token", tokenSource: source, lastError: errorMessage2(error) });
-          await sleep(15e3);
+          await sleep2(15e3);
           continue;
         }
         const wait = error instanceof TelegramError && error.retryAfter ? Math.min(6e4, error.retryAfter * 1e3) : backoff;
         logger.warn("telegram-remote: poll failed (%s), retrying in %dms", errorMessage2(error), wait);
         await publishStatus({ state: "error", tokenSource: source, lastError: errorMessage2(error) });
-        await sleep(wait);
+        await sleep2(wait);
         backoff = Math.min(backoff * 2, 3e4);
       }
     }
@@ -7212,6 +7265,1869 @@ function errorMessage2(error) {
   return String(error);
 }
 
+// src/features/web-remote.ts
+import { mkdir as mkdir5, readFile as readFile5, writeFile as writeFile4 } from "node:fs/promises";
+import { hostname } from "node:os";
+import { join as join7 } from "node:path";
+
+// src/lib/remote-device.ts
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+  sign,
+  verify
+} from "node:crypto";
+import { chmod, mkdir as mkdir4, readFile as readFile4, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join6 } from "node:path";
+var HELLO_CONTEXT = "dsh-remote-hello";
+function helloSigningText({ v = 1, deviceId, ts, nonce }) {
+  return `${HELLO_CONTEXT}|${v}|${deviceId}|${ts}|${nonce}`;
+}
+function makeNonce() {
+  return randomBytes(16).toString("base64url");
+}
+function deviceIdFor(publicKeyBase64) {
+  const digest = createHash("sha256").update(Buffer.from(publicKeyBase64, "base64")).digest("hex");
+  return `dev_${digest.slice(0, 16)}`;
+}
+function fingerprintFor(publicKeyBase64) {
+  const digest = createHash("sha256").update(Buffer.from(publicKeyBase64, "base64")).digest("hex");
+  const pairs = digest.slice(0, 32).toUpperCase().match(/.{2}/g) ?? [];
+  return `SHA256:${pairs.join(":")}`;
+}
+function publicKeyBase64Of(publicKey) {
+  return publicKey.export({ type: "spki", format: "der" }).toString("base64");
+}
+async function loadOrCreateIdentity({ dir, keyFile = join6(dir, "device.key") }) {
+  await mkdir4(dir, { recursive: true, mode: 448 });
+  let pem;
+  try {
+    pem = await readFile4(keyFile, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  if (pem === void 0 || pem.trim().length === 0) {
+    const { privateKey: privateKey2 } = generateKeyPairSync("ed25519");
+    pem = privateKey2.export({ type: "pkcs8", format: "pem" });
+    try {
+      await writeFile3(keyFile, pem, { encoding: "utf8", mode: 384, flag: "wx" });
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      pem = await readFile4(keyFile, "utf8");
+    }
+    await chmod(keyFile, 384).catch(() => {
+    });
+  }
+  const privateKey = createPrivateKey(pem);
+  if (privateKey.asymmetricKeyType !== "ed25519") {
+    throw new Error(`device key at ${keyFile} is not Ed25519`);
+  }
+  const publicKey = createPublicKey(privateKey);
+  const publicKeyBase64 = publicKeyBase64Of(publicKey);
+  return {
+    deviceId: deviceIdFor(publicKeyBase64),
+    keyFile,
+    privateKey,
+    publicKey,
+    publicKeyBase64,
+    fingerprint: fingerprintFor(publicKeyBase64)
+  };
+}
+function signHello(identity, { ts = Date.now(), nonce = makeNonce(), deviceId = identity.deviceId, v = 1 } = {}) {
+  const text = helloSigningText({ v, deviceId, ts, nonce });
+  const sig = sign(null, Buffer.from(text, "utf8"), identity.privateKey).toString("base64url");
+  return { v, deviceId, ts, nonce, sig };
+}
+
+// src/lib/remote-pairing.ts
+var PairingError = class extends Error {
+  code;
+  constructor(code, message3, options = {}) {
+    super(message3, options.cause === void 0 ? void 0 : { cause: options.cause });
+    this.name = "PairingError";
+    this.code = code;
+  }
+};
+function relayEndpoints(relayUrl) {
+  const raw = typeof relayUrl === "string" ? relayUrl.trim() : "";
+  if (raw.length === 0) throw new PairingError("pair/invalid-url", "relayUrl is empty");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch (error) {
+    throw new PairingError("pair/invalid-url", `relayUrl is not a URL: ${raw}`, { cause: error });
+  }
+  const secure = url.protocol === "https:" || url.protocol === "wss:";
+  if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) {
+    throw new PairingError("pair/invalid-url", `relayUrl must be http(s) or ws(s): ${raw}`);
+  }
+  if (url.search.length > 0 || url.hash.length > 0) {
+    throw new PairingError("pair/invalid-url", "relayUrl must not carry a query or fragment");
+  }
+  const path = url.pathname.replace(/\/+$/, "");
+  const basePath = path.endsWith("/ws") ? path.slice(0, -3) : path;
+  const apiBase = `${secure ? "https" : "http"}://${url.host}${basePath}`;
+  const wsUrl = `${secure ? "wss" : "ws"}://${url.host}${basePath}/ws`;
+  return { apiBase, wsUrl };
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asRecord4(value) {
+  return isObject(value) ? value : {};
+}
+function errorCodeOf(body) {
+  const error = asRecord4(body).error;
+  if (typeof error === "string") return error;
+  if (isObject(error) && typeof error.code === "string") return error.code;
+  return void 0;
+}
+function messageOf6(body, fallback) {
+  const error = asRecord4(body).error;
+  if (isObject(error) && typeof error.message === "string" && error.message.length > 0) return error.message;
+  return fallback;
+}
+async function readBody(response) {
+  const text = await response.text();
+  if (text.length === 0) return void 0;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+}
+async function requestJson(url, options = {}) {
+  const {
+    method = "GET",
+    body,
+    token,
+    signal,
+    timeoutMs = 15e3,
+    fetchImpl = globalThis.fetch
+  } = options;
+  if (typeof fetchImpl !== "function") {
+    throw new PairingError("pair/network", "fetch is not available in this runtime");
+  }
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const combined = signal === void 0 ? timeout : AbortSignal.any([signal, timeout]);
+  const headers = { accept: "application/json" };
+  if (body !== void 0) headers["content-type"] = "application/json";
+  if (typeof token === "string" && token.length > 0) headers.authorization = `Bearer ${token}`;
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method,
+      headers,
+      body: body === void 0 ? void 0 : JSON.stringify(body),
+      signal: combined
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" && signal?.aborted) {
+      throw new PairingError("pair/aborted", "request was cancelled", { cause: error });
+    }
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new PairingError("pair/network", `request timed out after ${timeoutMs} ms`, { cause: error });
+    }
+    throw new PairingError("pair/network", `cannot reach ${url}: ${error?.message ?? error}`, { cause: error });
+  }
+  return { status: response.status, body: await readBody(response) };
+}
+function sleep(ms, signal) {
+  return new Promise((resolve5, reject) => {
+    if (signal?.aborted) {
+      reject(new PairingError("pair/aborted", "pairing was cancelled"));
+      return;
+    }
+    const timer = setTimeout(done, Math.max(0, ms));
+    function done() {
+      cleanup();
+      resolve5();
+    }
+    function onAbort() {
+      cleanup();
+      reject(new PairingError("pair/aborted", "pairing was cancelled"));
+    }
+    function cleanup() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+function hasAccessToken(body) {
+  return isObject(body) && typeof body.access_token === "string";
+}
+async function pairDevice(options) {
+  const {
+    relayUrl,
+    name: name2,
+    platform = process.platform,
+    pubkey,
+    deviceId,
+    scopes = ["chat", "approval"],
+    onCode,
+    onStatus,
+    signal,
+    fetchImpl,
+    now = Date.now,
+    pollIntervalMs
+  } = options;
+  const { apiBase } = relayEndpoints(relayUrl);
+  if (typeof pubkey !== "string" || pubkey.length === 0) {
+    throw new PairingError("pair/invalid-pubkey", "pairing requires an Ed25519 public key");
+  }
+  const authorized = await requestJson(`${apiBase}/v1/device/authorize`, {
+    method: "POST",
+    body: {
+      name: name2,
+      platform,
+      pubkey,
+      scopes,
+      ...typeof deviceId === "string" && deviceId.length > 0 ? { device_id: deviceId } : {}
+    },
+    signal,
+    fetchImpl
+  });
+  if (authorized.status !== 200 && authorized.status !== 201) {
+    const code = errorCodeOf(authorized.body) ?? "pair/authorize-failed";
+    throw new PairingError(code, messageOf6(authorized.body, `relay answered HTTP ${authorized.status}`));
+  }
+  const authorizedBody = asRecord4(authorized.body);
+  const deviceCode = authorizedBody.device_code;
+  const userCode = authorizedBody.user_code;
+  const expiresIn = Number(authorizedBody.expires_in);
+  if (typeof deviceCode !== "string" || deviceCode.length === 0) {
+    throw new PairingError("pair/invalid-response", "relay did not return device_code");
+  }
+  if (typeof userCode !== "string" || userCode.length === 0) {
+    throw new PairingError("pair/invalid-response", "relay did not return user_code");
+  }
+  const verificationUri = typeof authorizedBody.verification_uri === "string" ? authorizedBody.verification_uri : `${apiBase}/pair`;
+  const serverInterval = Number(authorizedBody.interval);
+  let intervalMs = typeof pollIntervalMs === "number" && Number.isFinite(pollIntervalMs) && pollIntervalMs > 0 ? pollIntervalMs : Math.max(1, Number.isFinite(serverInterval) ? serverInterval : 5) * 1e3;
+  const effectiveExpiresIn = Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 600;
+  const deadline = now() + effectiveExpiresIn * 1e3;
+  onCode?.({
+    userCode,
+    verificationUri,
+    expiresIn: effectiveExpiresIn,
+    intervalMs
+  });
+  for (; ; ) {
+    if (now() >= deadline) {
+      throw new PairingError("pair/expired", "the pairing code expired before it was approved");
+    }
+    await sleep(intervalMs, signal);
+    const polled = await requestJson(`${apiBase}/v1/device/token`, {
+      method: "POST",
+      body: { device_code: deviceCode },
+      signal,
+      fetchImpl
+    });
+    if (polled.status === 200 && hasAccessToken(polled.body)) {
+      if (typeof polled.body.refresh_token !== "string") {
+        throw new PairingError("pair/invalid-response", "relay did not return refresh_token");
+      }
+      return polled.body;
+    }
+    const code = errorCodeOf(polled.body);
+    if (code === "authorization_pending" || code === "device/pending") {
+      onStatus?.({ code: "authorization_pending", message: "waiting for approval on the web" });
+      continue;
+    }
+    if (code === "slow_down") {
+      intervalMs += 5e3;
+      onStatus?.({ code: "slow_down", message: "relay asked the device to poll more slowly" });
+      continue;
+    }
+    if (code === "access_denied" || code === "device/denied") {
+      throw new PairingError("pair/denied", "the pairing request was denied");
+    }
+    if (code === "expired_token" || code === "pair/expired") {
+      throw new PairingError("pair/expired", "the pairing code expired");
+    }
+    if (polled.status === 429) {
+      throw new PairingError("rate/limited", messageOf6(polled.body, "relay rate-limited pairing"));
+    }
+    throw new PairingError(
+      code ?? "pair/token-failed",
+      messageOf6(polled.body, `relay answered HTTP ${polled.status} while polling for a token`)
+    );
+  }
+}
+async function refreshAccessToken({
+  relayUrl,
+  refreshToken,
+  fetchImpl,
+  signal,
+  timeoutMs
+} = { relayUrl: "" }) {
+  if (typeof refreshToken !== "string" || refreshToken.length === 0) {
+    throw new PairingError("auth/invalid-token", "no refresh token is stored");
+  }
+  const { apiBase } = relayEndpoints(relayUrl);
+  const response = await requestJson(`${apiBase}/v1/token/refresh`, {
+    method: "POST",
+    body: { refresh_token: refreshToken },
+    fetchImpl,
+    signal,
+    timeoutMs
+  });
+  if (response.status !== 200 || !hasAccessToken(response.body)) {
+    const code = errorCodeOf(response.body) ?? "auth/invalid-token";
+    throw new PairingError(code, messageOf6(response.body, `token refresh failed with HTTP ${response.status}`));
+  }
+  return response.body;
+}
+
+// src/lib/remote-protocol.ts
+var PROTOCOL_VERSION = 1;
+var DEFAULT_LIMITS = Object.freeze({
+  maxFrameBytes: 262144,
+  maxStreams: 8,
+  maxInflight: 32,
+  heartbeatMs: 25e3,
+  requestTimeoutMs: 6e4,
+  approvalTimeoutMs: 3e5,
+  questionTimeoutMs: 3e5
+});
+var APPROVAL_OUTCOMES = Object.freeze([
+  "allowed-once",
+  "rejected",
+  "cancelled",
+  "unavailable"
+]);
+var END_REASONS = Object.freeze([
+  "complete",
+  "cancelled",
+  "overflow",
+  "error",
+  "revoked",
+  "shutdown"
+]);
+var FRAME_TYPES = Object.freeze([
+  "hello",
+  "hello.ok",
+  "req",
+  "res",
+  "open",
+  "item",
+  "end",
+  "cancel",
+  "ping",
+  "pong",
+  "error"
+]);
+var CLIENT_OPS = Object.freeze([
+  "session.list",
+  "session.state",
+  "session.create",
+  "session.rename",
+  "session.prompt",
+  "session.cancel",
+  "session.events",
+  "session.modelCatalog",
+  "session.selectModel"
+]);
+var STREAM_OPS = Object.freeze(["session.follow", "session.control"]);
+var DEVICE_OPS = Object.freeze(["approval.ask", "question.ask", "relay.ping"]);
+var ERROR_CATALOG = Object.freeze({
+  "bad-frame": false,
+  "bad-request": false,
+  unsupported: false,
+  internal: true,
+  "auth/invalid-token": false,
+  "auth/expired": true,
+  "auth/replay": false,
+  "device/pending": true,
+  "device/revoked": false,
+  "session/not-found": false,
+  "stream/limit": false,
+  "stream/overflow": false,
+  "approval/expired": false,
+  "rate/limited": true,
+  "transport/not-ready": true,
+  "transport/timeout": true,
+  "transport/closed": true,
+  "transport/cancelled": false,
+  relay: false
+});
+var ProtocolError = class extends Error {
+  code;
+  retryable;
+  /**
+   * @param code one of `ERROR_CATALOG`
+   * @param message human-readable, already safe to log
+   */
+  constructor(code, message3, options = {}) {
+    super(message3, options.cause === void 0 ? void 0 : { cause: options.cause });
+    this.name = "ProtocolError";
+    this.code = code;
+    this.retryable = options.retryable ?? ERROR_CATALOG[code] ?? false;
+  }
+};
+function toWireError(error) {
+  if (error instanceof ProtocolError) {
+    return { code: error.code, message: error.message, retryable: error.retryable };
+  }
+  return {
+    code: "internal",
+    message: error instanceof Error ? error.message : String(error),
+    retryable: true
+  };
+}
+var OPS_PATTERN = /^[a-z][a-z0-9]*\.[a-zA-Z][a-zA-Z0-9]*$/;
+function badFrame(message3) {
+  return new ProtocolError("bad-frame", message3);
+}
+function isObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isFrameType(value) {
+  return typeof value === "string" && FRAME_TYPES.includes(value);
+}
+function requireObject(frame, field2, { optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (!isObject2(value)) throw badFrame(`"${field2}" must be an object`);
+}
+function requireString(frame, field2, { min = 1, max = 4096, optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (typeof value !== "string") throw badFrame(`"${field2}" must be a string`);
+  if (value.length < min || value.length > max) throw badFrame(`"${field2}" has an invalid length`);
+}
+function requireInteger(frame, field2, { min = 0, optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min) {
+    throw badFrame(`"${field2}" must be a number >= ${min}`);
+  }
+}
+function requireBoolean(frame, field2) {
+  if (typeof frame[field2] !== "boolean") throw badFrame(`"${field2}" must be a boolean`);
+}
+function requireId(frame) {
+  requireString(frame, "id", { min: 1, max: 128 });
+}
+function requireOp(frame) {
+  requireString(frame, "op", { min: 3, max: 64 });
+  const op = frame.op;
+  if (typeof op !== "string" || !OPS_PATTERN.test(op)) throw badFrame('"op" must look like "<namespace>.<verb>"');
+}
+function validateFrame(value) {
+  if (!isObject2(value)) throw badFrame("a frame must be a JSON object");
+  if (!isFrameType(value.t)) {
+    throw badFrame("unknown frame type");
+  }
+  const frame = value;
+  switch (frame.t) {
+    case "hello": {
+      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
+      requireString(frame, "deviceId", { min: 1, max: 128 });
+      requireInteger(frame, "ts");
+      requireString(frame, "nonce", { min: 8, max: 128 });
+      requireString(frame, "sig", { min: 40, max: 256 });
+      return frame;
+    }
+    case "hello.ok": {
+      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
+      requireInteger(frame, "serverTime");
+      requireObject(frame, "limits", { optional: true });
+      return frame;
+    }
+    case "req":
+    case "open": {
+      requireId(frame);
+      requireOp(frame);
+      requireObject(frame, "args", { optional: true });
+      return frame;
+    }
+    case "res": {
+      requireId(frame);
+      requireBoolean(frame, "ok");
+      if (frame.ok === true) {
+        if (!Object.prototype.hasOwnProperty.call(frame, "value")) {
+          throw badFrame('a successful response must carry "value"');
+        }
+        return frame;
+      }
+      const error = frame.error;
+      if (!isObject2(error)) throw badFrame('a failed response must carry "error"');
+      requireString(error, "code", { min: 1, max: 64 });
+      requireString(error, "message", { min: 0, max: 8192 });
+      if (error.retryable !== void 0 && typeof error.retryable !== "boolean") {
+        throw badFrame('"error.retryable" must be a boolean');
+      }
+      return frame;
+    }
+    case "item": {
+      requireId(frame);
+      if (!Object.prototype.hasOwnProperty.call(frame, "item")) throw badFrame('"item" is required');
+      requireInteger(frame, "seq", { optional: true });
+      return frame;
+    }
+    case "end": {
+      requireId(frame);
+      if (frame.reason !== void 0 && !END_REASONS.includes(frame.reason)) {
+        throw badFrame('"reason" is not a known end reason');
+      }
+      return frame;
+    }
+    case "cancel": {
+      requireId(frame);
+      return frame;
+    }
+    case "ping":
+    case "pong": {
+      requireString(frame, "nonce", { min: 0, max: 128, optional: true });
+      return frame;
+    }
+    case "error": {
+      requireString(frame, "code", { min: 1, max: 64 });
+      requireString(frame, "message", { min: 0, max: 8192 });
+      if (frame.retryable !== void 0 && typeof frame.retryable !== "boolean") {
+        throw badFrame('"retryable" must be a boolean');
+      }
+      return frame;
+    }
+    /* v8 ignore next -- FRAME_TYPES is closed and checked above. */
+    default:
+      throw badFrame("unknown frame type");
+  }
+}
+function decodeFrame(text, options = {}) {
+  if (typeof text !== "string") throw badFrame("a wire frame must be text");
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > maxFrameBytes) {
+    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new ProtocolError("bad-frame", "frame is not valid JSON", { cause: error });
+  }
+  return validateFrame(parsed);
+}
+function encodeFrame(frame, options = {}) {
+  validateFrame(frame);
+  const text = JSON.stringify(frame);
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > maxFrameBytes) {
+    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
+  }
+  return text;
+}
+function helloFrame({ deviceId, ts, nonce, sig }) {
+  return { t: "hello", v: PROTOCOL_VERSION, deviceId, ts, nonce, sig };
+}
+function requestFrame(id, op, args = {}) {
+  return { t: "req", id, op, args };
+}
+function responseFrame(id, value) {
+  return { t: "res", id, ok: true, value: value ?? null };
+}
+function errorResponseFrame(id, code, message3, options = {}) {
+  return {
+    t: "res",
+    id,
+    ok: false,
+    error: {
+      code,
+      message: message3,
+      ...options.retryable === void 0 ? {} : { retryable: options.retryable }
+    }
+  };
+}
+function itemFrame(id, item, seq) {
+  return { t: "item", id, item, ...seq === void 0 ? {} : { seq } };
+}
+function endFrame(id, reason = "complete") {
+  return { t: "end", id, reason };
+}
+function pingFrame(nonce) {
+  return { t: "ping", ...nonce === void 0 ? {} : { nonce } };
+}
+function pongFrame(nonce) {
+  return { t: "pong", ...nonce === void 0 ? {} : { nonce } };
+}
+
+// src/lib/remote-transport.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+var READY_STATES = { connecting: 0, open: 1, closing: 2, closed: 3 };
+var NOOP_LOGGER = { info() {
+}, warn() {
+}, error() {
+} };
+var RemoteTransport = class {
+  url;
+  identity;
+  getAccessToken;
+  WebSocketImpl;
+  onRequest;
+  onStream;
+  onStatus;
+  onAuthRequired;
+  logger;
+  now;
+  random;
+  setTimeoutImpl;
+  clearTimeoutImpl;
+  setIntervalImpl;
+  clearIntervalImpl;
+  maxFrameBytes;
+  maxStreams;
+  maxInflight;
+  heartbeatMs;
+  helloTimeoutMs;
+  requestTimeoutMs;
+  reconnect;
+  #status;
+  #started;
+  #stopped;
+  #attempt;
+  #generation;
+  #inflight;
+  #lastSeen;
+  #socket;
+  #pending;
+  #streams;
+  #helloTimer;
+  #heartbeatTimer;
+  #reconnectTimer;
+  #counter = 0;
+  /**
+   * @param options transport configuration; `url` is required.
+   */
+  constructor(options) {
+    if (typeof options?.url !== "string" || options.url.length === 0) {
+      throw new TypeError("RemoteTransport requires a url");
+    }
+    this.url = options.url;
+    this.identity = options.identity;
+    this.getAccessToken = options.getAccessToken ?? (() => null);
+    this.WebSocketImpl = options.WebSocket ?? globalThis.WebSocket;
+    this.onRequest = options.onRequest;
+    this.onStream = options.onStream;
+    this.onStatus = options.onStatus;
+    this.onAuthRequired = options.onAuthRequired;
+    this.logger = options.logger ?? NOOP_LOGGER;
+    this.now = options.now ?? Date.now;
+    this.random = options.random ?? Math.random;
+    this.setTimeoutImpl = options.setTimeout ?? setTimeout;
+    this.clearTimeoutImpl = options.clearTimeout ?? clearTimeout;
+    this.setIntervalImpl = options.setInterval ?? setInterval;
+    this.clearIntervalImpl = options.clearInterval ?? clearInterval;
+    this.maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
+    this.maxStreams = options.maxStreams ?? DEFAULT_LIMITS.maxStreams;
+    this.maxInflight = options.maxInflight ?? DEFAULT_LIMITS.maxInflight;
+    this.heartbeatMs = options.heartbeatMs ?? DEFAULT_LIMITS.heartbeatMs;
+    this.helloTimeoutMs = options.helloTimeoutMs ?? 1e4;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_LIMITS.requestTimeoutMs;
+    this.reconnect = {
+      minMs: 1e3,
+      maxMs: 3e4,
+      ...options.reconnect ?? {}
+    };
+    this.#status = "idle";
+    this.#started = false;
+    this.#stopped = false;
+    this.#attempt = 0;
+    this.#generation = 0;
+    this.#inflight = 0;
+    this.#lastSeen = 0;
+    this.#pending = /* @__PURE__ */ new Map();
+    this.#streams = /* @__PURE__ */ new Map();
+  }
+  get status() {
+    return this.#status;
+  }
+  get ready() {
+    return this.#status === "ready";
+  }
+  /** Open the socket; reconnects automatically until `stop()`. */
+  start() {
+    if (this.#started) return;
+    this.#started = true;
+    this.#stopped = false;
+    this.#attempt = 0;
+    void this.#connect();
+  }
+  /** Stop reconnecting and close the socket. */
+  stop(reason = "stopped") {
+    this.#stopped = true;
+    this.#generation += 1;
+    this.#clearTimers();
+    this.#rejectPending("transport/closed", "transport stopped");
+    this.#closeStreams(reason);
+    const socket = this.#socket;
+    this.#socket = void 0;
+    if (socket !== void 0) this.#closeSocket(socket);
+    this.#setStatus("stopped", { reason });
+  }
+  /**
+   * Send one unary request and await its response.
+   * @param op operation name, `<namespace>.<verb>`
+   * @param args arguments forwarded verbatim
+   * @param options deadline override and cancellation
+   */
+  request(op, args = {}, options = {}) {
+    if (this.#status !== "ready") {
+      return Promise.reject(new ProtocolError("transport/not-ready", "the relay connection is not ready"));
+    }
+    if (this.#pending.size >= this.maxInflight) {
+      return Promise.reject(new ProtocolError("rate/limited", "too many requests are waiting for a response"));
+    }
+    const id = `d_${randomUUID3()}`;
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    const signal = options.signal;
+    return new Promise((resolve5, reject) => {
+      const settle = (action) => {
+        if (!this.#pending.has(id)) return;
+        this.#pending.delete(id);
+        if (timer !== void 0) this.clearTimeoutImpl(timer);
+        signal?.removeEventListener("abort", onAbort);
+        action();
+      };
+      const timer = this.setTimeoutImpl(() => {
+        settle(() => reject(new ProtocolError("transport/timeout", `no response to ${op} within ${timeoutMs} ms`)));
+      }, timeoutMs);
+      timer?.unref?.();
+      const onAbort = () => {
+        settle(() => reject(new ProtocolError("transport/cancelled", "request was cancelled")));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.#pending.set(id, {
+        op,
+        resolve: (value) => settle(() => resolve5(value)),
+        reject: (error) => settle(() => reject(error))
+      });
+      try {
+        this.#send(requestFrame(id, op, args));
+      } catch (error) {
+        settle(() => reject(error));
+      }
+    });
+  }
+  /** Resolves once a `hello.ok` arrived. */
+  async #connect() {
+    if (this.#stopped) return;
+    const generation = ++this.#generation;
+    this.#setStatus(this.#attempt === 0 ? "connecting" : "reconnecting");
+    let token;
+    try {
+      token = await this.getAccessToken();
+    } catch (error) {
+      this.#authFailure(error, generation);
+      return;
+    }
+    if (this.#stopped || generation !== this.#generation) return;
+    if (typeof token !== "string" || token.length === 0) {
+      this.#authFailure(new ProtocolError("auth/invalid-token", "no access token is available"), generation);
+      return;
+    }
+    const protocols = ["dsh-remote.v1", `bearer.${token}`];
+    if (typeof this.identity?.deviceId === "string") protocols.push(`device.${this.identity.deviceId}`);
+    let socket;
+    try {
+      socket = new this.WebSocketImpl(this.url, protocols);
+    } catch (error) {
+      this.logger.warn("web-remote: cannot construct WebSocket: %s", error instanceof Error ? error.message : error);
+      this.#retry(generation);
+      return;
+    }
+    if (this.#stopped || generation !== this.#generation) {
+      this.#closeSocket(socket);
+      return;
+    }
+    this.#socket = socket;
+    this.#lastSeen = this.now();
+    socket.addEventListener("open", () => {
+      if (generation !== this.#generation || this.#stopped) return;
+      this.#sendHello();
+    });
+    socket.addEventListener("message", (event) => {
+      if (generation !== this.#generation || this.#stopped) return;
+      this.#receive(event?.data);
+    });
+    socket.addEventListener("close", (event) => {
+      if (generation !== this.#generation || this.#stopped) return;
+      this.logger.info("web-remote: socket closed (%s)", event?.code ?? "no-code");
+      this.#lost("socket closed");
+    });
+    socket.addEventListener("error", (event) => {
+      if (generation !== this.#generation || this.#stopped) return;
+      this.logger.warn("web-remote: socket error: %s", event?.message ?? event?.error?.message ?? "unknown");
+    });
+  }
+  #sendHello() {
+    try {
+      const hello = helloFrame(signHello(this.identity, { ts: this.now() }));
+      this.#rawSend(hello);
+    } catch (error) {
+      this.logger.warn("web-remote: cannot send hello: %s", error instanceof Error ? error.message : error);
+      this.#lost("hello send failed");
+      return;
+    }
+    this.#helloTimer = this.setTimeoutImpl(() => {
+      if (this.#status !== "ready") this.#lost("hello timed out");
+    }, this.helloTimeoutMs);
+    this.#helloTimer?.unref?.();
+  }
+  #receive(data) {
+    let frame;
+    try {
+      frame = decodeFrame(normalizeIncoming(data), { maxFrameBytes: this.maxFrameBytes });
+    } catch (error) {
+      this.logger.warn("web-remote: dropped a frame: %s", error instanceof Error ? error.message : error);
+      if (error?.code === "stream/overflow") this.#lost("frame overflow");
+      return;
+    }
+    this.#lastSeen = this.now();
+    switch (frame.t) {
+      case "hello.ok":
+        this.#onHelloOk(frame);
+        return;
+      case "ping":
+        this.#safeSend(pongFrame(frame.nonce));
+        return;
+      case "pong":
+        return;
+      case "res":
+        this.#onResponse(frame);
+        return;
+      case "req":
+        this.#onIncomingRequest(frame);
+        return;
+      case "open":
+        this.#onIncomingStream(frame);
+        return;
+      case "item":
+        this.#onStreamItem(frame);
+        return;
+      case "end":
+        this.#onStreamEnd(frame, frame.reason ?? "complete");
+        return;
+      case "cancel":
+        this.#onStreamEnd(frame, "cancelled");
+        return;
+      case "error":
+        this.logger.warn("web-remote: relay error %s: %s", frame.code, frame.message);
+        if (frame.code === "auth/invalid-token" || frame.code === "device/revoked") {
+          this.#lost(frame.code);
+        }
+        return;
+      /* v8 ignore next -- closed frame union. */
+      default:
+        return;
+    }
+  }
+  #onHelloOk(frame) {
+    if (this.#helloTimer !== void 0) {
+      this.clearTimeoutImpl(this.#helloTimer);
+      this.#helloTimer = void 0;
+    }
+    const maxFrameBytes = frame.limits?.maxFrameBytes;
+    const maxStreams = frame.limits?.maxStreams;
+    const maxInflight = frame.limits?.maxInflight;
+    if (typeof maxFrameBytes === "number") {
+      this.maxFrameBytes = Math.min(this.maxFrameBytes, maxFrameBytes);
+    }
+    if (typeof maxStreams === "number") {
+      this.maxStreams = Math.min(this.maxStreams, maxStreams);
+    }
+    if (typeof maxInflight === "number") {
+      this.maxInflight = Math.min(this.maxInflight, maxInflight);
+    }
+    this.#attempt = 0;
+    this.#setStatus("ready", { serverTime: frame.serverTime });
+    this.#startHeartbeat();
+  }
+  #onResponse(frame) {
+    const pending = this.#pending.get(frame.id);
+    if (pending === void 0) return;
+    if (frame.ok === true) {
+      pending.resolve(frame.value);
+      return;
+    }
+    const error = frame.error;
+    pending.reject(new ProtocolError(
+      typeof error?.code === "string" ? error.code : "internal",
+      typeof error?.message === "string" ? error.message : "remote request failed",
+      { retryable: error?.retryable }
+    ));
+  }
+  #onIncomingRequest(frame) {
+    if (this.#inflight >= this.maxInflight) {
+      this.#safeSend(errorResponseFrame(frame.id, "rate/limited", "too many requests are in flight"));
+      return;
+    }
+    const onRequest = this.onRequest;
+    if (typeof onRequest !== "function") {
+      this.#safeSend(errorResponseFrame(frame.id, "unsupported", `${frame.op} is not supported`));
+      return;
+    }
+    this.#inflight += 1;
+    Promise.resolve().then(() => onRequest(frame.op, frame.args ?? {})).then((value) => this.#safeSend(responseFrame(frame.id, value))).catch((error) => this.#safeSend(errorResponseFrame(frame.id, ...wireErrorTuple(error)))).finally(() => {
+      this.#inflight -= 1;
+    });
+  }
+  #onIncomingStream(frame) {
+    if (this.#streams.size >= this.maxStreams) {
+      this.#safeSend(endFrame(frame.id, "overflow"));
+      return;
+    }
+    const onStream = this.onStream;
+    if (typeof onStream !== "function") {
+      this.#safeSend(endFrame(frame.id, "error"));
+      return;
+    }
+    const record = {
+      id: frame.id,
+      closed: false,
+      cancelHandlers: /* @__PURE__ */ new Set()
+    };
+    this.#streams.set(frame.id, record);
+    const stream = {
+      id: frame.id,
+      get closed() {
+        return record.closed;
+      },
+      push: (item, seq) => {
+        if (record.closed) return false;
+        try {
+          this.#send(itemFrame(frame.id, item, seq));
+          return true;
+        } catch (error) {
+          this.logger.warn("web-remote: cannot push stream item: %s", error instanceof Error ? error.message : error);
+          return false;
+        }
+      },
+      end: (reason = "complete") => {
+        this.#finishStream(frame.id, reason, true);
+      },
+      onCancel: (listener) => {
+        record.cancelHandlers.add(listener);
+        return () => record.cancelHandlers.delete(listener);
+      }
+    };
+    try {
+      Promise.resolve(onStream(frame.op, frame.args ?? {}, stream)).catch((error) => {
+        this.logger.warn("web-remote: stream handler failed: %s", error instanceof Error ? error.message : error);
+        stream.end("error");
+      });
+    } catch (error) {
+      this.logger.warn("web-remote: stream handler threw: %s", error instanceof Error ? error.message : error);
+      stream.end("error");
+    }
+  }
+  #onStreamItem(frame) {
+    const record = this.#streams.get(frame.id);
+    if (record === void 0 || record.closed) return;
+    this.logger.warn("web-remote: unexpected item for stream %s", frame.id);
+  }
+  #onStreamEnd(frame, reason) {
+    const record = this.#streams.get(frame.id);
+    if (record === void 0) return;
+    record.closed = true;
+    this.#streams.delete(frame.id);
+    for (const listener of [...record.cancelHandlers]) {
+      try {
+        listener(reason);
+      } catch (error) {
+        this.logger.warn("web-remote: stream cancel listener failed: %s", error instanceof Error ? error.message : error);
+      }
+    }
+  }
+  #finishStream(id, reason, sendEnd) {
+    const record = this.#streams.get(id);
+    if (record === void 0) return;
+    record.closed = true;
+    this.#streams.delete(id);
+    if (sendEnd) this.#safeSend(endFrame(id, reason));
+  }
+  #startHeartbeat() {
+    this.#clearHeartbeat();
+    this.#heartbeatTimer = this.setIntervalImpl(() => {
+      if (this.#status !== "ready") return;
+      if (this.now() - this.#lastSeen > this.heartbeatMs * 2.5) {
+        this.#lost("heartbeat timeout");
+        return;
+      }
+      this.#safeSend(pingFrame(makeNonce()));
+    }, this.heartbeatMs);
+    this.#heartbeatTimer?.unref?.();
+  }
+  #lost(reason) {
+    if (this.#stopped) return;
+    const generation = ++this.#generation;
+    this.#clearTimers();
+    const socket = this.#socket;
+    this.#socket = void 0;
+    if (socket !== void 0) this.#closeSocket(socket);
+    this.#rejectPending("transport/closed", `connection lost: ${reason}`);
+    this.#closeStreams("cancelled");
+    if (reason === "device/revoked") {
+      this.#setStatus("revoked", { reason });
+      return;
+    }
+    if (reason === "auth/invalid-token") {
+      this.#setStatus("auth-required", { reason });
+      this.onAuthRequired?.(new ProtocolError("auth/invalid-token", "the relay rejected the access token"));
+      return;
+    }
+    this.#setStatus("reconnecting", { reason });
+    this.#retry(generation);
+  }
+  #retry(generation) {
+    if (this.#stopped || generation !== this.#generation) return;
+    const delay = this.#nextDelay();
+    this.#reconnectTimer = this.setTimeoutImpl(() => {
+      this.#reconnectTimer = void 0;
+      void this.#connect();
+    }, delay);
+    this.#reconnectTimer?.unref?.();
+    this.logger.info("web-remote: reconnecting in %d ms", delay);
+  }
+  #nextDelay() {
+    const { minMs, maxMs } = this.reconnect;
+    const ceiling = Math.min(maxMs, minMs * 2 ** this.#attempt);
+    this.#attempt += 1;
+    return Math.max(minMs, Math.floor(this.random() * ceiling));
+  }
+  #authFailure(error, generation) {
+    if (generation !== this.#generation || this.#stopped) return;
+    const code = error instanceof ProtocolError ? error.code : "auth/invalid-token";
+    this.#setStatus(code === "device/revoked" ? "revoked" : "auth-required", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    this.onAuthRequired?.(error);
+  }
+  #rejectPending(code, message3) {
+    for (const pending of [...this.#pending.values()]) {
+      pending.reject(new ProtocolError(code, message3));
+    }
+  }
+  #closeStreams(reason) {
+    for (const [id, record] of [...this.#streams]) {
+      record.closed = true;
+      this.#streams.delete(id);
+      for (const listener of [...record.cancelHandlers]) {
+        try {
+          listener(reason);
+        } catch {
+        }
+      }
+    }
+  }
+  #clearTimers() {
+    if (this.#helloTimer !== void 0) {
+      this.clearTimeoutImpl(this.#helloTimer);
+      this.#helloTimer = void 0;
+    }
+    if (this.#reconnectTimer !== void 0) {
+      this.clearTimeoutImpl(this.#reconnectTimer);
+      this.#reconnectTimer = void 0;
+    }
+    this.#clearHeartbeat();
+  }
+  #clearHeartbeat() {
+    if (this.#heartbeatTimer !== void 0) {
+      this.clearIntervalImpl(this.#heartbeatTimer);
+      this.#heartbeatTimer = void 0;
+    }
+  }
+  #send(frame) {
+    if (this.#status !== "ready") throw new ProtocolError("transport/not-ready", "the relay connection is not ready");
+    this.#rawSend(frame);
+  }
+  #safeSend(frame) {
+    try {
+      this.#send(frame);
+    } catch {
+    }
+  }
+  #rawSend(frame) {
+    const socket = this.#socket;
+    if (socket === void 0) throw new ProtocolError("transport/closed", "the socket is closed");
+    if (typeof socket.readyState === "number" && socket.readyState !== READY_STATES.open) {
+      throw new ProtocolError("transport/closed", "the socket is not open");
+    }
+    socket.send(encodeFrame(frame, { maxFrameBytes: this.maxFrameBytes }));
+  }
+  #closeSocket(socket) {
+    try {
+      if (typeof socket.readyState === "number" && socket.readyState >= READY_STATES.closing) return;
+      socket.close();
+    } catch {
+    }
+  }
+  #setStatus(status, detail = {}) {
+    if (this.#status === status && Object.keys(detail).length === 0) return;
+    this.#status = status;
+    try {
+      this.onStatus?.({ status, ...detail });
+    } catch (error) {
+      this.logger.warn("web-remote: status listener failed: %s", error instanceof Error ? error.message : error);
+    }
+  }
+};
+function normalizeIncoming(data) {
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  return String(data);
+}
+function wireErrorTuple(error) {
+  const wire = toWireError(error);
+  return [wire.code, wire.message, { retryable: wire.retryable }];
+}
+
+// src/lib/web-remote-bridge.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
+var PROMPT_TEXT_LIMIT = 1e5;
+var APPROVAL_OUTCOME_LIST = APPROVAL_OUTCOMES;
+var WebRemoteBridge = class {
+  sessionController;
+  transport;
+  approvalTimeoutMs;
+  questionTimeoutMs;
+  defaultCwd;
+  logger;
+  now;
+  clientTimeZone;
+  /** Cancels every service call that accepts a signal. */
+  #lifecycle;
+  /** sessionId -> number of open follow streams */
+  #watched;
+  /** AbortControllers for every open stream, so dispose can stop them all. */
+  #followers;
+  /**
+   * @param options session controller, transport, and optional config/logger/clock.
+   */
+  constructor({ sessionController, transport, config = {}, logger = console, now = Date.now }) {
+    this.sessionController = sessionController;
+    this.transport = transport;
+    this.approvalTimeoutMs = config.approvalTimeoutMs ?? 3e5;
+    this.questionTimeoutMs = config.questionTimeoutMs ?? 3e5;
+    this.defaultCwd = config.defaultCwd;
+    this.logger = logger;
+    this.now = now;
+    this.clientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    this.#lifecycle = new AbortController();
+    this.#watched = /* @__PURE__ */ new Map();
+    this.#followers = /* @__PURE__ */ new Set();
+  }
+  /** Session IDs a web client is currently following. */
+  get watchedSessions() {
+    return [...this.#watched.keys()];
+  }
+  /** Stop every open stream. */
+  dispose() {
+    try {
+      this.#lifecycle.abort();
+    } catch {
+    }
+    for (const controller of [...this.#followers]) {
+      try {
+        controller.abort();
+      } catch {
+      }
+    }
+    this.#followers.clear();
+    this.#watched.clear();
+  }
+  /**
+   * Serve one unary operation requested by the web client.
+   * @param op operation name
+   * @param args validated arguments read off the wire
+   */
+  async handleOp(op, args = {}) {
+    const controller = this.sessionController;
+    switch (op) {
+      case "relay.ping":
+        return { time: this.now() };
+      case "session.list":
+        return controller.list({}, this.#lifecycle.signal);
+      case "session.state":
+        return controller.state({ sessionId: requireSessionId(args) }, this.#lifecycle.signal);
+      case "session.create": {
+        const request = {};
+        if (nonEmptyString(args.cwd)) request.cwd = args.cwd;
+        if (nonEmptyString(args.workspaceId)) request.workspaceId = args.workspaceId;
+        if (nonEmptyString(args.agentPreset)) request.agentPreset = args.agentPreset;
+        if (nonEmptyString(args.sessionId)) request.sessionId = args.sessionId;
+        if (request.cwd === void 0 && request.workspaceId === void 0) {
+          request.cwd = this.defaultCwd ?? process.cwd();
+        }
+        return controller.create(request);
+      }
+      case "session.rename":
+        return controller.rename({
+          sessionId: requireSessionId(args),
+          title: requireString2(args.title, "title", 1, 200)
+        });
+      case "session.prompt":
+        return this.#prompt(args);
+      case "session.cancel":
+        return controller.cancel({ sessionId: requireSessionId(args) });
+      case "session.events": {
+        const request = { address: { kind: "session", sessionId: requireSessionId(args) } };
+        if (isInteger(args.maxMessages)) request.maxMessages = args.maxMessages;
+        if (isInteger(args.throughSeq)) request.throughSeq = args.throughSeq;
+        if (isInteger(args.beforeSeq)) request.beforeSeq = args.beforeSeq;
+        return controller.events(request, this.#lifecycle.signal);
+      }
+      case "session.modelCatalog":
+        return controller.modelCatalog();
+      case "session.selectModel": {
+        const request = {
+          sessionId: requireSessionId(args),
+          provider: requireString2(args.provider, "provider", 1, 200),
+          model: requireString2(args.model, "model", 1, 200)
+        };
+        if (nonEmptyString(args.reasoningEffort)) request.reasoningEffort = args.reasoningEffort;
+        return controller.selectModel(request, this.#lifecycle.signal);
+      }
+      default:
+        throw new ProtocolError("unsupported", `${op} is not supported by this bridge`);
+    }
+  }
+  /**
+   * Serve one stream the web client opened.
+   * @param op stream operation name
+   * @param args validated arguments read off the wire
+   * @param stream the stream the handler pushes into
+   */
+  handleStream(op, args = {}, stream) {
+    if (op === "session.follow") {
+      this.#follow(args, stream);
+      return;
+    }
+    if (op === "session.control") {
+      this.#control(stream);
+      return;
+    }
+    stream.end("error");
+  }
+  /**
+   * Answerer for `approval/request`: forward to the web only while a client is
+   * following the asking Session; otherwise delegate to the desktop answerer.
+   * A timeout or a malformed answer also delegates, so the local UI still gets
+   * its chance and the request never fails open.
+   */
+  async handleApproval(payload, next) {
+    const request = payloadObject(payload);
+    const sessionId = request?.agent?.session?.id;
+    if (!this.#canForward(sessionId)) return delegate(next);
+    const approvalId = `ap_${randomUUID4()}`;
+    const toolName = typeof request.toolName === "string" ? request.toolName : "unknown";
+    const callId = request.callId;
+    const reason = request.reason;
+    const displayReason = request.displayReason;
+    const args = {
+      approvalId,
+      sessionId,
+      toolName,
+      ...nonEmptyString(callId) ? { callId } : {},
+      ...nonEmptyString(reason) ? { reason } : {},
+      ...displayReason && typeof displayReason === "object" ? { displayReason } : {}
+    };
+    try {
+      const value = await this.transport.request("approval.ask", args, { timeoutMs: this.approvalTimeoutMs });
+      const outcome = isRecord(value) ? value.outcome : void 0;
+      if (typeof outcome === "string" && APPROVAL_OUTCOME_LIST.includes(outcome)) return outcome;
+      this.logger.warn("web-remote: approval.ask returned an unknown outcome, delegating");
+      return delegate(next);
+    } catch (error) {
+      this.#logDelegation("approval", error);
+      return delegate(next);
+    }
+  }
+  /**
+   * Answerer for `user-questions/request`. The web returns the same answer
+   * batch the DSH tool expects; anything malformed falls back to the desktop.
+   */
+  async handleQuestion(payload, next) {
+    const request = payloadObject(payload);
+    const sessionId = request?.agent?.session?.id;
+    if (!this.#canForward(sessionId)) return delegate(next);
+    const questions = sanitizeQuestions(request.questions);
+    if (questions === void 0) return delegate(next);
+    const waitCallId = request.wait?.callId;
+    const args = {
+      questionId: `q_${randomUUID4()}`,
+      sessionId,
+      questions,
+      ...nonEmptyString(waitCallId) ? { callId: waitCallId } : {}
+    };
+    try {
+      const value = await this.transport.request("question.ask", args, { timeoutMs: this.questionTimeoutMs });
+      const answers = normalizeAnswers(questions, isRecord(value) ? value.answers : void 0);
+      if (answers !== void 0) return { answers };
+      this.logger.warn("web-remote: question.ask returned a malformed answer, delegating");
+      return delegate(next);
+    } catch (error) {
+      this.#logDelegation("question", error);
+      return delegate(next);
+    }
+  }
+  async #prompt(args) {
+    const sessionId = requireSessionId(args);
+    const text = requireString2(args.text, "text", 1, PROMPT_TEXT_LIMIT);
+    if (text.trim().length === 0) throw new ProtocolError("bad-request", '"text" must not be blank');
+    const request = {
+      requestId: nonEmptyString(args.requestId) ? args.requestId : randomUUID4(),
+      sessionId,
+      mode: args.mode === "steer" ? "steer" : "queue",
+      content: [{ type: "text", text }],
+      clientTimeZone: this.clientTimeZone
+    };
+    return this.sessionController.prompt(request, this.#lifecycle.signal);
+  }
+  async #follow(args, stream) {
+    const sessionId = requireSessionId(args);
+    const abort = new AbortController();
+    this.#followers.add(abort);
+    this.#watch(sessionId);
+    stream.onCancel(() => abort.abort());
+    const request = {
+      address: { kind: "session", sessionId },
+      activate: args.activate === true,
+      assistantStream: args.assistantStream === true
+    };
+    if (isInteger(args.maxMessages)) request.maxMessages = args.maxMessages;
+    try {
+      for await (const frame of this.sessionController.follow(request, abort.signal)) {
+        if (stream.closed) break;
+        const seq = frame?.type === "event" && isInteger(frame.event?.seq) ? frame.event?.seq : void 0;
+        if (!stream.push(frame, seq)) break;
+      }
+      if (!stream.closed) stream.end("complete");
+    } catch (error) {
+      if (abort.signal.aborted) {
+        if (!stream.closed) stream.end("cancelled");
+      } else if (stream.closed) {
+      } else {
+        this.logger.warn("web-remote: follow failed: %s", error instanceof Error ? error.message : error);
+        stream.end("error");
+      }
+    } finally {
+      this.#followers.delete(abort);
+      this.#unwatch(sessionId);
+    }
+  }
+  async #control(stream) {
+    const abort = new AbortController();
+    this.#followers.add(abort);
+    stream.onCancel(() => abort.abort());
+    try {
+      for await (const frame of this.sessionController.control(abort.signal)) {
+        if (stream.closed) break;
+        if (!stream.push(frame)) break;
+      }
+      if (!stream.closed) stream.end("complete");
+    } catch (error) {
+      if (abort.signal.aborted) {
+        if (!stream.closed) stream.end("cancelled");
+      } else if (!stream.closed) {
+        this.logger.warn("web-remote: control failed: %s", error instanceof Error ? error.message : error);
+        stream.end("error");
+      }
+    } finally {
+      this.#followers.delete(abort);
+    }
+  }
+  #canForward(sessionId) {
+    if (!nonEmptyString(sessionId)) return false;
+    if (!this.#watched.has(sessionId)) return false;
+    return this.transport?.status === "ready";
+  }
+  #watch(sessionId) {
+    this.#watched.set(sessionId, (this.#watched.get(sessionId) ?? 0) + 1);
+  }
+  #unwatch(sessionId) {
+    const count = this.#watched.get(sessionId);
+    if (count === void 0) return;
+    if (count <= 1) this.#watched.delete(sessionId);
+    else this.#watched.set(sessionId, count - 1);
+  }
+  #logDelegation(kind, error) {
+    if (error instanceof ProtocolError && error.code === "transport/timeout") {
+      this.logger.info("web-remote: %s timed out on the web, delegating to the desktop", kind);
+      return;
+    }
+    this.logger.warn(
+      "web-remote: %s forwarding failed (%s), delegating to the desktop",
+      kind,
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+function delegate(next) {
+  return typeof next === "function" ? next() : "unavailable";
+}
+function payloadObject(value) {
+  return value !== null && typeof value === "object" ? value : {};
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object";
+}
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function isInteger(value) {
+  return typeof value === "number" && Number.isInteger(value);
+}
+function requireString2(value, field2, min, max) {
+  if (typeof value !== "string") throw new ProtocolError("bad-request", `"${field2}" must be a string`);
+  const length = value.length;
+  if (length < min || length > max) {
+    throw new ProtocolError("bad-request", `"${field2}" must be ${min}-${max} characters`);
+  }
+  return value;
+}
+function requireSessionId(args) {
+  return requireString2(args?.sessionId, "sessionId", 1, 200);
+}
+function sanitizeQuestions(questions) {
+  if (!Array.isArray(questions) || questions.length === 0) return void 0;
+  const list = questions;
+  const result = [];
+  for (const question of list) {
+    if (!isRecord(question) || typeof question.id !== "string" || typeof question.question !== "string") {
+      return void 0;
+    }
+    const options = Array.isArray(question.options) ? question.options.filter((option) => isRecord(option) && typeof option.label === "string").map((option) => ({
+      label: option.label,
+      ...typeof option.description === "string" ? { description: option.description } : {}
+    })) : void 0;
+    result.push({
+      id: question.id,
+      question: question.question,
+      ...typeof question.header === "string" ? { header: question.header } : {},
+      ...typeof question.detail === "string" ? { detail: question.detail } : {},
+      ...options === void 0 ? {} : { options },
+      ...question.multiSelect === true ? { multiSelect: true } : {}
+    });
+  }
+  return result;
+}
+function normalizeAnswers(questions, answers) {
+  if (!Array.isArray(answers) || answers.length !== questions.length) return void 0;
+  const list = answers;
+  const byId = new Map(questions.map((question) => [question.id, question]));
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const answer of list) {
+    if (!isRecord(answer) || typeof answer.id !== "string" || !byId.has(answer.id) || seen.has(answer.id)) {
+      return void 0;
+    }
+    if (!Array.isArray(answer.selected)) return void 0;
+    const selected = answer.selected;
+    if (!selected.every((item) => typeof item === "string")) {
+      return void 0;
+    }
+    const question = byId.get(answer.id);
+    if (question === void 0) return void 0;
+    const labels = new Set((question.options ?? []).map((option) => option.label));
+    if (labels.size > 0 && !selected.every((item) => labels.has(item))) return void 0;
+    if (answer.custom !== void 0 && typeof answer.custom !== "string") return void 0;
+    const custom = typeof answer.custom === "string" ? answer.custom : void 0;
+    seen.add(answer.id);
+    result.push({
+      id: answer.id,
+      selected: [...selected],
+      ...custom === void 0 ? {} : { custom }
+    });
+  }
+  return result.length === questions.length ? result : void 0;
+}
+
+// src/features/web-remote.ts
+var REFRESH_CREDENTIAL = "DSH_WEB_REMOTE_REFRESH_TOKEN";
+var SUPPORTED_METHODS = ["list", "state", "create", "prompt", "cancel", "follow", "control"];
+function mountWebRemote(ctx, config, deps = {}) {
+  const logger = deps.logger ?? console;
+  const resolvedController = ctx.get("sessionController");
+  if (resolvedController === void 0) {
+    logger.warn("web-remote: sessionController is absent; feature not mounted");
+    return () => {
+    };
+  }
+  const sessionController = resolvedController;
+  const now = deps.now ?? Date.now;
+  const dataDir = config.dataDir ? expandHome(config.dataDir) : join7(pluginDataDir("personal-hub"), "web-remote");
+  const statusFile = join7(dataDir, "status.json");
+  const tokenFile = join7(dataDir, "refresh-token.json");
+  const stateStore = new JsonStateStore(join7(dataDir, "state.json"), {
+    deviceId: "",
+    relayUrl: "",
+    pairedAt: 0
+  });
+  const deviceName = config.deviceName || hostname();
+  const lifecycle = new AbortController();
+  const disposers = [];
+  let identity;
+  let transport;
+  let bridge;
+  let bridgeRegistered = false;
+  let refreshToken = "";
+  let accessToken = "";
+  let accessExpiresAt = 0;
+  let stopped = false;
+  let published = { state: "starting" };
+  let lastPublished = "";
+  let writeChain = Promise.resolve();
+  let pairingAttempt = 0;
+  logger.info("web-remote: mounted, data directory %s", dataDir);
+  const missing = SUPPORTED_METHODS.filter((method) => typeof sessionController[method] !== "function");
+  if (missing.length > 0) {
+    logger.warn("web-remote: sessionController is missing %s; some operations will fail", missing.join(", "));
+  }
+  const ready = initialize().catch((error) => {
+    reportError("initialization failed", error);
+  });
+  function publish(patch) {
+    published = { ...published, ...patch, updatedAt: new Date(now()).toISOString() };
+    const snapshot = { ...published };
+    const text = JSON.stringify(snapshot);
+    if (text === lastPublished) return;
+    lastPublished = text;
+    writeChain = writeChain.then(() => writeJsonFile(statusFile, snapshot)).catch((error) => logger.warn("web-remote: cannot write status file: %s", message(error)));
+  }
+  async function initialize() {
+    await mkdir5(dataDir, { recursive: true, mode: 448 });
+    identity = deps.identity ?? await loadOrCreateIdentity({ dir: dataDir });
+    await stateStore.load();
+    const previousRelay = stateStore.state.relayUrl;
+    if (previousRelay !== config.relayUrl && previousRelay !== "") {
+      await clearRefreshToken();
+    }
+    await stateStore.update((state) => {
+      state.deviceId = identity.deviceId;
+      state.relayUrl = config.relayUrl;
+    });
+    publish({
+      state: config.relayUrl.length > 0 ? "starting" : "waiting-relay",
+      deviceId: identity.deviceId,
+      fingerprint: identity.fingerprint,
+      deviceName,
+      relayUrl: config.relayUrl
+    });
+    if (config.relayUrl.length === 0) {
+      logger.info("web-remote: no relayUrl configured; waiting for one in the plugin settings");
+      return;
+    }
+    try {
+      relayEndpoints(config.relayUrl);
+    } catch (error) {
+      publish({ state: "error", lastError: message(error) });
+      logger.error("web-remote: invalid relayUrl: %s", message(error));
+      return;
+    }
+    refreshToken = await readRefreshToken();
+    if (refreshToken.length === 0) {
+      if (!config.autoPair) {
+        publish({ state: "waiting-pairing" });
+        logger.info("web-remote: no credential yet; set webRemote.autoPair or pair explicitly");
+        return;
+      }
+      const paired = await pair();
+      if (!paired) return;
+    }
+    await connect();
+  }
+  async function pair() {
+    if (stopped) return;
+    pairingAttempt += 1;
+    publish({ state: "pairing" });
+    logger.info(
+      "web-remote: pairing device %s (%s) with %s",
+      deviceName,
+      identity.deviceId,
+      config.relayUrl
+    );
+    try {
+      const tokens = await pairDevice({
+        relayUrl: config.relayUrl,
+        name: deviceName,
+        platform: process.platform,
+        pubkey: identity.publicKeyBase64,
+        deviceId: identity.deviceId,
+        scopes: config.scopes,
+        fetchImpl: deps.fetchImpl,
+        signal: lifecycle.signal,
+        now,
+        ...typeof deps.pairingPollMs === "number" && deps.pairingPollMs > 0 ? { pollIntervalMs: deps.pairingPollMs } : {},
+        onCode: (code) => {
+          logger.info(
+            "web-remote: open %s and enter code %s (expires in %d minutes)",
+            code.verificationUri,
+            code.userCode,
+            Math.round(code.expiresIn / 60)
+          );
+          publish({
+            state: "pairing",
+            pairing: {
+              code: code.userCode,
+              uri: code.verificationUri,
+              expiresAt: new Date(now() + code.expiresIn * 1e3).toISOString()
+            }
+          });
+        },
+        onStatus: (issue) => {
+          publish({ pairingStatus: issue.code, lastError: null });
+        }
+      });
+      refreshToken = tokens.refresh_token;
+      await writeRefreshToken(refreshToken);
+      accessToken = tokens.access_token;
+      accessExpiresAt = now() + (Number(tokens.expires_in) || 900) * 1e3;
+      await stateStore.update((state) => {
+        state.pairedAt = now();
+        state.deviceId = identity.deviceId;
+        state.relayUrl = config.relayUrl;
+      });
+      publish({
+        state: "paired",
+        pairedAt: new Date(now()).toISOString(),
+        pairing: void 0,
+        lastError: null
+      });
+      logger.info("web-remote: paired; connecting to relay");
+      return true;
+    } catch (error) {
+      if (stopped || error?.code === "pair/aborted") return false;
+      reportError("pairing failed", error);
+      publish({ state: "pairing-required", pairing: void 0 });
+      return false;
+    }
+  }
+  const transportProxy = {
+    get status() {
+      return transport?.status ?? "idle";
+    },
+    request(op, args, options) {
+      if (transport === void 0) {
+        return Promise.reject(new ProtocolError("transport/not-ready", "the relay connection is not ready"));
+      }
+      return transport.request(op, args, options);
+    }
+  };
+  function ensureBridge() {
+    if (bridge === void 0) {
+      bridge = new WebRemoteBridge({
+        sessionController,
+        transport: transportProxy,
+        config: {
+          ...config,
+          defaultCwd: ctx.get("workingDirectory")?.defaultDirectory ?? process.cwd()
+        },
+        logger,
+        now
+      });
+    }
+    if (!bridgeRegistered) {
+      const active = bridge;
+      register(ctx, "approval/request", (request, next) => active.handleApproval(request, next));
+      register(ctx, "user-questions/request", (request, next) => active.handleQuestion(request, next));
+      bridgeRegistered = true;
+    }
+    return bridge;
+  }
+  async function connect() {
+    if (stopped) return;
+    transport?.stop("reconnecting");
+    const endpoints = relayEndpoints(config.relayUrl);
+    const transportOptions = {
+      url: endpoints.wsUrl,
+      identity,
+      getAccessToken,
+      WebSocket: deps.WebSocket,
+      heartbeatMs: config.heartbeatMs,
+      requestTimeoutMs: config.requestTimeoutMs,
+      reconnect: { minMs: config.reconnectMinMs, maxMs: config.reconnectMaxMs },
+      logger,
+      onRequest: (op, args) => ensureBridge().handleOp(op, args),
+      onStream: (op, args, stream) => ensureBridge().handleStream(op, args, stream),
+      onStatus: (state) => onTransportStatus(state),
+      onAuthRequired: (error) => onAuthRequired(error)
+    };
+    transport = deps.createTransport ? deps.createTransport(transportOptions) : new RemoteTransport(transportOptions);
+    ensureBridge();
+    publish({ state: "connecting" });
+    transport.start();
+  }
+  function register(context, event, listener) {
+    if (typeof context.on !== "function") {
+      logger.warn("web-remote: ctx.on is unavailable; cannot listen to %s", event);
+      return;
+    }
+    try {
+      const subscribe = context.on;
+      const dispose2 = subscribe(event, listener);
+      if (typeof dispose2 === "function") disposers.push(dispose2);
+    } catch (error) {
+      logger.warn("web-remote: cannot listen to %s: %s", event, message(error));
+    }
+  }
+  function onTransportStatus(state) {
+    const status = state.status;
+    if (status === "ready") {
+      publish({
+        state: "connected",
+        connectedAt: new Date(now()).toISOString(),
+        lastError: null,
+        watching: bridge?.watchedSessions ?? []
+      });
+      return;
+    }
+    if (status === "connecting" || status === "reconnecting") {
+      publish({ state: status, connectedAt: void 0, watching: bridge?.watchedSessions ?? [] });
+      return;
+    }
+    if (status === "auth-required") {
+      publish({ state: "auth-required", lastError: state.error ?? "relay rejected the access token" });
+      return;
+    }
+    if (status === "revoked") {
+      publish({ state: "revoked", lastError: "this device was revoked from the web" });
+      return;
+    }
+    if (status === "stopped") publish({ state: "stopped" });
+  }
+  async function onAuthRequired(error) {
+    accessToken = "";
+    accessExpiresAt = 0;
+    if (error instanceof ProtocolError && error.code === "device/revoked") return;
+    if (!config.autoPair || stopped) return;
+    if (pairingAttempt >= 2) {
+      publish({ state: "auth-required", lastError: "pairing failed twice; not retrying automatically" });
+      return;
+    }
+    await clearRefreshToken();
+    const attempt = pairingAttempt;
+    setTimeout(() => {
+      if (stopped) return;
+      void pair().then((paired) => paired ? connect() : void 0).catch((failure2) => reportError("re-pairing failed", failure2));
+    }, Math.min(3e4, 1500 * Math.max(1, attempt))).unref?.();
+  }
+  async function getAccessToken() {
+    if (accessToken.length > 0 && now() < accessExpiresAt - 6e4) return accessToken;
+    if (refreshToken.length === 0) refreshToken = await readRefreshToken();
+    if (refreshToken.length === 0) {
+      throw new ProtocolError("auth/invalid-token", "no refresh token is stored");
+    }
+    const refreshed = await refreshAccessToken({
+      relayUrl: config.relayUrl,
+      refreshToken,
+      fetchImpl: deps.fetchImpl
+    });
+    accessToken = refreshed.access_token;
+    accessExpiresAt = now() + (Number(refreshed.expires_in) || 900) * 1e3;
+    if (typeof refreshed.refresh_token === "string" && refreshed.refresh_token !== refreshToken) {
+      refreshToken = refreshed.refresh_token;
+      await writeRefreshToken(refreshToken);
+    }
+    return accessToken;
+  }
+  async function readRefreshToken() {
+    const credentials = ctx.get("credentials");
+    if (credentials?.resolve) {
+      try {
+        const hit = await credentials.resolve(REFRESH_CREDENTIAL);
+        if (typeof hit?.value === "string" && hit.value.trim().length > 0) return hit.value.trim();
+      } catch (error) {
+        logger.warn("web-remote: cannot read credential: %s", message(error));
+      }
+    }
+    try {
+      const stored = JSON.parse(await readFile5(tokenFile, "utf8"));
+      if (isRecord2(stored) && typeof stored.refresh_token === "string" && stored.refresh_token.length > 0) {
+        return stored.refresh_token;
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") logger.warn("web-remote: cannot read token file: %s", message(error));
+    }
+    return "";
+  }
+  async function writeRefreshToken(token) {
+    const credentials = ctx.get("credentials");
+    if (credentials?.set) {
+      try {
+        await credentials.set(REFRESH_CREDENTIAL, token);
+        return;
+      } catch (error) {
+        logger.warn("web-remote: cannot write credential, falling back to file: %s", message(error));
+      }
+    }
+    await writeFile4(tokenFile, `${JSON.stringify({ refresh_token: token })}
+`, {
+      encoding: "utf8",
+      mode: 384
+    });
+  }
+  async function clearRefreshToken() {
+    refreshToken = "";
+    accessToken = "";
+    accessExpiresAt = 0;
+    const credentials = ctx.get("credentials");
+    if (credentials?.unset) {
+      try {
+        await credentials.unset(REFRESH_CREDENTIAL);
+      } catch {
+      }
+    }
+    try {
+      await writeFile4(tokenFile, "", { encoding: "utf8", mode: 384 });
+    } catch {
+    }
+  }
+  function reportError(context, error) {
+    const text = message(error);
+    publish({ state: "error", lastError: `${context}: ${text}` });
+    logger.error("web-remote: %s: %s", context, text);
+  }
+  function dispose() {
+    if (stopped) return;
+    stopped = true;
+    lifecycle.abort();
+    try {
+      transport?.stop("plugin-disposed");
+    } catch (error) {
+      logger.warn("web-remote: transport stop failed: %s", message(error));
+    }
+    try {
+      bridge?.dispose();
+    } catch {
+    }
+    for (const disposeListener of disposers) {
+      try {
+        disposeListener();
+      } catch (error) {
+        logger.warn("web-remote: listener dispose failed: %s", message(error));
+      }
+    }
+    publish({ state: "stopped" });
+  }
+  void ready;
+  return dispose;
+}
+function isRecord2(value) {
+  return value !== null && typeof value === "object";
+}
+function message(error) {
+  if (error instanceof PairingError || error instanceof ProtocolError) return `${error.code}: ${error.message}`;
+  return error instanceof Error ? error.message : String(error);
+}
+
 // src/index.ts
 var name = "personal-hub";
 var inject = ["sessionController"];
@@ -7225,6 +9141,11 @@ var FEATURES = [
     key: "git",
     label: "Git panel",
     mount: mountGit
+  },
+  {
+    key: "webRemote",
+    label: "Web Remote",
+    mount: mountWebRemote
   }
 ];
 function apply(ctx, config) {
@@ -7244,10 +9165,10 @@ function apply(ctx, config) {
         continue;
       }
       try {
-        disposers.push(feature.key === "telegram" ? feature.mount(ctx, settings.telegram, { logger }) : feature.mount(ctx, settings.git, { logger }));
+        disposers.push(feature.key === "telegram" ? feature.mount(ctx, settings.telegram, { logger }) : feature.key === "git" ? feature.mount(ctx, settings.git, { logger }) : feature.mount(ctx, settings.webRemote, { logger }));
         logger.info("personal-hub: %s mounted", feature.label);
       } catch (error) {
-        logger.error("personal-hub: %s failed to mount: %s", feature.label, message(error));
+        logger.error("personal-hub: %s failed to mount: %s", feature.label, message2(error));
       }
     }
     return () => {
@@ -7255,7 +9176,7 @@ function apply(ctx, config) {
         try {
           dispose();
         } catch (error) {
-          logger.warn("personal-hub: feature dispose failed: %s", message(error));
+          logger.warn("personal-hub: feature dispose failed: %s", message2(error));
         }
       }
     };
@@ -7276,7 +9197,7 @@ function makeLogger(ctx) {
     error: (...args) => console.error("[personal-hub]", ...args)
   };
 }
-function message(error) {
+function message2(error) {
   return error instanceof Error ? error.message : String(error);
 }
 export {

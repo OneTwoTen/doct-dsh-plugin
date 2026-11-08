@@ -12,9 +12,10 @@
  * deps)` returning a disposer, then list it in `FEATURES` below.
  */
 import { normalizeConfig } from './lib/config.ts'
-import type { GitConfig, HubConfig, TelegramConfig } from './lib/config.ts'
+import type { GitConfig, TelegramConfig, WebRemoteConfig } from './lib/config.ts'
 import { mountGit } from './features/git.ts'
 import { mountTelegramRemote } from './features/telegram-remote.ts'
+import { mountWebRemote } from './features/web-remote.ts'
 import type { DshContext, Disposer, Logger } from './host/dsh.ts'
 
 export const name = 'personal-hub'
@@ -38,6 +39,11 @@ const FEATURES = [
     label: 'Git panel',
     mount: mountGit,
   },
+  {
+    key: 'webRemote',
+    label: 'Web Remote',
+    mount: mountWebRemote,
+  },
 ] as const
 
 /**
@@ -56,18 +62,20 @@ export function apply(ctx: DshContext, config: unknown): void {
   ctx.effect(() => {
     const disposers: Disposer[] = []
     for (const feature of FEATURES) {
-      const featureConfig: TelegramConfig | GitConfig | undefined = settings[feature.key]
+      const featureConfig: TelegramConfig | GitConfig | WebRemoteConfig | undefined = settings[feature.key]
       if (featureConfig === undefined) continue
       if (featureConfig.enabled === false) {
         logger.info('personal-hub: %s disabled by configuration', feature.label)
         continue
       }
       try {
-        // The two entries carry different configuration slices, so the
+        // The three entries carry different configuration slices, so the
         // discriminant is what keeps each `mount` paired with its own slice.
         disposers.push(feature.key === 'telegram'
           ? feature.mount(ctx, settings.telegram, { logger })
-          : feature.mount(ctx, settings.git, { logger }))
+          : feature.key === 'git'
+            ? feature.mount(ctx, settings.git, { logger })
+            : feature.mount(ctx, settings.webRemote, { logger }))
         logger.info('personal-hub: %s mounted', feature.label)
       } catch (error) {
         logger.error('personal-hub: %s failed to mount: %s', feature.label, message(error))

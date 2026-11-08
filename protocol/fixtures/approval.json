@@ -1,0 +1,41 @@
+{
+  "frames": [
+    {
+      "t": "req",
+      "id": "d_2a01",
+      "op": "approval.ask",
+      "args": {
+        "approvalId": "ap_01",
+        "sessionId": "s_01",
+        "toolName": "bash",
+        "callId": "call_01",
+        "reason": "run npm test",
+        "displayReason": { "en": "Run the test suite", "vi": "Chạy bộ kiểm thử" }
+      }
+    },
+    { "t": "res", "id": "d_2a01", "ok": true, "value": { "outcome": "allowed-once" } },
+    {
+      "t": "req",
+      "id": "d_2a02",
+      "op": "question.ask",
+      "args": {
+        "questionId": "q_01",
+        "sessionId": "s_01",
+        "callId": "call_02",
+        "questions": [
+          {
+            "id": "scope",
+            "question": "Chọn phạm vi",
+            "options": [{ "label": "Tệp" }, { "label": "Thư mục" }]
+          }
+        ]
+      }
+    },
+    {
+      "t": "res",
+      "id": "d_2a02",
+      "ok": true,
+      "value": { "answers": [{ "id": "scope", "selected": ["Tệp"] }] }
+    }
+  ]
+}

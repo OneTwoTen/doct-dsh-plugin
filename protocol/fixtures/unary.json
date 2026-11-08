@@ -1,0 +1,32 @@
+{
+  "frames": [
+    {
+      "t": "req",
+      "id": "d_1f0c9a",
+      "op": "session.prompt",
+      "args": { "sessionId": "s_01", "text": "xin chào", "requestId": "req_01" }
+    },
+    {
+      "t": "res",
+      "id": "d_1f0c9a",
+      "ok": true,
+      "value": { "accepted": true }
+    },
+    {
+      "t": "req",
+      "id": "d_1f0ca0",
+      "op": "session.state",
+      "args": { "sessionId": "s_missing" }
+    },
+    {
+      "t": "res",
+      "id": "d_1f0ca0",
+      "ok": false,
+      "error": {
+        "code": "session/not-found",
+        "message": "Session s_missing was not found",
+        "retryable": false
+      }
+    }
+  ]
+}

@@ -20,6 +20,27 @@ export interface TelegramConfig {
   pushChanges: boolean
 }
 
+/** The phone-first Web Remote bridge: an outbound relay connection plus pairing. */
+export interface WebRemoteConfig {
+  enabled: boolean
+  /** Relay base URL, for example `https://chat.example.com` or `wss://host/ws`. */
+  relayUrl: string
+  /** Machine name shown on the approval screen; empty uses the OS hostname. */
+  deviceName: string
+  /** Data directory; empty uses `<DSH_HOME>/personal-hub/web-remote`. */
+  dataDir: string
+  /** Start the device pairing flow automatically when no token is stored. */
+  autoPair: boolean
+  /** Scopes requested during pairing. */
+  scopes: string[]
+  approvalTimeoutMs: number
+  questionTimeoutMs: number
+  requestTimeoutMs: number
+  heartbeatMs: number
+  reconnectMinMs: number
+  reconnectMaxMs: number
+}
+
 /** How a model drafts a change request. */
 export interface PullConfig {
   enabled: boolean
@@ -106,6 +127,7 @@ export interface GitConfig {
 /** The normalized configuration one plugin row carries. */
 export interface HubConfig {
   telegram: TelegramConfig
+  webRemote: WebRemoteConfig
   git: GitConfig
 }
 
@@ -126,9 +148,29 @@ export const TELEGRAM_DEFAULTS = Object.freeze({
   pushChanges: true,
 })
 
+/** Web Remote bridge defaults. */
+export const WEB_REMOTE_DEFAULTS = Object.freeze({
+  enabled: false,
+  /** Relay base URL, e.g. `https://chat.example.com` or `wss://host/ws`. */
+  relayUrl: '',
+  /** Machine name shown on the approval screen; empty uses the OS hostname. */
+  deviceName: '',
+  /** Data directory; empty uses `<DSH_HOME>/personal-hub/web-remote`. */
+  dataDir: '',
+  /** Start the device pairing flow automatically when no token is stored. */
+  autoPair: true,
+  /** Scopes requested during pairing. */
+  scopes: ['chat', 'approval'] as string[],
+  approvalTimeoutMs: 300000,
+  questionTimeoutMs: 300000,
+  requestTimeoutMs: 60000,
+  heartbeatMs: 25000,
+  reconnectMinMs: 1000,
+  reconnectMaxMs: 30000,
+})
+
 /** Git defaults. */
-export const GIT_DEFAULTS = Object.freeze({
-  enabled: true,
+export const GIT_DEFAULTS = Object.freeze({  enabled: true,
   /** `auto` detects the code host from the remote; `none` disables pull requests and issues. */
   forge: 'auto',
   /** Remote to prefer; empty means the branch's upstream remote, then `origin`. */
@@ -262,6 +304,12 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+function asStringList(value: unknown, fallback: readonly string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback]
+  const list = value.map((item) => String(item).trim()).filter((item) => item.length > 0)
+  return list.length > 0 ? list : [...fallback]
+}
+
 function asChoice<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return choices.includes(text as T) ? (text as T) : fallback
@@ -283,6 +331,9 @@ export function normalizeConfig(raw: unknown): HubConfig {
   const worktree = asRecord(git.worktree)
   const cleanup = asRecord(worktree.cleanup)
   const merged = asRecord(git.merged)
+  const webRemote = asRecord(root.webRemote)
+  const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 60000 })
+  const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 300000 })
   return {
     telegram: {
       enabled: asBoolean(telegram.enabled, TELEGRAM_DEFAULTS.enabled),
@@ -298,6 +349,32 @@ export function normalizeConfig(raw: unknown): HubConfig {
       progressIntervalMs: asPositiveInteger(telegram.progressIntervalMs, TELEGRAM_DEFAULTS.progressIntervalMs, { min: 250 }),
       pushResponses: asBoolean(telegram.pushResponses, TELEGRAM_DEFAULTS.pushResponses),
       pushChanges: asBoolean(telegram.pushChanges, TELEGRAM_DEFAULTS.pushChanges),
+    },
+    webRemote: {
+      enabled: asBoolean(webRemote.enabled, WEB_REMOTE_DEFAULTS.enabled),
+      relayUrl: asString(webRemote.relayUrl, WEB_REMOTE_DEFAULTS.relayUrl).trim(),
+      deviceName: asString(webRemote.deviceName, WEB_REMOTE_DEFAULTS.deviceName).trim(),
+      dataDir: asString(webRemote.dataDir, WEB_REMOTE_DEFAULTS.dataDir).trim(),
+      autoPair: asBoolean(webRemote.autoPair, WEB_REMOTE_DEFAULTS.autoPair),
+      scopes: asStringList(webRemote.scopes, WEB_REMOTE_DEFAULTS.scopes),
+      approvalTimeoutMs: asPositiveInteger(
+        webRemote.approvalTimeoutMs,
+        WEB_REMOTE_DEFAULTS.approvalTimeoutMs,
+        { min: 5000, max: 3600000 },
+      ),
+      questionTimeoutMs: asPositiveInteger(
+        webRemote.questionTimeoutMs,
+        WEB_REMOTE_DEFAULTS.questionTimeoutMs,
+        { min: 5000, max: 3600000 },
+      ),
+      requestTimeoutMs: asPositiveInteger(
+        webRemote.requestTimeoutMs,
+        WEB_REMOTE_DEFAULTS.requestTimeoutMs,
+        { min: 1000, max: 600000 },
+      ),
+      heartbeatMs: asPositiveInteger(webRemote.heartbeatMs, WEB_REMOTE_DEFAULTS.heartbeatMs, { min: 1000, max: 120000 }),
+      reconnectMinMs,
+      reconnectMaxMs,
     },
     git: {
       enabled: asBoolean(git.enabled, GIT_DEFAULTS.enabled),

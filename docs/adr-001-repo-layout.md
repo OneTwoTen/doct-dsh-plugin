@@ -34,10 +34,12 @@ Lý do:
 ```
 doct-dsh-plugin/                 # repo root (không publish)
 ├── plugin/                      # giữ nguyên: @local/personal-hub
-│   ├── index.js
-│   ├── features/telegram-remote.js
-│   ├── features/web-remote.js   # mới
-│   └── lib/remote-protocol.js   # mới (adapter sang protocol/)
+│   ├── src/index.ts
+│   ├── src/features/telegram-remote.ts
+│   ├── src/features/web-remote.ts        # mới
+│   ├── src/lib/remote-protocol.ts        # mới (adapter sang protocol/)
+│   ├── dist/                             # build: index.js + client.js
+│   └── scripts/build.mjs
 ├── protocol/                    # nguồn sự thật duy nhất
 │   ├── schema/*.json            # JSON Schema cho frame/API
 │   ├── fixtures/*.json          # golden message dùng cho cả 3 test suite
@@ -60,7 +62,7 @@ doct-dsh-plugin/                 # repo root (không publish)
 
 Quy ước:
 
-- **`plugin/` không nằm trong pnpm workspace.** Nó không có dependency; thêm vào workspace chỉ tạo `node_modules` thừa và làm bẩn gói cài. Test chạy bằng `node --test` như hiện tại.
+- **`plugin/` không nằm trong pnpm workspace.** Nó không có dependency runtime (chỉ devDependencies cho TypeScript/esbuild); thêm vào workspace chỉ tạo `node_modules` thừa và làm bẩn gói cài. Test chạy bằng `node --test` trên TypeScript như hiện tại.
 - **`protocol/` là nguồn duy nhất.** TS types sinh từ schema; Zig dùng validator viết tay + fixture; plugin import schema/fixture khi test.
 - **`deploy/` chỉ chứa mẫu.** Token, `sk_live_...`, certificate thật nằm ngoài repo (systemd credential / file 0600).
 - **Tag theo artifact:** `plugin-v0.5.0`, `web-v0.1.0`, `server-v0.1.0`; không ép một version chung.
@@ -109,8 +111,12 @@ Cơ chế tách: `git filter-repo --path web --path server --path protocol` (gi�
 
 ## 8. Việc cần làm ngay
 
-- [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol`.
-- [ ] Thêm `server/`, `web/`, `protocol/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).
-- [ ] Viết `protocol/schema/hello.json` + fixture đầu tiên, dùng chung cho test plugin và relay.
+- [x] `protocol/` với schema, fixture và đặc tả v1.
+- [x] `plugin/src/features/web-remote.ts` + `plugin/src/lib/remote-*.ts` (Phase 1 bridge).
+- [x] `tools/dev-relay/` — relay Node + WebChat tối giản để thử end-to-end (không phải `server/`).
+- [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol` (khi scaffold web).
+- [ ] Thêm `server/`, `web/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).
+- [ ] Relay Zig (Phase 2), web SvelteKit (Phase 3).
 - [ ] Thêm ba workflow path-filter.
 - [ ] Ghi quy ước tag vào README.
+

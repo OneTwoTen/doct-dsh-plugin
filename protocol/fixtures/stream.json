@@ -1,0 +1,36 @@
+{
+  "frames": [
+    {
+      "t": "open",
+      "id": "r_9ab1",
+      "op": "session.follow",
+      "args": { "sessionId": "s_01", "assistantStream": true }
+    },
+    {
+      "t": "item",
+      "id": "r_9ab1",
+      "item": {
+        "type": "snapshot",
+        "cursor": 12,
+        "hasMore": false,
+        "records": [{ "type": "event", "event": { "type": "turn/start", "seq": 12, "time": 1762560000000, "data": {} } }]
+      }
+    },
+    {
+      "t": "item",
+      "id": "r_9ab1",
+      "seq": 13,
+      "item": {
+        "type": "event",
+        "event": {
+          "type": "assistant/message",
+          "seq": 13,
+          "time": 1762560000500,
+          "data": { "message": { "id": "m_1", "content": [{ "type": "text", "text": "Chào bạn" }] } }
+        }
+      }
+    },
+    { "t": "cancel", "id": "r_9ab1" },
+    { "t": "end", "id": "r_9ab1", "reason": "cancelled" }
+  ]
+}

@@ -337,12 +337,13 @@ GitHub (60 lượt/giờ khi không có token; đặt token ở `GITHUB_TOKEN`, 
 ### Cầu nối với Host (lưu ý khi nâng cấp DSH)
 
 Giao diện gọi Host qua **route Fetch chính xác** dưới kênh dùng chung của Connection:
-`POST /api/personal-hub-git/<thao-tác>` cho 32 thao tác — đọc (`overview`, `diff`, `diffAll`,
+`POST /api/personal-hub-git/<thao-tác>` cho 37 thao tác — đọc (`overview`, `diff`, `diffAll`,
 `commits`, `commit`, `branches`, `forge`, `pulls`, `pullRequest`, `branchPull`, `issues`, `issue`,
 `draftMessage`, `actionState`, `mergeSettings`, `cleanupState`), ghi (`stage`, `unstage`, `discard`,
 `commitChanges`, `push`, `pull`, `switchBranch`, `createBranch`, `createPull`, `publish`,
-`mergeSettingsSet`, `cleanupRun`, `startAction`) và worktree (`worktreeState`, `worktreeCreate`,
-`worktreeRemove`) — đăng ký bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin
+`mergeSettingsSet`, `cleanupRun`, `startAction`) và worktree (`worktrees`, `worktreeState`,
+`worktreeAdd`, `worktreeSwitch`, `worktreeCreate`, `worktreeRemovePath`, `worktreeRemove`,
+`worktreePrune`) — đăng ký bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin
 và bước xác thực Peer của Connection, nên chỉ trang loopback đã đăng nhập mới đọc được kho mã trên
 máy này.
 
@@ -425,7 +426,96 @@ Các mục `pull`, `worktree`, `merged` có thể đổi ngay trong giao diện:
 hình của hàng `personal-hub` → phần **Worktree và pull request đã gộp** → **Lưu**. Thao tác này ghi
 vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn sau khi khởi động lại DSH.
 
-## 7. Tệp dữ liệu
+## 7. Web Remote (Phase 1 — bridge)
+
+Điều khiển DSH từ điện thoại qua một relay WebSocket. Plugin là bên **chủ động nối ra ngoài**;
+máy chạy DSH không mở port nào. Phần đã xong là **bridge Host** và **giao thức v1**
+([`protocol/`](../protocol/README.md)). Relay Zig là Phase 2 và web client SvelteKit là Phase 3;
+để chạy thử ngay, repo có relay phát triển bằng Node tại [`tools/dev-relay/`](../tools/dev-relay/).
+
+```powershell
+node tools/dev-relay/index.mjs --port 8787
+# rồi đặt relayUrl: 'http://127.0.0.1:8787' và bật webRemote
+```
+
+### Cấu hình
+
+```yaml
+webRemote:
+  enabled: false         # bật tính năng; cần relayUrl hợp lệ
+  relayUrl: ''           # https://chat.example.com hoặc wss://host/ws
+  deviceName: ''         # tên hiện trên màn hình duyệt; rỗng = hostname máy
+  dataDir: ''            # mặc định <DSH_HOME>/personal-hub/web-remote
+  autoPair: true         # chưa có token thì tự chạy luồng ghép cặp
+  scopes: [chat, approval]
+  approvalTimeoutMs: 300000
+  questionTimeoutMs: 300000
+  requestTimeoutMs: 60000
+  heartbeatMs: 25000
+  reconnectMinMs: 1000
+  reconnectMaxMs: 30000
+```
+
+Bật bằng **Plugins** → thẻ cấu hình hàng `personal-hub` → `webRemote` → **Lưu** (hoặc sửa
+`cordis.patch.yml` của profile). Sửa `relayUrl` của một thiết bị đã ghép cặp sẽ xoá credential cũ:
+thiết bị phải ghép cặp lại với relay mới.
+
+### Ghép cặp (luồng B)
+
+1. Plugin tạo (hoặc đọc) khoá Ed25519 tại `<dataDir>/device.key`, quyền `0600`.
+2. Nó gọi `POST /v1/device/authorize` và nhận `user_code` + `verification_uri`.
+3. Mã và URL được ghi vào `status.json` và log Host:
+   `web-remote: open https://…/pair and enter code ABCD-EFGH (expires in 10 minutes)`.
+4. Người dùng đăng nhập WebChat, nhập mã, xem tên máy + fingerprint rồi bấm **Duyệt**.
+5. Plugin poll `POST /v1/device/token`, lưu refresh token vào credential store
+   (`DSH_WEB_REMOTE_REFRESH_TOKEN`; fallback `<dataDir>/refresh-token.json`), rồi mở WebSocket.
+6. Mọi lần kết nối lại đều ký `hello` bằng khoá riêng (nonce + timestamp), không dùng Bearer trần.
+
+Token được gửi qua **subprotocol** (`dsh-remote.v1`, `bearer.<access>`, `device.<id>`), không nằm
+trong query string.
+
+### Trạng thái và lỗi
+
+`<dataDir>/status.json` (mặc định `%USERPROFILE%\.dsh\personal-hub\web-remote\status.json`):
+
+| `state` | Nghĩa |
+|---|---|
+| `waiting-relay` | chưa cấu hình `relayUrl` |
+| `pairing` | đang chờ duyệt; `pairing.code`/`pairing.uri` để nhập |
+| `pairing-required` | chưa có credential và `autoPair: false`, hoặc ghép cặp thất bại |
+| `connecting` / `reconnecting` | đang mở hoặc mở lại WebSocket (backoff 1→30 giây, full jitter) |
+| `connected` | đã `hello.ok`; `watching` là các phiên đang được web theo dõi |
+| `auth-required` | relay từ chối token; plugin xoá credential và ghép cặp lại (tối đa 2 lần) |
+| `revoked` | thiết bị bị thu hồi từ web; dừng kết nối |
+| `error` | lỗi gần nhất nằm ở `lastError` |
+
+### Phê duyệt và câu hỏi
+
+- Plugin đăng ký answerer cho `approval/request` và `user-questions/request`.
+- Chỉ chuyển tiếp khi **có web client đang `session.follow` đúng phiên đó**; phiên không được theo
+  dõi vẫn do giao diện desktop trả lời.
+- Web trả lời qua `approval.ask` / `question.ask`; bind `(approvalId, sessionId, callId)`.
+- Quá hạn, mất kết nối, hoặc câu trả lời sai bind → plugin gọi `next()` để answerer desktop xử lý;
+  **không bao giờ tự cho phép**. Câu trả lời hợp lệ duy nhất cho một lần duyệt là `allowed-once`.
+- Vì waterfall chạy tuần tự, trong lúc chờ web (tối đa `approvalTimeoutMs`), hộp thoại desktop của
+  phiên đó không được hỏi. Đặt timeout ngắn hơn nếu muốn desktop làm dự phòng nhanh.
+
+### Thao tác đã hỗ trợ
+
+`session.list`, `session.state`, `session.create`, `session.rename`, `session.prompt`,
+`session.cancel`, `session.events`, `session.modelCatalog`, `session.selectModel`;
+stream `session.follow` (snapshot → event → assistant-stream) và `session.control`.
+Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
+
+### Giới hạn Phase 1
+
+- Relay Zig và web client SvelteKit chưa có. Relay Node trong `tools/dev-relay/` chỉ để phát triển
+  (RAM, một người dùng, không TLS); không dùng cho dữ liệu thật.
+- Chỉ prompt văn bản; ảnh/tệp, xoá phiên, đổi workspace chưa có trong giao thức.
+- Chưa có màn hình hiển thị mã ghép cặp trong DSH UI; mã nằm ở log Host và `status.json`.
+- Chưa có E2E: relay thấy plaintext. Chỉ dùng TLS và relay do bạn kiểm soát.
+
+## 8. Tệp dữ liệu
 
 `%USERPROFILE%\.dsh\personal-hub\telegram-remote\` (hoặc `$DSH_HOME/personal-hub/telegram-remote/`):
 
@@ -433,6 +523,13 @@ vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn s
 - `state.json` — `offset` của getUpdates, chat đã ghép nối, phiên đang gắn.
 - `status.json` — trạng thái chạy: `waiting-token`, `polling`, `invalid-token`, `error`, `stopped`,
   bot đã kết nối, lỗi gần nhất. Đây là nơi kiểm tra khi bot im lặng.
+
+`%USERPROFILE%\.dsh\personal-hub\web-remote\` (hoặc `$DSH_HOME/personal-hub/web-remote/`):
+
+- `device.key` — khoá riêng Ed25519, `0600`; **không** sao lưu lên relay.
+- `state.json` — `deviceId`, `relayUrl`, `pairedAt`.
+- `refresh-token.json` — chỉ dùng khi credential store không khả dụng.
+- `status.json` — trạng thái kết nối/ghép cặp như bảng ở mục 7.
 
 `%USERPROFILE%\.dsh\personal-hub\git.json` giữ trạng thái của bảng Git:
 
@@ -444,15 +541,17 @@ vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn s
 - `cleanup` — kết quả lượt dọn worktree gần nhất: `at`, `removed`, `kept` (kèm lý do);
 - `probe` — lần cuối giao diện New Session hỏi trạng thái worktree (dùng để kiểm tra bridge).
 
-## 8. Mã nguồn TypeScript và thêm tính năng mới
+## 9. Mã nguồn TypeScript và thêm tính năng mới
 
 Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
 
 | Đường dẫn | Nội dung |
 |---|---|
 | `src/index.ts` | Host entry: `name`, `inject`, `apply`, danh sách `FEATURES` |
-| `src/features/git.ts` | 32 route `/api/personal-hub-git/*`, thao tác chuỗi, worktree |
+| `src/features/git.ts` | 37 route `/api/personal-hub-git/*`, thao tác chuỗi, quản lý worktree |
 | `src/features/telegram-remote.ts` | Bot Telegram, lệnh, đẩy phản hồi về chat |
+| `src/features/web-remote.ts` | Bridge Web Remote: ghép cặp, transport, answerer |
+| `src/lib/remote-*.ts` | Giao thức v1, identity Ed25519, pairing, WebSocket transport |
 | `src/lib/` | Phần thuần: đọc Git, forge, soạn PR/commit, worktree, text, state store |
 | `src/shared/protocol.ts` | Kiểu dữ liệu dùng chung giữa Host và trình duyệt |
 | `src/client/` | Giao diện: panel Git, hành động, diff, worktree, thẻ cấu hình |
@@ -473,7 +572,7 @@ npm test             # build rồi chạy toàn bộ test
 Thêm tính năng mới: tạo `src/features/<tên>.ts` export `mount(ctx, config, deps)` trả về hàm dọn
 dẹp, thêm một mục vào `FEATURES` trong `src/index.ts` và một khoá cấu hình trong `src/lib/config.ts`.
 
-## 9. Kiểm thử
+## 10. Kiểm thử
 
 ```powershell
 cd plugin
@@ -487,6 +586,10 @@ trên một Connection giả rồi gọi thẳng các route `/api/personal-hub-g
 bằng một React giả nên kiểm được cây render mà không cần trình duyệt. Phần logic thuần (chọn hành
 động, diff hai cột, ẩn khoảng trắng) có test riêng trong `test/action-logic.test.ts` và
 `test/diff-model.test.ts`.
+
+Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký Ed25519, pairing qua
+`fetch` giả, transport trên WebSocket giả (hello, heartbeat, backoff, stream), và bridge với
+`sessionController` giả. Không có test nào cần relay hay mạng thật.
 
 ## Giới hạn hiện tại
 
@@ -507,3 +610,5 @@ bằng một React giả nên kiểm được cây render mà không cần trìn
 - Diff dừng sau 4000 dòng và bị cắt theo `maxDiffBytes` để giao diện giữ được nhịp.
 - PR/issue cần remote GitHub/GitLab và `gh` (hoặc `glab`); thiếu CLI thì GitHub vẫn đọc được bằng
   REST công khai nhưng **không có chi tiết kiểm tra** và hạn mức thấp.
+- Web Remote có bridge + relay phát triển; chưa có relay production (Zig) và web client SvelteKit,
+  chưa hiển thị mã ghép cặp trong DSH UI, chỉ nhận prompt văn bản. Xem mục 7.

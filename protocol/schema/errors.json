@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doct.local/dsh-remote/v1/errors.json",
+  "title": "Web Remote v1 error catalogue",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "required": ["retryable"],
+    "properties": {
+      "retryable": { "type": "boolean" },
+      "description": { "type": "string" }
+    },
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "bad-frame": { "retryable": false },
+      "bad-request": { "retryable": false },
+      "unsupported": { "retryable": false },
+      "internal": { "retryable": true },
+      "auth/invalid-token": { "retryable": false },
+      "auth/expired": { "retryable": true },
+      "auth/replay": { "retryable": false },
+      "device/pending": { "retryable": true },
+      "device/revoked": { "retryable": false },
+      "session/not-found": { "retryable": false },
+      "stream/limit": { "retryable": false },
+      "stream/overflow": { "retryable": false },
+      "approval/expired": { "retryable": false },
+      "rate/limited": { "retryable": true },
+      "transport/not-ready": { "retryable": true },
+      "transport/timeout": { "retryable": true },
+      "transport/closed": { "retryable": true },
+      "transport/cancelled": { "retryable": false }
+    }
+  ]
+}
