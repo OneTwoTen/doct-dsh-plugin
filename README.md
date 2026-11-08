@@ -18,8 +18,20 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 |---|---|
 | [`plugin/`](plugin/) | Package cài được: `@local/personal-hub` (Host + Client + bundle patch + locale + icon + test) |
 | [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH khi phát triển plugin (xem bên dưới) |
+| [`docs/`](docs/) | Nghiên cứu kiến trúc, đặc tả ghép cặp/xác thực, ADR bố trí repo |
+| `protocol/`, `web/`, `server/`, `deploy/` | Kế hoạch Web Remote (chưa scaffold) — xem [ADR-001](docs/adr-001-repo-layout.md) |
 
-`plugin/` là thư mục cài đặt; `tools/` không nằm trong package.
+`plugin/` là thư mục cài đặt; `tools/` và `docs/` không nằm trong package.
+
+## Web Remote (kế hoạch)
+
+Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở port trên máy cá nhân.
+
+- Kiến trúc và so sánh phương án: [`docs/nghien-cuu-remote-webchat.md`](docs/nghien-cuu-remote-webchat.md)
+- Ghép cặp thiết bị, Clerk, API, schema: [`docs/dac-ta-v1-pairing-va-xac-thuc.md`](docs/dac-ta-v1-pairing-va-xac-thuc.md)
+- Bố trí repo (monorepo giai đoạn đầu): [`docs/adr-001-repo-layout.md`](docs/adr-001-repo-layout.md)
+
+Trạng thái: mới ở mức thiết kế; `features/web-remote.js` và relay chưa được viết.
 
 ## Cài đặt
 
