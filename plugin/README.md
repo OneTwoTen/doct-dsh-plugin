@@ -1,9 +1,13 @@
 # Personal hub — plugin cá nhân cho DeepSeek Harness
 
 Một bundle duy nhất, nhiều tính năng: **điều khiển DSH từ xa qua Telegram**, và **bảng Git** ở
-thanh bên phải (thay đổi, diff từng tệp, commit, pull request kèm trạng thái, issue).
+thanh bên phải với trải nghiệm theo T3 Code: một nút thao tác thông minh (commit, push, pull, tạo
+PR, publish), hộp commit chọn tệp với thông điệp do model viết, diff xếp chồng có header dính,
+đổi nhánh, lịch sử commit, pull request kèm trạng thái, và issue.
 Bảng Git còn **tạo pull request bằng model của phiên** (effort thấp nhất), **worktree riêng cho
 phiên mới** (bắt đầu từ nhánh local hoặc nhánh remote đã fetch), và **dọn dẹp sau khi PR được gộp**.
+
+Toàn bộ mã là TypeScript trong `src/`; `npm run build` tạo `dist/` mà Host và trình duyệt nạp.
 
 Gửi tin nhắn trong chat Telegram đã ghép nối → tin nhắn thành prompt cho một phiên DSH →
 câu trả lời được đẩy về chat thành các tin riêng: phản hồi trung gian, tóm tắt thay đổi chính,
@@ -115,14 +119,66 @@ Tab đọc kho mã của **thư mục làm việc của phiên**: Host tự tra 
 thêm. Bảng tự làm mới theo `git.refreshMs` (mặc định 30 giây), khi bấm nút ⟳, và khi bạn quay lại
 cửa sổ DSH.
 
-### Thay đổi
+### Thanh thao tác Git
 
-- Nhóm **Đã stage**, **Chưa stage**, **Chưa theo dõi**, **Xung đột**.
-- Mỗi tệp có nhãn A/M/D/R/C/!/U theo màu, thư mục mờ phía trước tên tệp, và `+n −m` theo số dòng.
-- Bấm một tệp → diff từng dòng: số dòng hai bên, nền xanh/đỏ, dòng `@@` của hunk, tự cắt khi diff
-  quá dài, và ghi chú riêng cho tệp nhị phân.
-- Đầu bảng có nhánh hiện tại (`↑ahead ↓behind`), remote, thanh tỉ lệ thêm/bớt, số tệp đang stash,
-  và chip PR của nhánh nếu nhánh đã có pull request.
+Đầu bảng là **một cụm nút giống T3 Code**: nút chính nêu việc nên làm tiếp, mũi tên bên phải mở menu.
+
+| Nút chính | Khi nào |
+|---|---|
+| **Commit** | có thay đổi và nhánh đang chậm hơn upstream (hoặc kho chưa có remote) |
+| **Commit & push** | có thay đổi, nhánh đã có PR đang mở hoặc đang ở nhánh mặc định |
+| **Commit, push & pull request** | có thay đổi, nhánh riêng, chưa có PR |
+| **Push** / **Push & tạo pull request** | cây sạch, có commit local chưa đẩy |
+| **Pull** | nhánh chậm hơn upstream |
+| **Publish repository** | kho chưa có remote |
+| **Sync branch** (khoá) | nhánh đã tách khỏi upstream — rebase/merge trước |
+
+Bấm nút chính là chạy ngay; nếu ô thông điệp đang trống thì model của phiên tự viết. Menu liệt kê
+**Commit**, **Push**, **Tạo pull request** và **Publish repository**; mục nào không dùng được thì có
+lý do khi rê chuột. Commit trong menu mở hộp commit thay vì chạy ngay.
+
+Trong lúc chạy, cả cụm nút đổi thành dòng tiến trình: nhãn pha (`Đang commit…`, `Đang push…`,
+`Đang tạo pull request…`, `Đang chạy <hook>…`), đồng hồ đếm giây, và dòng output cuối của lệnh.
+Xong thì dòng đó thành **dòng thành công 10 giây** (ví dụ `Đã push 1a2b3c4 lên origin/feat`) kèm nút
+**Xem pull request**; lỗi hiện thành toast đỏ giữ tới khi bạn đóng.
+
+Ở **nhánh mặc định**, push và tạo PR hỏi xác nhận trước: tiếp tục trên nhánh mặc định, hoặc
+**checkout nhánh feature rồi chạy tiếp** — cùng một thao tác, không phải làm lại từ đầu.
+
+### Hộp commit
+
+Cuối ngăn **Changes** là hộp commit:
+
+- **Checkbox ở từng tệp** (và ở đầu danh sách) quyết định tệp nào vào commit. Chọn một phần tệp là
+  commit đúng phần đó: plugin reset index rồi `git add` đúng các tệp đã chọn.
+- **Ô thông điệp để trống** → model của phiên viết subject/body từ diff đã chọn (effort thấp nhất).
+  Nút **Tự sinh** gọi lại bất cứ lúc nào; `Ctrl/Cmd+Enter` để commit.
+- **Commit** chạy commit; **Commit trên nhánh mới** tạo nhánh `feature/…` từ thông điệp rồi commit
+  trên đó (giống *Commit on new branch* của T3 Code).
+- Khi đang merge, commit chọn tệp bị từ chối (`commit/merge-in-progress`) vì Git cần mọi tệp đã
+  giải quyết xung đột.
+
+### Diff
+
+Ngăn Changes là **một khối cuộn gồm mọi tệp thay đổi**, mỗi tệp một mục:
+
+- **Header dính** khi cuộn: checkbox chọn commit, mũi tên mở/thu, nhãn A/M/D/R/C/!/U, đường dẫn
+  (thư mục mờ, tên tệp sáng), `+n −m`, nút sao chép đường dẫn.
+- **Một cột / Hai cột** (unified/split), **xuống dòng**, **ẩn thay đổi khoảng trắng**, **mở tất cả**,
+  **thu gọn tất cả**. Lựa chọn được nhớ trong trình duyệt.
+- **Phạm vi**: **Chưa commit** (`git diff HEAD` cộng tệp chưa theo dõi) hoặc **Nhánh** (so với
+  merge-base của nhánh mặc định) — giống hai chế độ *Uncommitted* và *Changes* của T3 Code.
+- Tệp nhị phân, tệp quá lớn, và diff dài hơn 4000 dòng đều có ghi chú riêng thay vì làm treo bảng.
+
+### Đổi nhánh
+
+Nút nhánh cạnh tên kho mở danh sách tìm kiếm gồm **nhánh local và nhánh remote**:
+
+- nhánh hiện tại, nhánh mặc định và nhánh remote được đánh dấu;
+- chọn một nhánh remote sẽ tạo nhánh local tracking rồi checkout;
+- gõ tên chưa có trong danh sách → dòng **Tạo nhánh "<tên>"**.
+
+Lỗi checkout (cây bẩn, nhánh đã bị checkout ở worktree khác) hiện nguyên văn trong hộp thoại.
 
 ### Pull request và issue
 
@@ -135,21 +191,29 @@ cửa sổ DSH.
 
 ### Tạo pull request bằng AI
 
-Trong tab **Pull request** có nút **Tạo pull request**. Bấm lần thứ nhất để xem xác nhận (nhánh
-nguồn → nhánh nền, chọn được nhánh nền), bấm **Tạo** để chạy:
+Tạo PR là một bước trong chuỗi thao tác (`commit_push_pr`, `create_pr`) hoặc mục **Tạo pull request**
+trong menu:
 
-1. Plugin đẩy nhánh hiện tại lên remote (`git push --set-upstream`); đặt `git.pull.push: false` nếu
-   bạn tự đẩy trước.
-2. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ các commit cùng diff của nhánh, với
+1. Plugin đẩy nhánh hiện tại lên remote nếu cần (`git.push --set-upstream`); đặt
+   `git.pull.push: false` nếu bạn tự đẩy trước.
+2. Nếu nhánh đã có PR đang mở, plugin dùng lại PR đó (`opened_existing`) thay vì tạo trùng.
+3. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ các commit cùng diff của nhánh, với
    **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`). Có thể ghim route
    khác bằng `git.pull.provider` + `git.pull.model`.
-3. Pull request được mở bằng `gh pr create` (GitLab: `glab mr create`), hoặc REST API GitHub khi
+4. Pull request được mở bằng `gh pr create` (GitLab: `glab mr create`), hoặc REST API GitHub khi
    không có CLI đã đăng nhập.
-4. Pull request vừa tạo được **gắn với phiên** để theo dõi việc gộp.
+5. Pull request vừa tạo được **gắn với phiên** để theo dõi việc gộp.
 
 Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì plugin vẫn tạo PR bằng bản nháp dựng
 từ commit và tên tệp, và ghi lý do vào `draft.error` trong câu trả lời — không chặn thao tác.
 Nhánh chưa có commit mới so với nhánh nền sẽ bị từ chối với `pr/no-commits`.
+
+### Publish repository
+
+Kho chưa có remote thì nút chính là **Publish repository**. Hộp thoại hỏi máy chủ (GitHub/GitLab,
+chỉ bật khi CLI tương ứng đã đăng nhập), tên `owner/repo`, và chế độ **Riêng tư** / **Công khai**.
+Plugin chạy `gh repo create --source . --remote origin --push` (GitLab: `glab repo create` rồi push),
+sau đó bảng tự làm mới và remote mới xuất hiện ở header.
 
 ### Worktree cho phiên mới
 
@@ -251,12 +315,18 @@ GitHub (60 lượt/giờ khi không có token; đặt token ở `GITHUB_TOKEN`, 
 ### Cầu nối với Host (lưu ý khi nâng cấp DSH)
 
 Giao diện gọi Host qua **route Fetch chính xác** dưới kênh dùng chung của Connection:
-`POST /api/personal-hub-git/<thao-tác>` cho 19 thao tác (`overview`, `diff`, `commits`, `commit`,
-`branches`, `forge`, `pulls`, `pull`, `branchPull`, `issues`, `issue`, `createPull`,
-`worktreeState`, `worktreeCreate`, `worktreeRemove`, `mergeSettings`, `mergeSettingsSet`,
-`cleanupState`, `cleanupRun`), đăng ký
-bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin và bước xác thực Peer của
-Connection, nên chỉ trang loopback đã đăng nhập mới đọc được kho mã trên máy này.
+`POST /api/personal-hub-git/<thao-tác>` cho 32 thao tác — đọc (`overview`, `diff`, `diffAll`,
+`commits`, `commit`, `branches`, `forge`, `pulls`, `pullRequest`, `branchPull`, `issues`, `issue`,
+`draftMessage`, `actionState`, `mergeSettings`, `cleanupState`), ghi (`stage`, `unstage`, `discard`,
+`commitChanges`, `push`, `pull`, `switchBranch`, `createBranch`, `createPull`, `publish`,
+`mergeSettingsSet`, `cleanupRun`, `startAction`) và worktree (`worktreeState`, `worktreeCreate`,
+`worktreeRemove`) — đăng ký bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin
+và bước xác thực Peer của Connection, nên chỉ trang loopback đã đăng nhập mới đọc được kho mã trên
+máy này.
+
+Một thao tác chuỗi (`startAction`) trả về `actionId` ngay rồi chạy nền; giao diện hỏi
+`actionState` mỗi 300 ms để lấy pha, nhãn, output và kết quả. Nhờ vậy một commit + push + tạo PR
+không bị cắt khi bạn đổi tab, và tiến trình vẫn hiện đúng như T3 Code.
 
 Không dùng `connection.rpc.handle()` nữa: trên DSH 0.2.2-rc.1, hàm đăng ký đó đọc `ctx.webServer`
 trong context của chính plugin Connection — context này không `inject` `webServer` — nên mọi lần
@@ -292,6 +362,16 @@ git:
     maxOutputTokens: 4096
     contextBytes: 60000  # bytes diff đưa vào prompt
     commitLimit: 40
+
+  commit:                # viết thông điệp commit bằng AI
+    enabled: true
+    provider: ''         # ghim route; rỗng = model hiện tại của phiên
+    model: ''
+    timeoutMs: 60000
+    maxOutputTokens: 512
+    contextBytes: 50000  # bytes diff đưa vào prompt
+    styleLimit: 12       # số commit gần nhất làm mẫu giọng văn
+    maxSubjectLength: 72
 
   worktree:              # worktree cho phiên mới
     enabled: true
@@ -342,23 +422,49 @@ vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn s
 - `cleanup` — kết quả lượt dọn worktree gần nhất: `at`, `removed`, `kept` (kèm lý do);
 - `probe` — lần cuối giao diện New Session hỏi trạng thái worktree (dùng để kiểm tra bridge).
 
-## 8. Thêm tính năng mới
+## 8. Mã nguồn TypeScript và thêm tính năng mới
 
-Tạo `features/<tên>.js` export `mount(ctx, config, deps)` trả về hàm dọn dẹp, rồi thêm một mục
-vào mảng `FEATURES` trong `index.js` và một khoá cấu hình tương ứng trong `lib/config.js`.
+Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
+
+| Đường dẫn | Nội dung |
+|---|---|
+| `src/index.ts` | Host entry: `name`, `inject`, `apply`, danh sách `FEATURES` |
+| `src/features/git.ts` | 32 route `/api/personal-hub-git/*`, thao tác chuỗi, worktree |
+| `src/features/telegram-remote.ts` | Bot Telegram, lệnh, đẩy phản hồi về chat |
+| `src/lib/` | Phần thuần: đọc Git, forge, soạn PR/commit, worktree, text, state store |
+| `src/shared/protocol.ts` | Kiểu dữ liệu dùng chung giữa Host và trình duyệt |
+| `src/client/` | Giao diện: panel Git, hành động, diff, worktree, thẻ cấu hình |
+| `src/host/dsh.ts` | Kiểu structural của API Harness mà plugin gọi |
+| `dist/index.js`, `dist/client.js` | Sản phẩm build (Host ESM và bundle trình duyệt) |
+| `test/*.test.ts` | Test chạy bằng `node --test` (Node 24 strip types) |
+
+Build bằng esbuild; `dist/` là thứ được cài, nên **build lại sau mỗi lần sửa**:
+
+```powershell
+cd plugin
+npm install          # lần đầu: typescript, esbuild, @types/node
+npm run build        # dist/index.js + dist/client.js
+npm run typecheck    # tsc cho src/ và test/
+npm test             # build rồi chạy toàn bộ test
+```
+
+Thêm tính năng mới: tạo `src/features/<tên>.ts` export `mount(ctx, config, deps)` trả về hàm dọn
+dẹp, thêm một mục vào `FEATURES` trong `src/index.ts` và một khoá cấu hình trong `src/lib/config.ts`.
 
 ## 9. Kiểm thử
 
 ```powershell
 cd plugin
-node --test
+npm test
 ```
 
 Bộ test dùng một `fetch` giả lập Telegram và một `sessionController` giả, nên chạy được khi
 không có token thật. Test của bảng Git tạo một kho mã tạm thật (cần `git` trên máy), mount Host
-trên một Connection giả rồi gọi thẳng 19 route `/api/personal-hub-git/<thao-tác>`, nên không cần
-DSH đang chạy. Test worktree tạo một remote `--bare` cục bộ nên kiểm được cả nhánh local, nhánh
-remote sau `fetch`, và trường hợp worktree còn thay đổi chưa commit.
+trên một Connection giả rồi gọi thẳng các route `/api/personal-hub-git/<thao-tác>`, kể cả
+`startAction`/`actionState` với một remote `--bare` cục bộ. Test giao diện nạp `dist/client.js`
+bằng một React giả nên kiểm được cây render mà không cần trình duyệt. Phần logic thuần (chọn hành
+động, diff hai cột, ẩn khoảng trắng) có test riêng trong `test/action-logic.test.ts` và
+`test/diff-model.test.ts`.
 
 ## Giới hạn hiện tại
 
@@ -367,8 +473,9 @@ remote sau `fetch`, và trường hợp worktree còn thay đổi chưa commit.
 - Phê duyệt và câu hỏi của DSH chỉ được báo về chat, chưa trả lời được từ Telegram.
 - Chưa có API xoá phiên: chỉ lưu trữ/khôi phục, không xoá tệp phiên.
 - Phiên đang chạy phải dừng (`/cancel`) trước khi lưu trữ.
-- Bảng Git chỉ đọc với thay đổi và commit: chưa stage/unstage, commit hay checkout. Thao tác ghi duy
-  nhất là tạo pull request, tạo/xoá worktree, và đổi thiết lập dọn dẹp.
+- Bảng Git giờ **đọc và ghi**: commit (chọn tệp), push, pull, đổi/tạo nhánh, tạo PR, publish. Chưa
+  có amend, rebase tương tác, hay stage từng hunk; discard chỉ hoàn tác tệp đã theo dõi (và xoá tệp
+  chưa theo dõi khi bật `includeUntracked`).
 - Worktree được tạo **ngay khi bấm Tạo**, trước tin nhắn đầu tiên, nên phiên chưa mở hoặc kho mã là
   worktree liên kết sẽ bị từ chối thay vì chờ. Worktree đã tạo không tự xoá khi bạn đổi ý: dùng nút ✕.
 - Tạo pull request cần đẩy được nhánh lên remote và `gh`/`glab` đã đăng nhập (GitHub không có CLI

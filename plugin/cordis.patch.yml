@@ -14,6 +14,11 @@
             enabled: true
             base: ''
             push: true
+          # Viết thông điệp commit: model hiện tại của phiên khi ô thông điệp để trống.
+          commit:
+            enabled: true
+            provider: ''
+            model: ''
           # Worktree riêng cho phiên mới; nguồn local hoặc nhánh remote đã fetch.
           worktree:
             enabled: true

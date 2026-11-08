@@ -16,7 +16,7 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 
 | Đường dẫn | Nội dung |
 |---|---|
-| [`plugin/`](plugin/) | Package cài được: `@local/personal-hub` (Host + Client + bundle patch + locale + icon + test) |
+| [`plugin/`](plugin/) | Package cài được: `@local/personal-hub` (Host + Client + bundle patch + locale + icon + test); mã TypeScript trong `src/`, sản phẩm build trong `dist/` |
 | [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH khi phát triển plugin (xem bên dưới) |
 | [`docs/`](docs/) | Nghiên cứu kiến trúc, đặc tả ghép cặp/xác thực, ADR bố trí repo |
 | `protocol/`, `web/`, `server/`, `deploy/` | Kế hoạch Web Remote (chưa scaffold) — xem [ADR-001](docs/adr-001-repo-layout.md) |
@@ -31,11 +31,13 @@ Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở p
 - Ghép cặp thiết bị, Clerk, API, schema: [`docs/dac-ta-v1-pairing-va-xac-thuc.md`](docs/dac-ta-v1-pairing-va-xac-thuc.md)
 - Bố trí repo (monorepo giai đoạn đầu): [`docs/adr-001-repo-layout.md`](docs/adr-001-repo-layout.md)
 
-Trạng thái: mới ở mức thiết kế; `features/web-remote.js` và relay chưa được viết.
+Trạng thái: mới ở mức thiết kế; `src/features/web-remote.ts` và relay chưa được viết.
 
 ## Cài đặt
 
-Bundle được cài vào một profile của DSH bằng Plugin Manager với đường dẫn tuyệt đối tới `plugin/`:
+Bundle được cài vào một profile của DSH bằng Plugin Manager với đường dẫn tuyệt đối tới `plugin/`.
+Chạy `cd plugin && npm install && npm run build` trước, vì profile nạp `dist/index.js` và
+`dist/client.js`.
 
 ```text
 plugin_manager install_bundle  →  <đường dẫn tuyệt đối>/plugin
@@ -97,13 +99,21 @@ Tab **Git** trong thanh bên phải (cạnh Files/Browser/Terminal), mở bằng
 thẻ Git ở trang bắt đầu của thanh bên phải, hoặc dấu **+** trong dải tab. Bảng đọc kho mã của thư
 mục làm việc của phiên đang xem và tự làm mới mỗi 30 giây.
 
+Trải nghiệm theo **T3 Code**: một cụm nút thao tác thông minh ở đầu bảng, hộp commit chọn tệp,
+diff xếp chồng, và đổi nhánh ngay trong bảng.
+
 | Phần | Nội dung |
 |---|---|
-| Thay đổi | nhóm Đã stage / Chưa stage / Chưa theo dõi / Xung đột, nhãn A/M/D/R/C, `+n −m`, bấm để xem diff từng dòng có số dòng và nền xanh/đỏ |
-| Đầu bảng | nhánh, `↑ahead ↓behind`, remote, thanh tỉ lệ thêm/bớt, stash, chip PR của nhánh |
+| Thao tác | nút chính nêu việc kế tiếp — Commit / Commit & push / Commit, push & PR / Push / Push & PR / Pull / Publish — kèm menu Commit, Push, Tạo PR, Publish; chạy có tiến trình, đồng hồ, output, dòng thành công 10 giây và toast lỗi |
+| Commit | checkbox từng tệp quyết định phạm vi commit; thông điệp để trống thì model của phiên tự viết; **Commit** hoặc **Commit trên nhánh mới** |
+| Diff | mọi tệp trong một khối cuộn, header dính, mở/thu từng tệp, một cột/hai cột, xuống dòng, ẩn thay đổi khoảng trắng, phạm vi Chưa commit hoặc Nhánh, sao chép đường dẫn |
+| Nhánh | danh sách tìm kiếm local + remote, đánh dấu nhánh hiện tại/mặc định, tạo nhánh mới bằng cách gõ tên |
 | Pull request | lọc Đang mở / Đã gộp / Đã đóng / Tất cả; trạng thái kiểm tra, đánh giá; chi tiết có checks, reviews, tệp, bình luận |
 | Issue | lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả, bình luận |
 | Commit | lịch sử gần nhất; bấm để xem mô tả, tệp và patch |
+
+Ở **nhánh mặc định**, push và tạo PR hỏi xác nhận: tiếp tục trên nhánh mặc định, hoặc checkout nhánh
+feature rồi chạy tiếp cùng thao tác. Kho chưa có remote thì nút chính là **Publish repository**.
 
 Git chạy qua `subprocess` của DSH; PR/issue đọc qua **GitHub CLI** (`gh`) — hoặc `glab` cho GitLab —
 nên dùng đúng phiên đăng nhập sẵn có. Không có CLI thì GitHub vẫn đọc được bằng REST công khai
@@ -111,13 +121,19 @@ nên dùng đúng phiên đăng nhập sẵn có. Không có CLI thì GitHub v�
 
 ## Phát triển
 
+Mã plugin là TypeScript trong `plugin/src/`; `plugin/dist/` là sản phẩm build mà DSH nạp.
+
 ```powershell
 cd plugin
-node --test        # hàm thuần, kênh RPC của bảng Git trên kho mã tạm, và bridge Telegram giả lập
+npm install        # lần đầu: typescript, esbuild, @types/node
+npm run build      # dist/index.js + dist/client.js
+npm run typecheck  # tsc cho src/ và test/
+npm test           # build rồi chạy toàn bộ test (Node 24 strip types)
 ```
 
-Thêm tính năng mới: tạo `plugin/features/<tên>.js` export `mount(ctx, config, deps)` trả về hàm dọn dẹp,
-thêm một mục vào `FEATURES` trong `plugin/index.js` và khoá cấu hình tương ứng trong `plugin/lib/config.js`.
+Thêm tính năng mới: tạo `plugin/src/features/<tên>.ts` export `mount(ctx, config, deps)` trả về hàm
+dọn dẹp, thêm một mục vào `FEATURES` trong `plugin/src/index.ts` và khoá cấu hình tương ứng trong
+`plugin/src/lib/config.ts`. Nhớ chạy `npm run build` trước khi cài lại bundle.
 
 ### `tools/`
 
@@ -140,7 +156,8 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
 - Phê duyệt và câu hỏi của DSH được báo về chat nhưng chưa trả lời được từ Telegram.
 - DSH chưa có API xoá phiên; plugin chỉ **lưu trữ** (ẩn khỏi danh sách, dữ liệu vẫn còn) và **khôi phục**.
   Phiên đang chạy phải `/cancel` hoặc đợi xong trước khi lưu trữ.
-- Bảng Git là chỉ đọc (chưa stage/unstage, commit hay tạo PR từ bảng); diff dừng sau 4000 dòng.
+- Bảng Git giờ **đọc và ghi**: commit (chọn tệp), push, pull, đổi/tạo nhánh, tạo PR, publish; diff
+  dừng sau 4000 dòng mỗi tệp. Chưa có amend, rebase tương tác hay stage từng hunk.
   PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được nhưng không có chi tiết checks.
 
 ## Giấy phép
