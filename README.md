@@ -15,8 +15,8 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
   hoặc nhánh remote đã fetch.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
 - **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
-  mở port trên máy. Phase 1 (bridge Host + giao thức v1) và dev relay đã có; relay Zig và web client
-  đang triển khai.
+  mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH) và dev
+  relay đã có; relay Zig và web client đang triển khai.
 
 ## Cấu trúc
 
@@ -42,6 +42,7 @@ Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở p
 | Hạng mục | Trạng thái |
 |---|---|
 | Bridge Host (`src/features/web-remote.ts`) | đã có: identity Ed25519, pairing luồng B, transport WS, 9 thao tác phiên, 2 stream, approval/question |
+| Thẻ Web Remote (`src/client/web-remote.tsx`) | đã có: trạng thái, mã ghép cặp kèm đếm ngược, ghép cặp lại, ngắt ghép nối, sửa relay/tên thiết bị |
 | Giao thức v1 + fixture | đã có: schema, golden frame, test codec |
 | Relay phát triển (Node) | đã có trong [`tools/dev-relay/`](tools/dev-relay/) — chạy thử end-to-end, không dùng production |
 | Relay (Zig) | chưa có — Phase 2 |
@@ -55,9 +56,10 @@ Cấu hình, trạng thái và giới hạn: [`plugin/README.md#7-web-remote-pha
 # 1. Relay + WebChat (in ra URL có token)
 node tools/dev-relay/index.mjs --port 8787
 
-# 2. Bật Web Remote trong DSH: relayUrl: 'http://127.0.0.1:8787'
+# 2. Plugins → hàng personal-hub → thẻ Web Remote: tick "Bật Web Remote",
+#    nhập relayUrl 'http://127.0.0.1:8787' rồi Lưu
 
-# 3. Mở link /pair?code=… mà relay in ra khi plugin yêu cầu ghép cặp, bấm Duyệt
+# 3. Mã ghép cặp hiện ngay trong thẻ đó; bấm liên kết trang duyệt, nhập mã, bấm Duyệt
 # 4. Mở link WebChat trên điện thoại (cùng LAN thì chạy relay với --host 0.0.0.0)
 ```
 
@@ -207,8 +209,9 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
   PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được (không có chi tiết checks), còn
   GitLab cần `glab` hoặc token `GITLAB_TOKEN`/`DSH_GITLAB_TOKEN` để dùng REST. GitLab tự host phải khai
   báo host trong `git.gitlabHosts`.
-- Web Remote mới có bridge Host và giao thức: chưa có relay, web client, màn hình nhập mã trong DSH UI;
-  chỉ nhận prompt văn bản và chưa có E2E (relay thấy plaintext — cần TLS và relay tự quản).
+- Web Remote mới có bridge Host, giao thức, và thẻ cấu hình/ghép cặp trong DSH UI: chưa có relay
+  Zig hay web client SvelteKit (dev relay có WebChat tối giản); chỉ nhận prompt văn bản và chưa có
+  E2E (relay thấy plaintext — cần TLS và relay tự quản).
 
 ## Giấy phép
 

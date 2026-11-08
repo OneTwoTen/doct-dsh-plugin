@@ -30,7 +30,9 @@ Pair page   : http://127.0.0.1:8787/pair
 ```
 
 Mở WebChat trên điện thoại (cùng mạng LAN thì dùng `--host 0.0.0.0`; CLI in thêm URL LAN), sau đó
-cấu hình hàng `personal-hub` trong DSH:
+trong DSH mở **Plugins → hàng `personal-hub` → thẻ Web Remote**, tick **Bật Web Remote**, nhập
+`relayUrl` rồi **Lưu**. Thẻ cũng hiện mã ghép cặp và trạng thái kết nối; có thể sửa trực tiếp
+`cordis.patch.yml` của profile thay vì dùng thẻ:
 
 ```yaml
 webRemote:
@@ -45,8 +47,8 @@ Khi plugin khởi động, nó gọi `/v1/device/authorize`; relay in ra:
 [relay] mở http://127.0.0.1:8787/pair?code=ABCD-EFGH để duyệt
 ```
 
-Mở link đó, kiểm tra fingerprint, bấm **Duyệt thiết bị**. Plugin nhận token, mở WebSocket, và
-WebChat hiện danh sách phiên.
+Mã đó cũng hiện trong thẻ Web Remote. Mở link, kiểm tra fingerprint, bấm **Duyệt thiết bị**. Plugin
+nhận token, mở WebSocket, và WebChat hiện danh sách phiên.
 
 ## Tham số
 

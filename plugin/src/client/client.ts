@@ -10,11 +10,12 @@ import { h } from './runtime.ts'
 import type { ClientContext, Disposer } from '../host/dsh.ts'
 import { NS, dictionaries } from './i18n.ts'
 import type { Translate } from './i18n.ts'
-import { createGitCaller, createGitApi, messageOf } from './api.ts'
-import type { GitApi } from './api.ts'
+import { createGitCaller, createGitApi, createWebRemoteApi, messageOf } from './api.ts'
+import type { GitApi, WebRemoteApi } from './api.ts'
 import { GIT_CSS } from './styles.ts'
 import { Icon } from './icons.tsx'
 import { TelegramCard, createController } from './telegram.tsx'
+import { WebRemoteCard, WebRemoteForm, countdownText, draftOf, emptyCardState, relayLooksValid, stateLabel, stateTone } from './web-remote.tsx'
 import { MergeSettingsCard, MergeSettingsForm } from './git/settings.tsx'
 import { WorktreeHero, WorktreeOption } from './worktree.tsx'
 import { GitPanel, GitHeaderButton } from './git/panel.tsx'
@@ -50,6 +51,8 @@ export function createClient(): ClientModule {
     /** Rendering helpers the Node test harness exercises with a stand-in React. */
     __internal: {
       TelegramCard,
+      WebRemoteCard,
+      WebRemoteForm,
       MergeSettingsCard,
       WorktreeHero,
       WorktreeOption,
@@ -61,6 +64,12 @@ export function createClient(): ClientModule {
       WorktreesView,
       WorktreeRow,
       MergeSettingsForm,
+      stateLabel,
+      stateTone,
+      countdownText,
+      relayLooksValid,
+      emptyCardState,
+      draftOf,
       installStyles,
     },
 
@@ -81,6 +90,7 @@ export function createClient(): ClientModule {
       }, 'personal-hub: credential watch')
 
       const api: GitApi = createGitApi(createGitCaller())
+      const webRemote: WebRemoteApi = createWebRemoteApi()
       ctx.effect(() => installStyles(), 'personal-hub: styles')
 
       // `plugins.row.config` is a keyed slot with exactly one occupant per row
@@ -101,6 +111,7 @@ export function createClient(): ClientModule {
             save: controller.save,
             clear: controller.clear,
             api,
+            webRemote,
           }),
         }, PersonalHubCard)),
         'personal-hub: row config card',
@@ -194,25 +205,29 @@ export function createClient(): ClientModule {
 }
 
 /**
- * The plugin row's configuration card: the Telegram binding, then the worktree
- * and merge cleanup settings.
+ * The plugin row's configuration card: the Telegram binding, then the Web
+ * Remote controls, then the worktree and merge cleanup settings.
  *
- * Both sections share one registration because `plugins.row.config` keeps a
+ * All sections share one registration because `plugins.row.config` keeps a
  * single occupant per row key.
  */
 function PersonalHubCard(props: Record<string, unknown> & {
   t: Translate
   api: GitApi
+  webRemote: WebRemoteApi
   view?: string
 }): ReturnType<typeof h> {
   const t = props.t
   if (props.view === 'summary') {
     return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
       h('span', null, t('summary')),
+      h('span', { className: 'ph-hint' }, t('webRemoteSummary')),
       h('span', { className: 'ph-hint' }, t('gitSettingsSummary')))
   }
   return h('div', { 'data-personal-hub-card': true, style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
     h(TelegramCard, props as never),
+    h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
+    h(WebRemoteCard, { api: props.webRemote, t }),
     h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
     h(MergeSettingsCard, { api: props.api, t }))
 }

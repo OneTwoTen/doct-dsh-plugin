@@ -1,12 +1,42 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-/** Write JSON atomically: full temp file first, then rename over the target. */
-export async function writeJsonFile(file: string, value: unknown): Promise<void> {
+/** Errors a rename can answer with while another process holds the target open. */
+const RETRYABLE_WRITE = new Set(['EBUSY', 'EPERM', 'EACCES'])
+
+/** Pause between two write attempts. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref?.()
+  })
+}
+
+/**
+ * Write JSON atomically: full temp file first, then rename over the target.
+ *
+ * Windows refuses a rename while any reader holds the target open, and both
+ * `status.json` and `state.json` are meant to be readable at any moment, so the
+ * rename is retried a few times before the write is given up.
+ *
+ * @param file destination file.
+ * @param value the JSON document.
+ * @param attempts how many times a transient rename failure is retried.
+ */
+export async function writeJsonFile(file: string, value: unknown, attempts = 6): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
   const temporary = `${file}.${process.pid}.${nextTempId()}.tmp`
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  await rename(temporary, file)
+  const text = `${JSON.stringify(value, null, 2)}\n`
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await writeFile(temporary, text, 'utf8')
+      await rename(temporary, file)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code ?? ''
+      if (attempt >= attempts || !RETRYABLE_WRITE.has(code)) throw error
+      await delay(10 * attempt)
+    }
+  }
 }
 
 let tempCounter = 0

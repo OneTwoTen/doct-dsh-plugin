@@ -31,6 +31,8 @@ import type {
 import { JsonStateStore, writeJsonFile } from '../lib/state-store.ts'
 import { WebRemoteBridge } from '../lib/web-remote-bridge.ts'
 import type { BridgeTransport, WebRemoteSessionController } from '../lib/web-remote-bridge.ts'
+import type { WebRemoteRuntimeStatus, WebRemoteSettingsView } from '../shared/protocol.ts'
+import { mountWebRemoteRoutes } from './web-remote-routes.ts'
 
 const REFRESH_CREDENTIAL = 'DSH_WEB_REMOTE_REFRESH_TOKEN'
 const STATUS_INTERVAL_MS = 500
@@ -62,7 +64,7 @@ export interface WebRemoteStatus {
   pairedAt?: string
   connectedAt?: string
   pairing?: PairingStatus | null
-  pairingStatus?: string
+  pairingStatus?: string | null
   watching?: string[]
   lastError?: string | null
   [key: string]: unknown
@@ -147,7 +149,7 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
   const lifecycle = new AbortController()
   const disposers: Disposer[] = []
 
-  let identity: DeviceIdentity
+  let identity: DeviceIdentity | undefined
   let transport: WebRemoteTransport | undefined
   let bridge: WebRemoteBridge | undefined
   let bridgeRegistered = false
@@ -159,6 +161,10 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
   let lastPublished = ''
   let writeChain: Promise<void> = Promise.resolve()
   let pairingAttempt = 0
+  /** The attempt in flight; the card's Cancel aborts exactly this one. */
+  let pairingController: AbortController | undefined
+  let rewriteTimer: ReturnType<typeof setTimeout> | undefined
+  let rewriteAttempts = 0
 
   logger.info('web-remote: mounted, data directory %s', dataDir)
 
@@ -173,6 +179,19 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
     reportError('initialization failed', error)
   })
 
+  // The plugin row's card reads this feature's status and drives pairing, so the
+  // routes live and die with the feature rather than with a separate mount.
+  const routesDisposer = mountWebRemoteRoutes(ctx, {
+    logger,
+    settings: settingsView,
+    status: statusView,
+    pair: pairNow,
+    cancelPairing: async () => {
+      cancelPairing()
+    },
+    unpair,
+  })
+
   /**
    * Publish the observable runtime status. Writes are serialized and diffed so
    * a 25-second heartbeat does not rewrite the file.
@@ -185,12 +204,44 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
     lastPublished = text
     writeChain = writeChain
       .then(() => writeJsonFile(statusFile, snapshot))
-      .catch((error) => logger.warn('web-remote: cannot write status file: %s', message(error)))
+      .then(() => {
+        rewriteAttempts = 0
+      })
+      .catch((error) => {
+        logger.warn('web-remote: cannot write status file: %s', message(error))
+        // Keep the dedupe guard open and rewrite the latest snapshot shortly: a
+        // status file frozen on an old state is worse than a slightly late one.
+        lastPublished = ''
+        scheduleRewrite()
+      })
+  }
+
+  /**
+   * Queue one more attempt after a failed status write.
+   *
+   * Bounded, because a file that silently stops updating is exactly what makes
+   * the card and any script reading `status.json` believe the feature died.
+   */
+  function scheduleRewrite(): void {
+    if (stopped || rewriteTimer !== undefined || rewriteAttempts >= 3) return
+    rewriteAttempts += 1
+    const wait = 250 * rewriteAttempts
+    rewriteTimer = setTimeout(() => {
+      rewriteTimer = undefined
+      if (stopped) return
+      // `publish({})` recomputes `updatedAt`, so the dedupe guard cannot skip it.
+      publish({})
+    }, wait)
+    rewriteTimer.unref?.()
   }
 
   async function initialize(): Promise<void> {
     await mkdir(dataDir, { recursive: true, mode: 0o700 })
-    identity = deps.identity ?? await loadOrCreateIdentity({ dir: dataDir })
+    // A disabled feature still serves the card's routes, so its own settings can
+    // turn it back on; it just never touches the network or the device key.
+    if (config.enabled) {
+      identity = deps.identity ?? await loadOrCreateIdentity({ dir: dataDir })
+    }
     await stateStore.load()
 
     const previousRelay = stateStore.state.relayUrl
@@ -199,18 +250,24 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
       await clearRefreshToken()
     }
     await stateStore.update((state) => {
-      state.deviceId = identity.deviceId
+      if (identity !== undefined) state.deviceId = identity.deviceId
       state.relayUrl = config.relayUrl
     })
 
     publish({
-      state: config.relayUrl.length > 0 ? 'starting' : 'waiting-relay',
-      deviceId: identity.deviceId,
-      fingerprint: identity.fingerprint,
+      state: config.enabled
+        ? (config.relayUrl.length > 0 ? 'starting' : 'waiting-relay')
+        : 'disabled',
+      deviceId: identity?.deviceId,
+      fingerprint: identity?.fingerprint,
       deviceName,
       relayUrl: config.relayUrl,
     })
 
+    if (!config.enabled) {
+      logger.info('web-remote: disabled by configuration; the settings card can turn it on')
+      return
+    }
     if (config.relayUrl.length === 0) {
       logger.info('web-remote: no relayUrl configured; waiting for one in the plugin settings')
       return
@@ -239,12 +296,24 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
 
   async function pair(): Promise<boolean | undefined> {
     if (stopped) return
+    const device = identity
+    if (device === undefined) {
+      logger.warn('web-remote: cannot pair while the feature is disabled')
+      return false
+    }
+    // One attempt at a time: the card's Pair button and the automatic retry can
+    // both fire, and two device codes would race for the same profile row.
+    if (pairingController !== undefined) return false
+    const attempt = new AbortController()
+    pairingController = attempt
+    // The plugin unloading must cancel pairing too, not only the card's Cancel.
+    const signal = AbortSignal.any([lifecycle.signal, attempt.signal])
     pairingAttempt += 1
-    publish({ state: 'pairing' })
+    publish({ state: 'pairing', pairing: undefined, pairingStatus: 'authorize', lastError: null })
     logger.info(
       'web-remote: pairing device %s (%s) with %s',
       deviceName,
-      identity.deviceId,
+      device.deviceId,
       config.relayUrl,
     )
 
@@ -253,11 +322,11 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
         relayUrl: config.relayUrl,
         name: deviceName,
         platform: process.platform,
-        pubkey: identity.publicKeyBase64,
-        deviceId: identity.deviceId,
+        pubkey: device.publicKeyBase64,
+        deviceId: device.deviceId,
         scopes: config.scopes,
         fetchImpl: deps.fetchImpl,
-        signal: lifecycle.signal,
+        signal,
         now,
         ...(typeof deps.pairingPollMs === 'number' && deps.pairingPollMs > 0
           ? { pollIntervalMs: deps.pairingPollMs }
@@ -289,13 +358,14 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
       accessExpiresAt = now() + (Number(tokens.expires_in) || 900) * 1000
       await stateStore.update((state) => {
         state.pairedAt = now()
-        state.deviceId = identity.deviceId
+        state.deviceId = device.deviceId
         state.relayUrl = config.relayUrl
       })
       publish({
         state: 'paired',
         pairedAt: new Date(now()).toISOString(),
         pairing: undefined,
+        pairingStatus: null,
         lastError: null,
       })
       logger.info('web-remote: paired; connecting to relay')
@@ -305,6 +375,102 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
       reportError('pairing failed', error)
       publish({ state: 'pairing-required', pairing: undefined })
       return false
+    } finally {
+      if (pairingController === attempt) pairingController = undefined
+    }
+  }
+
+  /**
+   * Start pairing from the card, replacing any credential this machine holds.
+   *
+   * The attempt itself runs in the background: approving it on the web can take
+   * minutes, and the card polls `state` instead of holding one HTTP request
+   * open. Input errors are still reported synchronously.
+   */
+  async function pairNow(): Promise<void> {
+    if (stopped) throw new ProtocolError('transport/closed', 'the Web Remote feature is shutting down')
+    if (!config.enabled) {
+      throw new PairingError('pair/disabled', 'Web Remote is turned off in the profile configuration')
+    }
+    if (config.relayUrl.length === 0) {
+      throw new PairingError('pair/no-relay', 'Set a relay URL before pairing this device')
+    }
+    // The same parser the transport uses, so a bad URL fails before any request.
+    relayEndpoints(config.relayUrl)
+    if (pairingController !== undefined) return
+    transport?.stop('pairing')
+    await clearRefreshToken()
+    pairingAttempt = 0
+    void pair()
+      .then((paired) => (paired === true ? connect() : undefined))
+      .catch((error) => reportError('pairing failed', error))
+  }
+
+  /** Abort the attempt in flight; the browser shows the credential-less state. */
+  function cancelPairing(): void {
+    // Nothing to cancel is not a state change: a stale click must not rewrite
+    // the status of a device that is already connected.
+    if (stopped || pairingController === undefined) return
+    pairingController.abort()
+    pairingAttempt = 0
+    publish({
+      state: 'pairing-required',
+      pairing: undefined,
+      pairingStatus: 'cancelled',
+      connectedAt: undefined,
+      watching: [],
+    })
+  }
+
+  /** Delete the stored credential and stop the socket until the next pairing. */
+  async function unpair(): Promise<void> {
+    if (stopped) throw new ProtocolError('transport/closed', 'the Web Remote feature is shutting down')
+    pairingController?.abort()
+    pairingAttempt = 0
+    await clearRefreshToken()
+    try {
+      transport?.stop('unpaired')
+    } catch (error) {
+      logger.warn('web-remote: transport stop failed: %s', message(error))
+    }
+    publish({
+      state: 'pairing-required',
+      pairing: undefined,
+      pairingStatus: 'unpaired',
+      connectedAt: undefined,
+      watching: [],
+      lastError: null,
+    })
+    logger.info('web-remote: unpaired; the web client lost access to this device')
+  }
+
+  /** The settings the card edits; they come from the profile row, not a file. */
+  function settingsView(): WebRemoteSettingsView {
+    return {
+      enabled: config.enabled,
+      relayUrl: config.relayUrl,
+      deviceName: config.deviceName,
+      effectiveDeviceName: deviceName,
+      autoPair: config.autoPair,
+    }
+  }
+
+  /** One status snapshot for the card, with every field present. */
+  function statusView(): WebRemoteRuntimeStatus {
+    return {
+      state: published.state,
+      deviceId: published.deviceId ?? '',
+      deviceName: published.deviceName ?? deviceName,
+      fingerprint: published.fingerprint ?? identity?.fingerprint ?? '',
+      relayUrl: published.relayUrl ?? config.relayUrl,
+      paired: refreshToken.length > 0,
+      pairedAt: published.pairedAt ?? null,
+      connectedAt: published.connectedAt ?? null,
+      pairing: published.pairing ?? null,
+      pairingStatus: published.pairingStatus ?? null,
+      watching: [...(published.watching ?? [])],
+      lastError: published.lastError ?? null,
+      updatedAt: published.updatedAt ?? null,
     }
   }
 
@@ -349,6 +515,10 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
 
   async function connect(): Promise<void> {
     if (stopped) return
+    if (identity === undefined) {
+      reportError('cannot connect', new Error('the device key was never loaded; enable Web Remote first'))
+      return
+    }
     transport?.stop('reconnecting')
     const endpoints = relayEndpoints(config.relayUrl)
     const transportOptions: RemoteTransportOptions = {
@@ -397,6 +567,7 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
         state: 'connected',
         connectedAt: new Date(now()).toISOString(),
         lastError: null,
+        pairingStatus: null,
         watching: bridge?.watchedSessions ?? [],
       })
       return
@@ -522,6 +693,17 @@ export function mountWebRemote(ctx: DshContext, config: WebRemoteConfig, deps: W
   function dispose(): void {
     if (stopped) return
     stopped = true
+    if (rewriteTimer !== undefined) {
+      clearTimeout(rewriteTimer)
+      rewriteTimer = undefined
+    }
+    // Withdraw the card's routes first, so a poll in flight cannot reach a
+    // feature that is already tearing down.
+    try {
+      routesDisposer()
+    } catch (error) {
+      logger.warn('web-remote: route disposal failed: %s', message(error))
+    }
     lifecycle.abort()
     try {
       transport?.stop('plugin-disposed')

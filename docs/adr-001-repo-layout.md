@@ -113,6 +113,8 @@ Cơ chế tách: `git filter-repo --path web --path server --path protocol` (gi�
 
 - [x] `protocol/` với schema, fixture và đặc tả v1.
 - [x] `plugin/src/features/web-remote.ts` + `plugin/src/lib/remote-*.ts` (Phase 1 bridge).
+- [x] Thẻ Web Remote trong hàng plugin (`src/client/web-remote.tsx` + `src/features/web-remote-routes.ts`):
+      trạng thái, mã ghép cặp, huỷ/ghép lại, ngắt ghép nối, sửa relay/tên thiết bị.
 - [x] `tools/dev-relay/` — relay Node + WebChat tối giản để thử end-to-end (không phải `server/`).
 - [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol` (khi scaffold web).
 - [ ] Thêm `server/`, `web/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).

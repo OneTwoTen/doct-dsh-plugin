@@ -180,8 +180,8 @@ function asHostList(value) {
   return result;
 }
 function asChoice(value, choices, fallback) {
-  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return choices.includes(text) ? text : fallback;
+  const text2 = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return choices.includes(text2) ? text2 : fallback;
 }
 function normalizeConfig(raw) {
   const root = asRecord(raw);
@@ -417,10 +417,10 @@ function parsePorcelainV2(raw) {
   }
   return { branch, files };
 }
-function readBranchHeader(branch, text) {
-  const space = text.indexOf(" ");
-  const key = space < 0 ? text : text.slice(0, space);
-  const value = space < 0 ? "" : text.slice(space + 1);
+function readBranchHeader(branch, text2) {
+  const space = text2.indexOf(" ");
+  const key = space < 0 ? text2 : text2.slice(0, space);
+  const value = space < 0 ? "" : text2.slice(space + 1);
   switch (key) {
     case "branch.oid":
       branch.unborn = value === "(initial)";
@@ -628,8 +628,8 @@ function parsePatch(raw) {
   }
   return files;
 }
-function unquotePath(text) {
-  const trimmed = String(text ?? "").trim();
+function unquotePath(text2) {
+  const trimmed = String(text2 ?? "").trim();
   if (trimmed.length < 2 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return trimmed;
   try {
     return JSON.parse(trimmed.replace(/\\"/g, '"'));
@@ -637,8 +637,8 @@ function unquotePath(text) {
     return trimmed.slice(1, -1);
   }
 }
-function untrackedPatch(path, text, options = {}) {
-  const content = String(text ?? "");
+function untrackedPatch(path, text2, options = {}) {
+  const content = String(text2 ?? "");
   const lines = content.length === 0 ? [] : content.replace(/\r\n/g, "\n").split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return [{
@@ -753,10 +753,10 @@ function parseAheadBehind(raw) {
   };
 }
 function parseDefaultBranch(raw, remote = "origin") {
-  const text = String(raw ?? "").trim();
+  const text2 = String(raw ?? "").trim();
   const prefix = `refs/remotes/${remote}/`;
-  if (text.startsWith(prefix) && text.length > prefix.length) return text.slice(prefix.length);
-  return text.length > 0 && !text.includes("/") ? text : null;
+  if (text2.startsWith(prefix) && text2.length > prefix.length) return text2.slice(prefix.length);
+  return text2.length > 0 && !text2.includes("/") ? text2 : null;
 }
 var BRANCH_FALLBACK = "update";
 function sanitizeBranchFragment(raw) {
@@ -933,15 +933,15 @@ function createCommandRunner(options) {
             return;
           }
           const truncated = code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          const text = stdout ?? "";
+          const text2 = stdout ?? "";
           const err = stderr ?? "";
           if (onLine !== void 0) {
-            for (const line of text.split(/\r?\n/)) if (line.length > 0) onLine("stdout", line);
+            for (const line of text2.split(/\r?\n/)) if (line.length > 0) onLine("stdout", line);
             for (const line of err.split(/\r?\n/)) if (line.length > 0) onLine("stderr", line);
           }
           settle({
             code: truncated ? 0 : typeof code === "number" ? code : error ? 1 : 0,
-            stdout: text,
+            stdout: text2,
             stderr: err,
             truncated
           });
@@ -1441,22 +1441,22 @@ async function readFilePreview(file, maxBytes) {
     await handle.close();
   }
 }
-function countLines(text) {
-  if (text.length === 0) return 0;
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+function countLines(text2) {
+  if (text2.length === 0) return 0;
+  const lines = text2.replace(/\r\n/g, "\n").split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines.length;
 }
 function normalizeRelativePath(root, path) {
-  const text = String(path ?? "").trim();
-  if (text.length === 0 || text.includes("\0") || isAbsolute(text)) {
-    throw new CommandError("input/invalid", "Invalid file path", { path: text });
+  const text2 = String(path ?? "").trim();
+  if (text2.length === 0 || text2.includes("\0") || isAbsolute(text2)) {
+    throw new CommandError("input/invalid", "Invalid file path", { path: text2 });
   }
-  const normalized = text.split(sep).join("/").replace(/^\.\//, "");
+  const normalized = text2.split(sep).join("/").replace(/^\.\//, "");
   const target = resolve(root, normalized);
   const inside = relative(root, target);
   if (inside.startsWith("..") || isAbsolute(inside)) {
-    throw new CommandError("input/invalid", "File path is outside the repository", { path: text });
+    throw new CommandError("input/invalid", "File path is outside the repository", { path: text2 });
   }
   return normalized;
 }
@@ -1471,8 +1471,8 @@ function basename(path) {
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
-function firstLine(text) {
-  return String(text ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+function firstLine(text2) {
+  return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
 function literal(path) {
   return path;
@@ -1537,9 +1537,9 @@ async function pullCurrentBranch(runner, options) {
     onLine
   });
   if (result.code !== 0) throwWriteFailure("pull", result, { branch });
-  const text = `${result.stdout}
+  const text2 = `${result.stdout}
 ${result.stderr}`;
-  const upToDate = /Already up to date\./i.test(text);
+  const upToDate = /Already up to date\./i.test(text2);
   return { status: upToDate ? "skipped_up_to_date" : "pulled", branch };
 }
 async function stagePaths(runner, options) {
@@ -1789,17 +1789,17 @@ import { dirname, isAbsolute as isAbsolute2, join as join2, relative as relative
 var POOL_IGNORE = ".gitignore";
 var BRANCH_NAME = /^(?![-/.])(?!.*\.\.)(?!.*[/.]$)[A-Za-z0-9._/-]+$/;
 function generatedWorktreeName(sessionId, prefix = "dsh") {
-  const text = String(sessionId ?? "");
-  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(text)?.[0];
+  const text2 = String(sessionId ?? "");
+  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(text2)?.[0];
   const head = uuid === void 0 ? randomHex(8) : uuid.slice(0, 8).toLowerCase();
   const tail = randomHex(4);
   const cleaned = String(prefix ?? "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
   return cleaned.length > 0 ? `${cleaned}-${head}-${tail}` : `${head}-${tail}`;
 }
 function randomHex(length) {
-  let text = "";
-  while (text.length < length) text += Math.floor(Math.random() * 16).toString(16);
-  return text.slice(0, length);
+  let text2 = "";
+  while (text2.length < length) text2 += Math.floor(Math.random() * 16).toString(16);
+  return text2.slice(0, length);
 }
 function poolDirectory(repoRoot, config) {
   const configured = String(config?.directory ?? ".agents/worktrees").trim() || ".agents/worktrees";
@@ -1926,8 +1926,8 @@ async function resolveDefaultBase(runner, { root, remote = "", signal }) {
   const preferred = remote.length > 0 ? [remote] : names;
   for (const name2 of preferred) {
     const symbolic = await runner.run("git", ["symbolic-ref", "--quiet", `refs/remotes/${name2}/HEAD`], { cwd: root, signal });
-    const text = symbolic.code === 0 ? symbolic.stdout.trim().replace(`refs/remotes/${name2}/`, "") : "";
-    if (text.length > 0) return text;
+    const text2 = symbolic.code === 0 ? symbolic.stdout.trim().replace(`refs/remotes/${name2}/`, "") : "";
+    if (text2.length > 0) return text2;
   }
   for (const name2 of preferred) {
     for (const candidate of ["main", "master"]) {
@@ -2090,8 +2090,8 @@ async function readCheckoutKind(runner, { path, signal }) {
     linked: gitValue !== null && commonValue !== null && resolve2(gitValue) !== resolve2(commonValue)
   };
 }
-function firstLine2(text) {
-  return String(text ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+function firstLine2(text2) {
+  return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
 
 // src/lib/forge-core.ts
@@ -2320,8 +2320,8 @@ function gitlabDiffStats(node) {
   const entry = node !== null && typeof node === "object" ? node : {};
   let additions = 0;
   let deletions = 0;
-  const text = typeof entry.diff === "string" ? entry.diff : "";
-  for (const line of text.split("\n")) {
+  const text2 = typeof entry.diff === "string" ? entry.diff : "";
+  for (const line of text2.split("\n")) {
     if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
     else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
   }
@@ -2561,14 +2561,14 @@ function createForge({ runner, config, logger, resolveToken, resolveGitLabToken,
         if (signal?.aborted === true) throw error;
         return { installed: true, signedIn: false, login: null, reason: messageOf(error) };
       }
-      const text = `${status.stdout}
+      const text2 = `${status.stdout}
 ${status.stderr}`;
-      const login = /account\s+(\S+)|as\s+([^\s(]+)|Logged in to .*?\bas\s+(\S+)/i.exec(text);
+      const login = /account\s+(\S+)|as\s+([^\s(]+)|Logged in to .*?\bas\s+(\S+)/i.exec(text2);
       return {
         installed: true,
         signedIn: status.code === 0,
         login: login?.[1] ?? login?.[2] ?? login?.[3] ?? null,
-        reason: status.code === 0 ? null : text.trim().split("\n").slice(-1)[0] ?? "Ch\u01B0a \u0111\u0103ng nh\u1EADp"
+        reason: status.code === 0 ? null : text2.trim().split("\n").slice(-1)[0] ?? "Ch\u01B0a \u0111\u0103ng nh\u1EADp"
       };
     })();
     probes.set(key, { at: Date.now(), value });
@@ -2693,46 +2693,46 @@ ${status.stderr}`;
   async function ghJson(program, args, options) {
     const result = await exec(program, args, { cwd: options.cwd, signal: options.signal });
     if (result.code !== 0) throw ghFailure(result.stderr, program);
-    const text = result.stdout.trim();
-    if (text.length === 0) return [];
+    const text2 = result.stdout.trim();
+    if (text2.length === 0) return [];
     try {
-      const parsed = JSON.parse(text);
+      const parsed = JSON.parse(text2);
       return parsed;
     } catch {
       throw new CommandError("forge/failed", `${program} tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c`);
     }
   }
   function ghFailure(stderr, program) {
-    const text = String(stderr ?? "").trim();
-    if (/gh auth login|not logged in|authentication|authenticate|HTTP 401/i.test(text)) {
-      return new CommandError("forge/not-signed-in", `Ch\u01B0a \u0111\u0103ng nh\u1EADp ${program}. Ch\u1EA1y: ${program} auth login`, { detail: text });
+    const text2 = String(stderr ?? "").trim();
+    if (/gh auth login|not logged in|authentication|authenticate|HTTP 401/i.test(text2)) {
+      return new CommandError("forge/not-signed-in", `Ch\u01B0a \u0111\u0103ng nh\u1EADp ${program}. Ch\u1EA1y: ${program} auth login`, { detail: text2 });
     }
-    if (/Could not resolve to a Repository|not found|HTTP 404/i.test(text)) {
-      return new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn m\xE1y ch\u1EE7", { detail: text });
+    if (/Could not resolve to a Repository|not found|HTTP 404/i.test(text2)) {
+      return new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn m\xE1y ch\u1EE7", { detail: text2 });
     }
-    if (/no git remotes|not a git repository/i.test(text)) {
-      return new CommandError("forge/no-remote", "Kho m\xE3 ch\u01B0a c\xF3 remote", { detail: text });
+    if (/no git remotes|not a git repository/i.test(text2)) {
+      return new CommandError("forge/no-remote", "Kho m\xE3 ch\u01B0a c\xF3 remote", { detail: text2 });
     }
-    if (/rate limit|API rate limit exceeded/i.test(text)) {
-      return new CommandError("forge/rate-limited", "M\xE1y ch\u1EE7 t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt", { detail: text });
+    if (/rate limit|API rate limit exceeded/i.test(text2)) {
+      return new CommandError("forge/rate-limited", "M\xE1y ch\u1EE7 t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt", { detail: text2 });
     }
-    return new CommandError("forge/failed", text.length > 0 ? text.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text });
+    return new CommandError("forge/failed", text2.length > 0 ? text2.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text2 });
   }
   function glabFailure(stderr, program) {
-    const text = String(stderr ?? "").trim();
-    if (/not logged in|authentication|authenticate|HTTP 401|invalid token/i.test(text)) {
-      return new CommandError("forge/not-signed-in", `Ch\u01B0a \u0111\u0103ng nh\u1EADp ${program}. Ch\u1EA1y: ${program} auth login`, { detail: text });
+    const text2 = String(stderr ?? "").trim();
+    if (/not logged in|authentication|authenticate|HTTP 401|invalid token/i.test(text2)) {
+      return new CommandError("forge/not-signed-in", `Ch\u01B0a \u0111\u0103ng nh\u1EADp ${program}. Ch\u1EA1y: ${program} auth login`, { detail: text2 });
     }
-    if (/404|not found|Project Not Found/i.test(text)) {
-      return new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn GitLab", { detail: text });
+    if (/404|not found|Project Not Found/i.test(text2)) {
+      return new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn GitLab", { detail: text2 });
     }
-    if (/no git remotes|not a git repository/i.test(text)) {
-      return new CommandError("forge/no-remote", "Kho m\xE3 ch\u01B0a c\xF3 remote", { detail: text });
+    if (/no git remotes|not a git repository/i.test(text2)) {
+      return new CommandError("forge/no-remote", "Kho m\xE3 ch\u01B0a c\xF3 remote", { detail: text2 });
     }
-    if (/rate limit|429/i.test(text)) {
-      return new CommandError("forge/rate-limited", "GitLab t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt", { detail: text });
+    if (/rate limit|429/i.test(text2)) {
+      return new CommandError("forge/rate-limited", "GitLab t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt", { detail: text2 });
     }
-    return new CommandError("forge/failed", text.length > 0 ? text.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text });
+    return new CommandError("forge/failed", text2.length > 0 ? text2.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text2 });
   }
   function gitlabProject(remote) {
     const slug = String(remote.slug ?? "").trim();
@@ -2808,8 +2808,8 @@ ${status.stderr}`;
       return void 0;
     }
   }
-  function parseJson(text, program) {
-    const trimmed = text.trim();
+  function parseJson(text2, program) {
+    const trimmed = text2.trim();
     if (trimmed.length === 0) return [];
     try {
       const parsed = JSON.parse(trimmed);
@@ -3228,8 +3228,8 @@ ${status.stderr}`;
   return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, pullState: pullState2 };
 }
 var STATE_FIELDS = ["number", "url", "state", "isDraft", "mergedAt", "headRefName", "baseRefName", "mergeable"].join(",");
-function firstUrl(text) {
-  const match = /https?:\/\/[^\s'"]+/.exec(String(text ?? ""));
+function firstUrl(text2) {
+  const match = /https?:\/\/[^\s'"]+/.exec(String(text2 ?? ""));
   return match?.[0] ?? null;
 }
 function numberFromUrl(url) {
@@ -3340,8 +3340,8 @@ function buildChangeRequestInput(facts) {
     "Answer with the JSON object only."
   ].join("\n");
 }
-function parseChangeRequestDraft(text, options = {}) {
-  const raw = String(text ?? "").trim();
+function parseChangeRequestDraft(text2, options = {}) {
+  const raw = String(text2 ?? "").trim();
   const fallbackTitle = normalizeTitle(options.fallbackTitle ?? "");
   if (raw.length === 0) {
     return { title: fallbackTitle, body: "", parsed: "fallback" };
@@ -3350,9 +3350,9 @@ function parseChangeRequestDraft(text, options = {}) {
   if (jsonText !== null) {
     try {
       const value = JSON.parse(jsonText);
-      const record = value !== null && typeof value === "object" ? value : {};
-      const title2 = normalizeTitle(String(record.title ?? ""));
-      const body = normalizeBody(String(record.body ?? record.description ?? ""));
+      const record2 = value !== null && typeof value === "object" ? value : {};
+      const title2 = normalizeTitle(String(record2.title ?? ""));
+      const body = normalizeBody(String(record2.body ?? record2.description ?? ""));
       if (title2.length > 0) return { title: title2, body, parsed: "json" };
     } catch {
     }
@@ -3366,8 +3366,8 @@ function parseChangeRequestDraft(text, options = {}) {
   const rest = lines.slice(lines.indexOf(titleLine) + 1).join("\n").trim();
   return { title, body: normalizeBody(stripFence(rest)), parsed: "text" };
 }
-function extractJsonObject(text) {
-  const unwrapped = stripFence(text);
+function extractJsonObject(text2) {
+  const unwrapped = stripFence(text2);
   const start = unwrapped.indexOf("{");
   if (start < 0) return null;
   let depth = 0;
@@ -3390,22 +3390,22 @@ function extractJsonObject(text) {
   }
   return null;
 }
-function stripFence(text) {
-  const trimmed = String(text ?? "").trim();
+function stripFence(text2) {
+  const trimmed = String(text2 ?? "").trim();
   const fenced = /^```[A-Za-z0-9_-]*\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
   return fenced === null ? trimmed : fenced[1].trim();
 }
-function normalizeTitle(text) {
-  const single = String(text ?? "").replace(/\s+/g, " ").replace(/^#+\s*/, "").replace(/^["'`]+|["'`]+$/g, "").replace(/^\*{1,3}(.*?)\*{1,3}$/, "$1").trim();
+function normalizeTitle(text2) {
+  const single = String(text2 ?? "").replace(/\s+/g, " ").replace(/^#+\s*/, "").replace(/^["'`]+|["'`]+$/g, "").replace(/^\*{1,3}(.*?)\*{1,3}$/, "$1").trim();
   return single.length <= MAX_TITLE_LENGTH ? single : `${single.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}\u2026`;
 }
-function normalizeBody(text) {
-  const body = String(text ?? "").replace(/\r\n/g, "\n").trim();
+function normalizeBody(text2) {
+  const body = String(text2 ?? "").replace(/\r\n/g, "\n").trim();
   if (body.length <= MAX_BODY_LENGTH) return body;
   return `${body.slice(0, MAX_BODY_LENGTH - 1).trimEnd()}\u2026`;
 }
-function stripMarkdown(text) {
-  return String(text ?? "").replace(/^[-*+]\s+/, "").replace(/^\*\*(.*)\*\*$/, "$1").trim();
+function stripMarkdown(text2) {
+  return String(text2 ?? "").replace(/^[-*+]\s+/, "").replace(/^\*\*(.*)\*\*$/, "$1").trim();
 }
 function offlineDraft(facts) {
   const commits = facts.commits ?? [];
@@ -3545,8 +3545,8 @@ function buildCommitInput(facts) {
     "Answer with the JSON object only."
   ].join("\n");
 }
-function parseCommitDraft(text, options = {}) {
-  const raw = String(text ?? "").trim();
+function parseCommitDraft(text2, options = {}) {
+  const raw = String(text2 ?? "").trim();
   const fallbackSubject = cleanSubjectLine(options.fallbackSubject ?? "");
   if (raw.length === 0) {
     return { subject: fallbackSubject, body: "", parsed: "fallback" };
@@ -3555,9 +3555,9 @@ function parseCommitDraft(text, options = {}) {
   if (jsonText !== null) {
     try {
       const value = JSON.parse(jsonText);
-      const record = value !== null && typeof value === "object" ? value : {};
-      const subject2 = cleanSubjectLine(String(record.subject ?? record.title ?? ""));
-      const body = normalizeCommitBody(String(record.body ?? record.description ?? ""));
+      const record2 = value !== null && typeof value === "object" ? value : {};
+      const subject2 = cleanSubjectLine(String(record2.subject ?? record2.title ?? ""));
+      const body = normalizeCommitBody(String(record2.body ?? record2.description ?? ""));
       if (subject2.length > 0) return { subject: subject2, body, parsed: "json" };
     } catch {
     }
@@ -3571,8 +3571,8 @@ function parseCommitDraft(text, options = {}) {
   const rest = lines.slice(lines.indexOf(subjectLine) + 1).join("\n").trim();
   return { subject, body: normalizeCommitBody(stripFence(rest)), parsed: "text" };
 }
-function sanitizeCommitMessage(text, maxSubjectLength = MAX_SUBJECT_LENGTH) {
-  const lines = String(text ?? "").replace(/\r\n/g, "\n").trim().split("\n");
+function sanitizeCommitMessage(text2, maxSubjectLength = MAX_SUBJECT_LENGTH) {
+  const lines = String(text2 ?? "").replace(/\r\n/g, "\n").trim().split("\n");
   const subject = cleanSubjectLine(lines[0] ?? "", maxSubjectLength);
   const body = normalizeCommitBody(lines.slice(1).join("\n"));
   return { subject, body };
@@ -3669,13 +3669,13 @@ ${draft.body}` : draft.subject,
     return { ...fallbackResult, error: messageOf3(error) };
   }
 }
-function cleanSubjectLine(text, maxSubjectLength = MAX_SUBJECT_LENGTH) {
-  const single = String(text ?? "").replace(/^[-*+]\s+/, "").replace(/^\d+[.)]\s+/, "").replace(/^#+\s*/, "").replace(/\s+/g, " ").replace(/^["'`]+|["'`]+$/g, "").replace(/^\*{1,3}(.*?)\*{1,3}$/, "$1").trim().replace(/\.+$/, "").trim();
+function cleanSubjectLine(text2, maxSubjectLength = MAX_SUBJECT_LENGTH) {
+  const single = String(text2 ?? "").replace(/^[-*+]\s+/, "").replace(/^\d+[.)]\s+/, "").replace(/^#+\s*/, "").replace(/\s+/g, " ").replace(/^["'`]+|["'`]+$/g, "").replace(/^\*{1,3}(.*?)\*{1,3}$/, "$1").trim().replace(/\.+$/, "").trim();
   const limit = Math.max(1, Math.trunc(maxSubjectLength));
   return single.length <= limit ? single : `${single.slice(0, limit - 1).trimEnd()}\u2026`;
 }
-function normalizeCommitBody(text) {
-  return String(text ?? "").replace(/\r\n/g, "\n").trim();
+function normalizeCommitBody(text2) {
+  return String(text2 ?? "").replace(/\r\n/g, "\n").trim();
 }
 function composeMessage({ subject, body }) {
   return body.length > 0 ? `${subject}
@@ -3713,10 +3713,10 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
   let timer;
   let running = false;
   let disposed = false;
-  async function track(sessionId, record) {
+  async function track(sessionId, record2) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return;
-    if (record === null || typeof record !== "object") return;
-    const number = Number(record.number);
+    if (record2 === null || typeof record2 !== "object") return;
+    const number = Number(record2.number);
     if (!Number.isFinite(number) || number <= 0) return;
     await store.load();
     const existing = store.state.pulls?.[sessionId];
@@ -3726,7 +3726,7 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       const previous = state.pulls[sessionId];
       state.pulls[sessionId] = {
         ...previous,
-        ...record,
+        ...record2,
         number,
         sessionId,
         trackedAt: previous?.trackedAt ?? now(),
@@ -3742,10 +3742,10 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     try {
       await store.load();
       const pulls = store.state.pulls ?? {};
-      for (const [sessionId, record] of Object.entries(pulls)) {
-        if (record === null || typeof record !== "object" || record.done === true) continue;
+      for (const [sessionId, record2] of Object.entries(pulls)) {
+        if (record2 === null || typeof record2 !== "object" || record2.done === true) continue;
         try {
-          await settle(sessionId, record);
+          await settle(sessionId, record2);
         } catch (error) {
           logger.warn("git: merge check for %s failed: %s", sessionId, messageOf4(error));
         }
@@ -3754,18 +3754,18 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       running = false;
     }
   }
-  async function settle(sessionId, record) {
+  async function settle(sessionId, record2) {
     const state = await forge.pullState({
-      root: record.root,
-      remote: record.remote,
-      number: Number(record.number)
+      root: record2.root,
+      remote: record2.remote,
+      number: Number(record2.number)
     });
     if (state === null) return;
     const next = String(state.state ?? "");
     if (next === "merged") {
       const worktrees = store.state.worktrees ?? {};
       const action = mergedCleanup(merged, { hasWorktree: worktrees[sessionId] !== void 0 });
-      const outcome = { cleanedAt: now(), mergedUrl: state.url ?? record.url ?? "" };
+      const outcome = { cleanedAt: now(), mergedUrl: state.url ?? record2.url ?? "" };
       if (action.removeWorktree) {
         try {
           const removed = await runtime.removeSessionWorktree(worktrees[sessionId], sessionId);
@@ -3848,15 +3848,54 @@ function pluginDataDir(name2, env = process.env) {
   return join3(dshHome(env), name2);
 }
 
+// src/lib/host-http.ts
+async function readJsonPayload(request) {
+  let text2;
+  try {
+    text2 = await request.text();
+  } catch {
+    return void 0;
+  }
+  if (text2.trim().length === 0) return {};
+  try {
+    const parsed = JSON.parse(text2);
+    return parsed !== null && typeof parsed === "object" ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function jsonResponse(body) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+  });
+}
+
 // src/lib/state-store.ts
 import { mkdir as mkdir2, readFile as readFile2, rename, writeFile as writeFile2 } from "node:fs/promises";
 import { dirname as dirname2 } from "node:path";
-async function writeJsonFile(file, value) {
+var RETRYABLE_WRITE = /* @__PURE__ */ new Set(["EBUSY", "EPERM", "EACCES"]);
+function delay(ms) {
+  return new Promise((resolve5) => {
+    setTimeout(resolve5, ms).unref?.();
+  });
+}
+async function writeJsonFile(file, value, attempts = 6) {
   await mkdir2(dirname2(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${nextTempId()}.tmp`;
-  await writeFile2(temporary, `${JSON.stringify(value, null, 2)}
-`, "utf8");
-  await rename(temporary, file);
+  const text2 = `${JSON.stringify(value, null, 2)}
+`;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await writeFile2(temporary, text2, "utf8");
+      await rename(temporary, file);
+      return;
+    } catch (error) {
+      const code = error?.code ?? "";
+      if (attempt >= attempts || !RETRYABLE_WRITE.has(code)) throw error;
+      await delay(10 * attempt);
+    }
+  }
 }
 var tempCounter = 0;
 function nextTempId() {
@@ -3930,9 +3969,9 @@ function cleanupDecision(settings, facts) {
   }
   return { remove: false, reason: "kept" };
 }
-async function inspectWorktree(runner, record, at = Date.now()) {
-  const path = String(record?.path ?? "");
-  const created = Number(record?.createdAt) || at;
+async function inspectWorktree(runner, record2, at = Date.now()) {
+  const path = String(record2?.path ?? "");
+  const created = Number(record2?.createdAt) || at;
   const info = await stat3(path).catch(() => void 0);
   if (info === void 0) {
     return { missing: true, ageMs: at - created, localFiles: 0, trackedChanges: 0, commitsAhead: 0 };
@@ -3940,7 +3979,7 @@ async function inspectWorktree(runner, record, at = Date.now()) {
   const status = await runner.run("git", ["status", "--porcelain=v1", "-z"], { cwd: path });
   const entries = status.code === 0 ? String(status.stdout ?? "").split("\0").filter((entry) => entry.length > 0) : [];
   const trackedChanges = entries.filter((entry) => !entry.startsWith("??")).length;
-  const start = String(record?.start ?? "").length > 0 ? String(record.start) : String(record?.base ?? "").length > 0 ? `refs/heads/${String(record.base)}` : "HEAD";
+  const start = String(record2?.start ?? "").length > 0 ? String(record2.start) : String(record2?.base ?? "").length > 0 ? `refs/heads/${String(record2.base)}` : "HEAD";
   const count = await runner.run("git", ["rev-list", "--count", `${start}...HEAD`], { cwd: path });
   const commitsAhead = count.code === 0 ? Number.parseInt(String(count.stdout ?? "").trim(), 10) || 0 : 0;
   return {
@@ -3969,21 +4008,21 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
       const records = worktreeRecords(store.state);
       for (const [sessionId, value] of Object.entries(records)) {
         if (value === null || typeof value !== "object") continue;
-        const record = value;
+        const record2 = value;
         try {
-          const facts = await inspectWorktree(runner, record, now());
+          const facts = await inspectWorktree(runner, record2, now());
           const decision = cleanupDecision(settings, {
             ...facts,
-            active: runtime.isSessionActive(sessionId, record)
+            active: runtime.isSessionActive(sessionId, record2)
           });
           if (!decision.remove) {
-            kept.push({ sessionId, branch: record.branch, reason: decision.reason });
+            kept.push({ sessionId, branch: record2.branch, reason: decision.reason });
             continue;
           }
           await removeWorktree(runner, {
-            repoRoot: String(record.repositoryRoot ?? ""),
-            path: String(record.path ?? ""),
-            branch: record.branch,
+            repoRoot: String(record2.repositoryRoot ?? ""),
+            path: String(record2.path ?? ""),
+            branch: record2.branch,
             deleteBranch: settings.deleteBranch === true,
             timeoutMs
           });
@@ -3994,12 +4033,12 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
               delete worktrees[sessionId];
             }
           });
-          removed.push({ sessionId, branch: record.branch, reason: decision.reason });
-          logger.info("git: cleanup removed %s (%s)", String(record.branch ?? ""), decision.reason);
+          removed.push({ sessionId, branch: record2.branch, reason: decision.reason });
+          logger.info("git: cleanup removed %s (%s)", String(record2.branch ?? ""), decision.reason);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
-          kept.push({ sessionId, branch: record?.branch, reason: "failed", error: reason });
-          logger.warn("git: cleanup kept %s: %s", String(record?.branch ?? ""), reason);
+          kept.push({ sessionId, branch: record2?.branch, reason: "failed", error: reason });
+          logger.warn("git: cleanup kept %s: %s", String(record2?.branch ?? ""), reason);
         }
       }
       const result = { at: now(), removed, kept };
@@ -4056,10 +4095,10 @@ function branchNamingPrompt(instructions = "") {
     extra.length === 0 ? "" : `Additional naming instructions: ${extra}`
   ].filter((line) => line.length > 0).join("\n");
 }
-function sanitizeBranchSlug(text, limits = {}) {
+function sanitizeBranchSlug(text2, limits = {}) {
   const maxWords = Math.max(1, Number(limits.maxWords) || MAX_SLUG_WORDS);
   const maxLength = Math.max(4, Number(limits.maxLength) || MAX_SLUG_LENGTH);
-  const folded = String(text ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  const folded = String(text2 ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
   if (folded.length === 0) return "";
   const words = folded.split("-").filter((word) => word.length > 0).slice(0, maxWords);
   let slug = words.join("-");
@@ -4075,8 +4114,8 @@ function semanticBranchName({ prefix, slug, fallbackPrefix = "dsh" }) {
   const head = BRANCH_PREFIXES.includes(chosen) ? chosen : sanitizeBranchSlug(fallbackPrefix, { maxWords: 1, maxLength: 16 });
   return head.length > 0 ? `${head}/${clean}` : clean;
 }
-function parseBranchDraft(text, options = {}) {
-  const raw = String(text ?? "").trim();
+function parseBranchDraft(text2, options = {}) {
+  const raw = String(text2 ?? "").trim();
   if (raw.length === 0) return null;
   const fallbackPrefix = options.fallbackPrefix ?? "dsh";
   const jsonText = extractJsonObject(raw);
@@ -4113,8 +4152,8 @@ function parseBranchDraft(text, options = {}) {
   }
   return null;
 }
-async function suggestBranchName({ llm, route, text, sessionId = "", instructions = "", fallbackPrefix = "dsh", config, signal, logger }) {
-  const message3 = String(text ?? "").trim();
+async function suggestBranchName({ llm, route, text: text2, sessionId = "", instructions = "", fallbackPrefix = "dsh", config, signal, logger }) {
+  const message3 = String(text2 ?? "").trim();
   if (llm === void 0 || typeof llm.prepareCall !== "function") return null;
   if (route === null || typeof route?.provider !== "string" || typeof route?.model !== "string") return null;
   if (message3.length === 0) return null;
@@ -4278,14 +4317,14 @@ function mountRoutes(ctx, connection, config, deps) {
     store,
     forge,
     runtime: {
-      async removeSessionWorktree(record, sessionId) {
-        const target = typeof record?.path === "string" ? record.path : "";
+      async removeSessionWorktree(record2, sessionId) {
+        const target = typeof record2?.path === "string" ? record2.path : "";
         if (target.length === 0) return { removed: false, branchDeleted: false };
-        const repoRoot = typeof record.repositoryRoot === "string" ? record.repositoryRoot : "";
+        const repoRoot = typeof record2.repositoryRoot === "string" ? record2.repositoryRoot : "";
         const result = await removeWorktree(runner, {
           repoRoot,
           path: target,
-          branch: record.branch,
+          branch: record2.branch,
           deleteBranch: config.merged.deleteBranch === true,
           timeoutMs: config.worktreeTimeoutMs
         });
@@ -4311,13 +4350,13 @@ function mountRoutes(ctx, connection, config, deps) {
     // and writes only the keys it owns.
     store,
     runtime: {
-      isSessionActive(sessionId, record) {
+      isSessionActive(sessionId, record2) {
         const agent = agentFor(sessionId);
         if (agent === void 0) return false;
         const session = agent.session;
         const workingDirectory = ctx.get("workingDirectory");
         const directory = session !== void 0 && typeof workingDirectory?.get === "function" ? workingDirectory.get(session) : session?.header?.cwd;
-        const target = typeof record?.path === "string" ? record.path : "";
+        const target = typeof record2?.path === "string" ? record2.path : "";
         return directory !== void 0 && target.length > 0 && isInside(target, directory);
       }
     }
@@ -4326,18 +4365,18 @@ function mountRoutes(ctx, connection, config, deps) {
   async function nameWorktreeFromMessage(sessionId, message3) {
     if (config.worktree.naming !== "semantic") return;
     if (naming.has(sessionId)) return;
-    const text = textOfUserMessage(message3);
-    if (text.length === 0) return;
+    const text2 = textOfUserMessage(message3);
+    if (text2.length === 0) return;
     const value = await state();
-    const record = value.worktrees?.[sessionId];
-    if (record === void 0 || typeof record !== "object") return;
-    if (record.branch !== record.name) return;
+    const record2 = value.worktrees?.[sessionId];
+    if (record2 === void 0 || typeof record2 !== "object") return;
+    if (record2.branch !== record2.name) return;
     naming.add(sessionId);
     try {
       const draft = await suggestBranchName({
         llm: ctx.get("llm"),
         route: configuredRoute(sessionId),
-        text,
+        text: text2,
         sessionId,
         instructions: config.worktree.nameInstructions,
         fallbackPrefix: config.worktree.namePrefix,
@@ -4352,9 +4391,9 @@ function mountRoutes(ctx, connection, config, deps) {
         });
         return;
       }
-      const repoRoot = String(record.repositoryRoot ?? "");
+      const repoRoot = String(record2.repositoryRoot ?? "");
       const branch = await uniqueBranchName(runner, { root: repoRoot, branch: draft.branch });
-      await renameWorktreeBranch(runner, { path: String(record.path ?? ""), branch });
+      await renameWorktreeBranch(runner, { path: String(record2.path ?? ""), branch });
       await store.update((current) => {
         const entry = current.worktrees?.[sessionId];
         if (entry !== void 0) {
@@ -4426,8 +4465,8 @@ function mountRoutes(ctx, connection, config, deps) {
     return null;
   }
   const actions = /* @__PURE__ */ new Map();
-  function pushOutput(progress, _stream, text) {
-    const line = String(text ?? "").trim();
+  function pushOutput(progress, _stream, text2) {
+    const line = String(text2 ?? "").trim();
     if (line.length === 0) return;
     progress.output.push(line.slice(0, 500));
     if (progress.output.length > ACTION_OUTPUT_LINES) progress.output.shift();
@@ -4561,7 +4600,7 @@ function mountRoutes(ctx, connection, config, deps) {
           paths: payload.paths,
           signal,
           timeoutMs: 6e5,
-          onLine: (stream, text) => pushOutput(progress, stream, text)
+          onLine: (stream, text2) => pushOutput(progress, stream, text2)
         });
         commit = outcome.status === "created" ? { status: "created", sha: outcome.sha, subject: outcome.subject } : { status: "skipped_no_changes" };
         if (outcome.branch !== null) branch = outcome.branch;
@@ -4575,7 +4614,7 @@ function mountRoutes(ctx, connection, config, deps) {
           branch,
           timeoutMs: config.worktreeTimeoutMs,
           signal,
-          onLine: (stream, text) => pushOutput(progress, stream, text)
+          onLine: (stream, text2) => pushOutput(progress, stream, text2)
         });
         push = {
           status: outcome.status,
@@ -4617,12 +4656,12 @@ function mountRoutes(ctx, connection, config, deps) {
       progress.label = "Done";
       progress.finishedAt = Date.now();
     } catch (error) {
-      const failure2 = failureOf(error);
+      const failure3 = failureOf(error);
       progress.status = "failed";
-      progress.error = failure2;
-      progress.label = failure2.message;
+      progress.error = failure3;
+      progress.label = failure3.message;
       progress.finishedAt = Date.now();
-      logger.warn("git: action %s failed: %s", action, failure2.message);
+      logger.warn("git: action %s failed: %s", action, failure3.message);
     }
   }
   async function createPullForBranch(options) {
@@ -5181,12 +5220,12 @@ function mountRoutes(ctx, connection, config, deps) {
       ]);
       const mainRoot = resolve4(entries[0]?.path ?? root);
       const records = /* @__PURE__ */ new Map();
-      for (const record of Object.values(value.worktrees ?? {})) {
-        if (typeof record?.path === "string") records.set(pathKey(record.path), record);
+      for (const record2 of Object.values(value.worktrees ?? {})) {
+        if (typeof record2?.path === "string") records.set(pathKey(record2.path), record2);
       }
       const pool = poolDirectory(mainRoot, config.worktree);
       const worktrees = await Promise.all(entries.map(async (entry) => {
-        const record = records.get(pathKey(entry.path));
+        const record2 = records.get(pathKey(entry.path));
         const entryPath = resolve4(entry.path);
         const changedFiles = entry.bare || entry.prunable ? null : await countChangedFiles(entryPath, signal);
         return {
@@ -5199,8 +5238,8 @@ function mountRoutes(ctx, connection, config, deps) {
           prunable: entry.prunable,
           current: pathKey(entryPath) === pathKey(currentPath),
           isPool: pathKey(entryPath) !== pathKey(pool) && isInside(pool, entryPath),
-          sessionId: record?.sessionId ?? null,
-          createdAt: record?.createdAt ?? null,
+          sessionId: record2?.sessionId ?? null,
+          createdAt: record2?.createdAt ?? null,
           changedFiles
         };
       }));
@@ -5248,7 +5287,7 @@ function mountRoutes(ctx, connection, config, deps) {
         signal
       });
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
-      const record = {
+      const record2 = {
         ...created,
         base,
         source,
@@ -5260,7 +5299,7 @@ function mountRoutes(ctx, connection, config, deps) {
       if (sessionId.length > 0) {
         await store.update((current) => {
           current.worktrees ??= {};
-          current.worktrees[sessionId] = record;
+          current.worktrees[sessionId] = record2;
         });
         if (payload.switch !== false) {
           try {
@@ -5282,7 +5321,7 @@ function mountRoutes(ctx, connection, config, deps) {
         }
       }
       logger.info("git: created worktree %s for %s", created.branch, sessionId.length > 0 ? sessionId : "no Session");
-      return { worktree: record, switched };
+      return { worktree: record2, switched };
     },
     /** Move one Session into an existing checkout, or back to the project. */
     async worktreeSwitch(payload, signal) {
@@ -5301,7 +5340,7 @@ function mountRoutes(ctx, connection, config, deps) {
       await store.update((current) => {
         current.worktrees ??= {};
         const existing = Object.values(current.worktrees).find(
-          (record) => typeof record?.path === "string" && pathKey(record.path) === pathKey(matchPath)
+          (record2) => typeof record2?.path === "string" && pathKey(record2.path) === pathKey(matchPath)
         );
         if (existing !== void 0 && pathKey(matchPath) !== pathKey(mainRoot)) {
           current.worktrees[sessionId] = { ...existing, sessionId };
@@ -5342,8 +5381,8 @@ function mountRoutes(ctx, connection, config, deps) {
       });
       await store.update((current) => {
         if (current.worktrees === void 0) return;
-        for (const [id, record] of Object.entries(current.worktrees)) {
-          if (typeof record?.path === "string" && pathKey(record.path) === pathKey(match.path)) delete current.worktrees[id];
+        for (const [id, record2] of Object.entries(current.worktrees)) {
+          if (typeof record2?.path === "string" && pathKey(record2.path) === pathKey(match.path)) delete current.worktrees[id];
         }
       });
       return { removed: result.removed, branchDeleted: result.branchDeleted, directory: resolve4(match.path) };
@@ -5414,7 +5453,7 @@ ${result.stderr ?? ""}`;
         timeoutMs: config.worktreeTimeoutMs,
         signal
       });
-      const record = {
+      const record2 = {
         ...created,
         base,
         source,
@@ -5436,24 +5475,24 @@ ${result.stderr ?? ""}`;
       }
       await store.update((current) => {
         current.worktrees ??= {};
-        current.worktrees[sessionId] = record;
+        current.worktrees[sessionId] = record2;
       });
       logger.info("git: %s now works in worktree %s", sessionId, created.branch);
-      return { worktree: record };
+      return { worktree: record2 };
     },
     /** Remove the checkout this plugin created for a Session and return it to the project. */
     async worktreeRemove(payload, signal) {
       const sessionId = requiredString(payload.sessionId, "sessionId");
       const value = await state();
-      const record = value.worktrees?.[sessionId];
-      if (record === void 0) {
+      const record2 = value.worktrees?.[sessionId];
+      if (record2 === void 0) {
         throw new CommandError("worktree/unknown", "This Session has no worktree created by the plugin");
       }
-      const repoRoot = String(record.repositoryRoot ?? "");
+      const repoRoot = String(record2.repositoryRoot ?? "");
       const result = await removeWorktree(runner, {
         repoRoot,
-        path: String(record.path ?? ""),
-        branch: record.branch,
+        path: String(record2.path ?? ""),
+        branch: record2.branch,
         deleteBranch: payload.deleteBranch === true,
         timeoutMs: config.worktreeTimeoutMs,
         signal
@@ -5567,7 +5606,7 @@ ${result.stderr ?? ""}`;
       return { ran: true, last: last ?? before };
     }
   };
-  async function dispatch(endpoint, payload, signal) {
+  async function dispatch2(endpoint, payload, signal) {
     const handler = handlers[endpoint];
     if (typeof handler !== "function") {
       return failure("input/unknown-endpoint", `Unknown Git action "${String(endpoint)}"`);
@@ -5611,11 +5650,11 @@ ${result.stderr ?? ""}`;
       methods: ["POST"],
       requestBody: "buffered",
       fetch: async (request) => {
-        const payload = await readPayload(request);
+        const payload = await readJsonPayload(request);
         if (payload === void 0) {
           return jsonResponse({ ok: false, error: { code: "input/invalid", message: "The request body is not valid JSON" } });
         }
-        return jsonResponse(await dispatch(endpoint, payload, request.signal));
+        return jsonResponse(await dispatch2(endpoint, payload, request.signal));
       }
     };
     try {
@@ -5680,33 +5719,12 @@ function throwWriteFailure2(operation, result) {
     exitCode: result.code
   });
 }
-function firstUrl2(text) {
-  const match = /https?:\/\/[^\s]+/.exec(String(text ?? ""));
+function firstUrl2(text2) {
+  const match = /https?:\/\/[^\s]+/.exec(String(text2 ?? ""));
   return match === null ? null : match[0];
 }
-function firstLine3(text) {
-  return String(text ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
-}
-async function readPayload(request) {
-  let text;
-  try {
-    text = await request.text();
-  } catch {
-    return void 0;
-  }
-  if (text.trim().length === 0) return {};
-  try {
-    const parsed = JSON.parse(text);
-    return parsed !== null && typeof parsed === "object" ? parsed : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function jsonResponse(body) {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-  });
+function firstLine3(text2) {
+  return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
 function sessionDirectory(ctx, sessionId) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
@@ -5902,32 +5920,32 @@ var TelegramApi = class {
       allowed_updates: allowedUpdates
     }, signal);
   }
-  sendMessage(chatId, text, options = {}, signal) {
+  sendMessage(chatId, text2, options = {}, signal) {
     const { replyToMessageId, disablePreview = true, keyboard } = options;
     return this.#call("sendMessage", {
       chat_id: chatId,
-      text,
+      text: text2,
       disable_web_page_preview: disablePreview,
       ...replyToMessageId === void 0 ? {} : { reply_to_message_id: replyToMessageId },
       ...keyboard === void 0 ? {} : { reply_markup: keyboard }
     }, signal);
   }
-  editMessageText(chatId, messageId, text, options = {}, signal) {
+  editMessageText(chatId, messageId, text2, options = {}, signal) {
     const { disablePreview = true, keyboard } = options;
     return this.#call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
-      text,
+      text: text2,
       disable_web_page_preview: disablePreview,
       ...keyboard === void 0 ? {} : { reply_markup: keyboard }
     }, signal);
   }
   /** Acknowledge a tapped inline button; the tap keeps spinning until this answers. */
   answerCallbackQuery(callbackQueryId, options = {}, signal) {
-    const { text, showAlert = false } = options;
+    const { text: text2, showAlert = false } = options;
     return this.#call("answerCallbackQuery", {
       callback_query_id: callbackQueryId,
-      ...text === void 0 ? {} : { text },
+      ...text2 === void 0 ? {} : { text: text2 },
       ...showAlert ? { show_alert: true } : {}
     }, signal);
   }
@@ -5948,8 +5966,8 @@ var TelegramApi = class {
 
 // src/lib/text.ts
 var SAFE_MESSAGE_LIMIT = 3800;
-function chunkText(text, limit = SAFE_MESSAGE_LIMIT) {
-  const source = typeof text === "string" ? text : String(text ?? "");
+function chunkText(text2, limit = SAFE_MESSAGE_LIMIT) {
+  const source = typeof text2 === "string" ? text2 : String(text2 ?? "");
   if (source.trim().length === 0) return [];
   if (limit <= 0) throw new RangeError("limit must be positive");
   const chunks = [];
@@ -5971,12 +5989,12 @@ function chunkText(text, limit = SAFE_MESSAGE_LIMIT) {
   if (rest.length > 0) chunks.push(rest);
   return chunks.filter((chunk) => chunk.length > 0);
 }
-function safeCut(text, limit) {
-  const code = text.charCodeAt(limit - 1);
+function safeCut(text2, limit) {
+  const code = text2.charCodeAt(limit - 1);
   return code >= 55296 && code <= 56319 ? limit - 1 : limit;
 }
-function parseCommand(text) {
-  const trimmed = typeof text === "string" ? text.trim() : "";
+function parseCommand(text2) {
+  const trimmed = typeof text2 === "string" ? text2.trim() : "";
   const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
   const space = withoutSlash.search(/\s/);
   const head = (space < 0 ? withoutSlash : withoutSlash.slice(0, space)).split("@")[0].toLowerCase();
@@ -6037,11 +6055,11 @@ function applyToolResult(entry, event) {
   if (entry.kind !== "file" || !Array.isArray(diffs)) return;
   const files = [];
   for (const diff of diffs) {
-    const record = diff;
-    if (!record || typeof record.path !== "string" || record.path.length === 0) continue;
-    const stats = lineStats(record.oldText, record.newText);
+    const record2 = diff;
+    if (!record2 || typeof record2.path !== "string" || record2.path.length === 0) continue;
+    const stats = lineStats(record2.oldText, record2.newText);
     files.push({
-      path: record.path,
+      path: record2.path,
       added: stats?.added ?? 0,
       deleted: stats?.removed ?? 0
     });
@@ -6147,9 +6165,9 @@ function createTurnReporter(options) {
   let responses = 0;
   let lastStatus = placeholder;
   let statusAt = 0;
-  async function safeSend(text) {
+  async function safeSend(text2) {
     try {
-      await send(text);
+      await send(text2);
       return true;
     } catch (error) {
       onError(error);
@@ -6161,8 +6179,8 @@ function createTurnReporter(options) {
     const count = keepLast ? Math.max(0, pending.length - 1) : pending.length;
     const texts = pending.splice(0, count);
     if (!pushResponses) return;
-    for (const text of texts) {
-      if (await safeSend(`${RESPONSE_LABEL} ${text}`)) responses += 1;
+    for (const text2 of texts) {
+      if (await safeSend(`${RESPONSE_LABEL} ${text2}`)) responses += 1;
     }
   }
   return {
@@ -6171,10 +6189,10 @@ function createTurnReporter(options) {
       if (!event || typeof event.type !== "string") return;
       if (event.type === "assistant/message") {
         if (!isAppendEvent(event)) return;
-        const text = assistantText(event);
-        if (text.length === 0) return;
+        const text2 = assistantText(event);
+        if (text2.length === 0) return;
         await flush(false);
-        pending.push(text);
+        pending.push(text2);
         return;
       }
       if (event.type === "tool/call") {
@@ -6207,12 +6225,12 @@ function createTurnReporter(options) {
       const parts = [];
       if (responses > 0) parts.push(`${RESPONSE_LABEL} ${responses}`);
       if (changeCount > 0) parts.push(`\u{1F527} ${changeCount}`);
-      const text = parts.length > 0 ? `${placeholder} \xB7 ${parts.join(" \xB7 ")}` : placeholder;
-      if (text === lastStatus) return;
+      const text2 = parts.length > 0 ? `${placeholder} \xB7 ${parts.join(" \xB7 ")}` : placeholder;
+      if (text2 === lastStatus) return;
       statusAt = Date.now();
-      lastStatus = text;
+      lastStatus = text2;
       try {
-        await updateStatus(text);
+        await updateStatus(text2);
       } catch (error) {
         onError(error);
       }
@@ -6225,8 +6243,8 @@ function createTurnReporter(options) {
       const finalText = pending.length > 0 ? pending.pop() : "";
       await flush(false);
       if (pushChanges) {
-        const text = latestSummary !== void 0 ? formatChangeSummary(latestSummary) : formatFallbackChanges([...entries.values()], { cwd });
-        if (text.length > 0) await safeSend(text);
+        const text2 = latestSummary !== void 0 ? formatChangeSummary(latestSummary) : formatFallbackChanges([...entries.values()], { cwd });
+        if (text2.length > 0) await safeSend(text2);
       }
       return finalText.trim();
     }
@@ -6263,29 +6281,29 @@ function patchPaths(input) {
   return paths;
 }
 function displayPath(value, cwd) {
-  let text = typeof value === "string" ? value : "";
-  if (text.trim().length === 0) return "(kh\xF4ng r\xF5)";
-  text = text.replaceAll("\\", "/");
+  let text2 = typeof value === "string" ? value : "";
+  if (text2.trim().length === 0) return "(kh\xF4ng r\xF5)";
+  text2 = text2.replaceAll("\\", "/");
   if (typeof cwd === "string" && cwd.trim().length > 0) {
     const base = cwd.replaceAll("\\", "/").replace(/\/+$/, "");
-    if (base.length > 0 && text.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
-      text = text.slice(base.length + 1);
+    if (base.length > 0 && text2.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
+      text2 = text2.slice(base.length + 1);
     }
   }
-  return shorten(text, MAX_PATH_CHARS);
+  return shorten(text2, MAX_PATH_CHARS);
 }
 function shortCommand(command) {
   const firstLine4 = String(command ?? "").split(/\r?\n/)[0].trim();
   return shorten(firstLine4, MAX_COMMAND_CHARS);
 }
-function shorten(text, max) {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
+function shorten(text2, max) {
+  return text2.length <= max ? text2 : `${text2.slice(0, max - 1)}\u2026`;
 }
-function countLines2(text) {
-  return splitLines(text).length;
+function countLines2(text2) {
+  return splitLines(text2).length;
 }
-function splitLines(text) {
-  const value = typeof text === "string" ? text : "";
+function splitLines(text2) {
+  const value = typeof text2 === "string" ? text2 : "";
   if (value.length === 0) return [];
   return (value.endsWith("\n") ? value.slice(0, -1) : value).split("\n");
 }
@@ -6458,9 +6476,9 @@ function mountTelegramRemote(ctx, config, deps) {
   function canPair() {
     return staticAllowed.length === 0 && (store.state.allowedChatIds ?? []).length === 0;
   }
-  async function reply(api, chatId, text, options = {}) {
+  async function reply(api, chatId, text2, options = {}) {
     const { keyboard, ...rest } = options;
-    const chunks = chunkText(text);
+    const chunks = chunkText(text2);
     for (let index = 0; index < chunks.length; index += 1) {
       const isLast = index === chunks.length - 1;
       await api.sendMessage(chatId, chunks[index], isLast && keyboard ? { ...rest, keyboard } : rest);
@@ -6476,8 +6494,8 @@ function mountTelegramRemote(ctx, config, deps) {
     });
   }
   function shorten2(value, max) {
-    const text = String(value ?? "");
-    return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
+    const text2 = String(value ?? "");
+    return text2.length <= max ? text2 : `${text2.slice(0, max - 1)}\u2026`;
   }
   function workspaceKeyboard(chatId, workspaces) {
     const chosen = preferencesOf(chatId).workspaceId;
@@ -6506,9 +6524,9 @@ function mountTelegramRemote(ctx, config, deps) {
     if (row.length > 0) rows.push(row);
     return { inline_keyboard: rows };
   }
-  async function editQuietly(api, chatId, messageId, text, options = {}) {
+  async function editQuietly(api, chatId, messageId, text2, options = {}) {
     try {
-      await api.editMessageText(chatId, messageId, text, options);
+      await api.editMessageText(chatId, messageId, text2, options);
     } catch (error) {
       if (error instanceof TelegramError) {
         if (error.status === 400 && /not modified/i.test(error.description)) return;
@@ -6611,12 +6629,12 @@ function mountTelegramRemote(ctx, config, deps) {
     const offset = (current - 1) * SESSION_PAGE_SIZE;
     return { current, total, offset, entries: items.slice(offset, offset + SESSION_PAGE_SIZE) };
   }
-  async function sendOrEdit(api, chatId, text, keyboard, editMessageId) {
+  async function sendOrEdit(api, chatId, text2, keyboard, editMessageId) {
     if (editMessageId !== void 0) {
-      await editQuietly(api, chatId, editMessageId, text, { keyboard: keyboard ?? { inline_keyboard: [] } });
+      await editQuietly(api, chatId, editMessageId, text2, { keyboard: keyboard ?? { inline_keyboard: [] } });
       return;
     }
-    await reply(api, chatId, text, keyboard ? { keyboard } : {});
+    await reply(api, chatId, text2, keyboard ? { keyboard } : {});
   }
   function sessionRowKeyboard(chatId, entries, offset) {
     const bound = store.state.bindings?.[chatId]?.sessionId;
@@ -6901,7 +6919,7 @@ function mountTelegramRemote(ctx, config, deps) {
       await sink.reporter.tick();
     }).catch((error) => logger.warn("telegram-remote: cannot report session event: %s", errorMessage2(error)));
   }
-  async function runPrompt(api, chatId, text) {
+  async function runPrompt(api, chatId, text2) {
     let binding = store.state.bindings?.[chatId];
     if (!binding?.sessionId) {
       const created = await createSession(chatId, {});
@@ -6920,7 +6938,7 @@ function mountTelegramRemote(ctx, config, deps) {
     const placeholder = await api.sendMessage(chatId, PLACEHOLDER);
     activeTurns.set(chatId, sessionId);
     const reporter = createTurnReporter({
-      send: (text2) => reply(api, chatId, text2),
+      send: (text3) => reply(api, chatId, text3),
       updateStatus: (statusText) => editQuietly(api, chatId, placeholder.message_id, statusText),
       resolveChanges: (seq) => {
         const changes = ctx.get("workspaceChanges");
@@ -6940,7 +6958,7 @@ function mountTelegramRemote(ctx, config, deps) {
           requestId: randomUUID2(),
           sessionId,
           mode: "queue",
-          content: [{ type: "text", text }],
+          content: [{ type: "text", text: text2 }],
           clientTimeZone
         }, controller.signal);
         const outcome = await pump(sessionId, before.cursor, deadline, reporter, sink);
@@ -6968,23 +6986,23 @@ function mountTelegramRemote(ctx, config, deps) {
       }, controller.signal);
       if (observeSessionEvents) {
         await sink.chain;
-        for (const record of [...wait.output?.records ?? []].reverse()) {
-          if (record?.event) enqueueSinkEvent(sink, record.event);
+        for (const record2 of [...wait.output?.records ?? []].reverse()) {
+          if (record2?.event) enqueueSinkEvent(sink, record2.event);
         }
         await sink.chain;
       } else {
         const events = await readEventsSince(sessionId, afterSeq, wait.state?.cursor);
         if (events === void 0) {
           const records = [...wait.output?.records ?? []].reverse();
-          for (const record of records) {
-            const event = record?.event;
+          for (const record2 of records) {
+            const event = record2?.event;
             if (!event || typeof event.seq !== "number" || event.seq <= afterSeq) continue;
             afterSeq = event.seq;
             await reporter.handle(event);
           }
         } else {
-          for (const record of events) {
-            const event = record?.event;
+          for (const record2 of events) {
+            const event = record2?.event;
             if (!event || typeof event.seq !== "number" || event.seq <= afterSeq) continue;
             afterSeq = event.seq;
             await reporter.handle(event);
@@ -7021,9 +7039,9 @@ function mountTelegramRemote(ctx, config, deps) {
         cut = void 0;
       }
       const seen = /* @__PURE__ */ new Set();
-      return pages.flat().filter(isSequencedRecord).sort((left, right) => left.event.seq - right.event.seq).filter((record) => {
-        if (record.event.seq <= afterSeq || seen.has(record.event.seq)) return false;
-        seen.add(record.event.seq);
+      return pages.flat().filter(isSequencedRecord).sort((left, right) => left.event.seq - right.event.seq).filter((record2) => {
+        if (record2.event.seq <= afterSeq || seen.has(record2.event.seq)) return false;
+        seen.add(record2.event.seq);
         return true;
       });
     } catch (error) {
@@ -7053,8 +7071,8 @@ function mountTelegramRemote(ctx, config, deps) {
       await editQuietly(api, chatId, messageId, "\u2705 Xong");
     }
   }
-  async function handleCommand(api, chatId, text) {
-    const { name: name2, argument } = parseCommand(text);
+  async function handleCommand(api, chatId, text2) {
+    const { name: name2, argument } = parseCommand(text2);
     switch (name2) {
       case "start": {
         if (canPair()) {
@@ -7269,8 +7287,8 @@ ${entry.providerName} (${entry.provider})`);
           const suffix = marks.length > 0 ? `  ${marks.join(" \xB7 ")}` : "";
           lines.push(`${index + 1}. ${entry.model}${suffix}`);
         });
-        for (const failure2 of catalog.failures ?? []) {
-          lines.push(`\u26A0 ${failure2.name ?? failure2.id}: ${failure2.message}`);
+        for (const failure3 of catalog.failures ?? []) {
+          lines.push(`\u26A0 ${failure3.name ?? failure3.id}: ${failure3.message}`);
         }
         lines.push("", "Ch\u1EA1m n\xFAt b\xEAn d\u01B0\u1EDBi \u0111\u1EC3 ch\u1ECDn, ho\u1EB7c g\xF5 /model <s\u1ED1> hay /model provider/model[@effort].");
         await reply(api, chatId, lines.join("\n"), { keyboard: modelKeyboard(chatId, flat) });
@@ -7368,28 +7386,28 @@ ${entry.providerName} (${entry.provider})`);
   async function handleMessage(api, message3) {
     if (!message3?.chat) return;
     const chatId = String(message3.chat.id);
-    const text = typeof message3.text === "string" ? message3.text.trim() : "";
+    const text2 = typeof message3.text === "string" ? message3.text.trim() : "";
     if (message3.chat.type !== "private") {
       await api.sendMessage(chatId, "Bot n\xE0y ch\u1EC9 \u0111i\u1EC1u khi\u1EC3n DSH trong chat ri\xEAng.");
       return;
     }
-    const command = text.startsWith("/") ? parseCommand(text) : void 0;
+    const command = text2.startsWith("/") ? parseCommand(text2) : void 0;
     if (!isAllowed(chatId) && !(command?.name === "start" && canPair())) {
       if (!command) return;
       await reply(api, chatId, canPair() ? `\u{1F44B} G\u1EEDi /start \u0111\u1EC3 gh\xE9p n\u1ED1i chat n\xE0y v\u1EDBi DSH (chat id ${chatId}).` : `\u26D4 Chat ${chatId} kh\xF4ng n\u1EB1m trong danh s\xE1ch cho ph\xE9p.`);
       return;
     }
     if (command) {
-      await handleCommand(api, chatId, text);
+      await handleCommand(api, chatId, text2);
       return;
     }
-    if (text.length === 0) {
+    if (text2.length === 0) {
       await reply(api, chatId, "Hi\u1EC7n ch\u1EC9 h\u1ED7 tr\u1EE3 tin nh\u1EAFn v\u0103n b\u1EA3n.");
       return;
     }
     void enqueue(chatId, async () => {
       try {
-        await runPrompt(api, chatId, text);
+        await runPrompt(api, chatId, text2);
       } catch (error) {
         logger.error("telegram-remote: prompt failed: %s", errorMessage2(error));
         await reply(api, chatId, `\u274C ${errorMessage2(error)}`).catch(() => {
@@ -7400,9 +7418,9 @@ ${entry.providerName} (${entry.provider})`);
   async function handleCallback(api, query) {
     const message3 = query?.message;
     const data = typeof query?.data === "string" ? query.data : "";
-    const answer = async (text, showAlert = false) => {
+    const answer = async (text2, showAlert = false) => {
       try {
-        await api.answerCallbackQuery(query.id, text ? { text, showAlert } : {});
+        await api.answerCallbackQuery(query.id, text2 ? { text: text2, showAlert } : {});
       } catch (error) {
         logger.warn("telegram-remote: answerCallbackQuery failed: %s", errorMessage2(error));
       }
@@ -7720,8 +7738,8 @@ ${entry.providerName} (${entry.provider})`);
     turnSinks.clear();
   };
 }
-function isSequencedRecord(record) {
-  return record?.event !== void 0 && typeof record.event.seq === "number";
+function isSequencedRecord(record2) {
+  return record2?.event !== void 0 && typeof record2.event.seq === "number";
 }
 function requiredService(ctx, name2) {
   return ctx.get(name2);
@@ -7803,8 +7821,8 @@ async function loadOrCreateIdentity({ dir, keyFile = join6(dir, "device.key") })
   };
 }
 function signHello(identity, { ts = Date.now(), nonce = makeNonce(), deviceId = identity.deviceId, v = 1 } = {}) {
-  const text = helloSigningText({ v, deviceId, ts, nonce });
-  const sig = sign(null, Buffer.from(text, "utf8"), identity.privateKey).toString("base64url");
+  const text2 = helloSigningText({ v, deviceId, ts, nonce });
+  const sig = sign(null, Buffer.from(text2, "utf8"), identity.privateKey).toString("base64url");
   return { v, deviceId, ts, nonce, sig };
 }
 
@@ -7857,10 +7875,10 @@ function messageOf6(body, fallback) {
   return fallback;
 }
 async function readBody(response) {
-  const text = await response.text();
-  if (text.length === 0) return void 0;
+  const text2 = await response.text();
+  if (text2.length === 0) return void 0;
   try {
-    return JSON.parse(text);
+    return JSON.parse(text2);
   } catch {
     return void 0;
   }
@@ -8265,16 +8283,16 @@ function validateFrame(value) {
       throw badFrame("unknown frame type");
   }
 }
-function decodeFrame(text, options = {}) {
-  if (typeof text !== "string") throw badFrame("a wire frame must be text");
+function decodeFrame(text2, options = {}) {
+  if (typeof text2 !== "string") throw badFrame("a wire frame must be text");
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
-  const bytes = Buffer.byteLength(text, "utf8");
+  const bytes = Buffer.byteLength(text2, "utf8");
   if (bytes > maxFrameBytes) {
     throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
   }
   let parsed;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text2);
   } catch (error) {
     throw new ProtocolError("bad-frame", "frame is not valid JSON", { cause: error });
   }
@@ -8282,13 +8300,13 @@ function decodeFrame(text, options = {}) {
 }
 function encodeFrame(frame, options = {}) {
   validateFrame(frame);
-  const text = JSON.stringify(frame);
+  const text2 = JSON.stringify(frame);
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
-  const bytes = Buffer.byteLength(text, "utf8");
+  const bytes = Buffer.byteLength(text2, "utf8");
   if (bytes > maxFrameBytes) {
     throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
   }
-  return text;
+  return text2;
 }
 function helloFrame({ deviceId, ts, nonce, sig }) {
   return { t: "hello", v: PROTOCOL_VERSION, deviceId, ts, nonce, sig };
@@ -8654,19 +8672,19 @@ var RemoteTransport = class {
       this.#safeSend(endFrame(frame.id, "error"));
       return;
     }
-    const record = {
+    const record2 = {
       id: frame.id,
       closed: false,
       cancelHandlers: /* @__PURE__ */ new Set()
     };
-    this.#streams.set(frame.id, record);
+    this.#streams.set(frame.id, record2);
     const stream = {
       id: frame.id,
       get closed() {
-        return record.closed;
+        return record2.closed;
       },
       push: (item, seq) => {
-        if (record.closed) return false;
+        if (record2.closed) return false;
         try {
           this.#send(itemFrame(frame.id, item, seq));
           return true;
@@ -8679,8 +8697,8 @@ var RemoteTransport = class {
         this.#finishStream(frame.id, reason, true);
       },
       onCancel: (listener) => {
-        record.cancelHandlers.add(listener);
-        return () => record.cancelHandlers.delete(listener);
+        record2.cancelHandlers.add(listener);
+        return () => record2.cancelHandlers.delete(listener);
       }
     };
     try {
@@ -8694,16 +8712,16 @@ var RemoteTransport = class {
     }
   }
   #onStreamItem(frame) {
-    const record = this.#streams.get(frame.id);
-    if (record === void 0 || record.closed) return;
+    const record2 = this.#streams.get(frame.id);
+    if (record2 === void 0 || record2.closed) return;
     this.logger.warn("web-remote: unexpected item for stream %s", frame.id);
   }
   #onStreamEnd(frame, reason) {
-    const record = this.#streams.get(frame.id);
-    if (record === void 0) return;
-    record.closed = true;
+    const record2 = this.#streams.get(frame.id);
+    if (record2 === void 0) return;
+    record2.closed = true;
     this.#streams.delete(frame.id);
-    for (const listener of [...record.cancelHandlers]) {
+    for (const listener of [...record2.cancelHandlers]) {
       try {
         listener(reason);
       } catch (error) {
@@ -8712,9 +8730,9 @@ var RemoteTransport = class {
     }
   }
   #finishStream(id, reason, sendEnd) {
-    const record = this.#streams.get(id);
-    if (record === void 0) return;
-    record.closed = true;
+    const record2 = this.#streams.get(id);
+    if (record2 === void 0) return;
+    record2.closed = true;
     this.#streams.delete(id);
     if (sendEnd) this.#safeSend(endFrame(id, reason));
   }
@@ -8753,13 +8771,13 @@ var RemoteTransport = class {
   }
   #retry(generation) {
     if (this.#stopped || generation !== this.#generation) return;
-    const delay = this.#nextDelay();
+    const delay2 = this.#nextDelay();
     this.#reconnectTimer = this.setTimeoutImpl(() => {
       this.#reconnectTimer = void 0;
       void this.#connect();
-    }, delay);
+    }, delay2);
     this.#reconnectTimer?.unref?.();
-    this.logger.info("web-remote: reconnecting in %d ms", delay);
+    this.logger.info("web-remote: reconnecting in %d ms", delay2);
   }
   #nextDelay() {
     const { minMs, maxMs } = this.reconnect;
@@ -8781,10 +8799,10 @@ var RemoteTransport = class {
     }
   }
   #closeStreams(reason) {
-    for (const [id, record] of [...this.#streams]) {
-      record.closed = true;
+    for (const [id, record2] of [...this.#streams]) {
+      record2.closed = true;
       this.#streams.delete(id);
-      for (const listener of [...record.cancelHandlers]) {
+      for (const listener of [...record2.cancelHandlers]) {
         try {
           listener(reason);
         } catch {
@@ -9046,13 +9064,13 @@ var WebRemoteBridge = class {
   }
   async #prompt(args) {
     const sessionId = requireSessionId(args);
-    const text = requireString2(args.text, "text", 1, PROMPT_TEXT_LIMIT);
-    if (text.trim().length === 0) throw new ProtocolError("bad-request", '"text" must not be blank');
+    const text2 = requireString2(args.text, "text", 1, PROMPT_TEXT_LIMIT);
+    if (text2.trim().length === 0) throw new ProtocolError("bad-request", '"text" must not be blank');
     const request = {
       requestId: nonEmptyString(args.requestId) ? args.requestId : randomUUID4(),
       sessionId,
       mode: args.mode === "steer" ? "steer" : "queue",
-      content: [{ type: "text", text }],
+      content: [{ type: "text", text: text2 }],
       clientTimeZone: this.clientTimeZone
     };
     return this.sessionController.prompt(request, this.#lifecycle.signal);
@@ -9216,6 +9234,207 @@ function normalizeAnswers(questions, answers) {
   return result.length === questions.length ? result : void 0;
 }
 
+// src/features/web-remote-routes.ts
+var WEB_REMOTE_PATH_PREFIX = "/api/personal-hub-web-remote";
+var WEB_REMOTE_ENDPOINTS = ["state", "settingsSet", "pair", "pairCancel", "unpair"];
+var ROW_PACKAGE = "@local/personal-hub";
+var MAX_DEVICE_NAME = 80;
+var MAX_RELAY_URL = 2048;
+function mountWebRemoteRoutes(ctx, deps) {
+  const connection = ctx.get("connection");
+  if (connection?.fetch !== void 0 && typeof connection.fetch.register === "function") {
+    return registerRoutes(ctx, connection.fetch.register.bind(connection.fetch), deps);
+  }
+  if (typeof ctx.inject !== "function") {
+    deps.logger.info("web-remote: the connection service is absent, so the settings card has no Host side");
+    return () => {
+    };
+  }
+  let routeDisposer;
+  let fiber;
+  try {
+    fiber = ctx.inject(["connection"], (scoped) => {
+      const scopedConnection = scoped.get("connection");
+      if (scopedConnection?.fetch === void 0 || typeof scopedConnection.fetch.register !== "function") {
+        deps.logger.warn("web-remote: the connection service exposes no Fetch routes; the settings card has no Host side");
+        return;
+      }
+      routeDisposer = registerRoutes(ctx, scopedConnection.fetch.register.bind(scopedConnection.fetch), deps);
+    });
+  } catch (error) {
+    deps.logger.warn("web-remote: cannot wait for the connection service: %s", messageOf7(error));
+    return () => {
+    };
+  }
+  return () => {
+    try {
+      routeDisposer?.();
+    } catch (error) {
+      deps.logger.warn("web-remote: route disposal failed: %s", messageOf7(error));
+    }
+    routeDisposer = void 0;
+    try {
+      fiber?.dispose?.();
+    } catch {
+    }
+  };
+}
+function registerRoutes(ctx, register, deps) {
+  const disposers = [];
+  for (const endpoint of WEB_REMOTE_ENDPOINTS) {
+    const route = {
+      path: `${WEB_REMOTE_PATH_PREFIX}/${endpoint}`,
+      methods: ["POST"],
+      requestBody: "buffered",
+      fetch: async (request) => {
+        const payload = await readJsonPayload(request);
+        if (payload === void 0) {
+          return jsonResponse(failure2("input/invalid", "The request body is not valid JSON"));
+        }
+        return jsonResponse(await dispatch(ctx, deps, endpoint, payload));
+      }
+    };
+    try {
+      disposers.push(register(route));
+    } catch (error) {
+      deps.logger.error("web-remote: cannot register %s: %s", route.path, messageOf7(error));
+    }
+  }
+  if (disposers.length === 0) {
+    deps.logger.error("web-remote: no card route could be registered");
+  } else {
+    deps.logger.info("web-remote: %d status routes are open under %s for this browser", disposers.length, WEB_REMOTE_PATH_PREFIX);
+  }
+  return () => {
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch (error) {
+        deps.logger.warn("web-remote: route dispose failed: %s", messageOf7(error));
+      }
+    }
+  };
+}
+async function dispatch(ctx, deps, endpoint, payload) {
+  try {
+    switch (endpoint) {
+      case "state":
+        return { ok: true, value: cardState(ctx, deps) };
+      case "settingsSet":
+        return { ok: true, value: await settingsSet(ctx, deps, payload) };
+      case "pair":
+        await deps.pair();
+        return { ok: true, value: actionResult(deps) };
+      case "pairCancel":
+        await deps.cancelPairing();
+        return { ok: true, value: actionResult(deps) };
+      case "unpair":
+        await deps.unpair();
+        return { ok: true, value: actionResult(deps) };
+      default:
+        return failure2("input/unknown-endpoint", `Unknown Web Remote route "${String(endpoint)}"`);
+    }
+  } catch (error) {
+    deps.logger.warn("web-remote: %s failed: %s", endpoint, messageOf7(error));
+    return failureOf2(error);
+  }
+}
+function cardState(ctx, deps) {
+  return {
+    writable: editorOf(ctx) !== void 0,
+    settings: deps.settings(),
+    status: deps.status()
+  };
+}
+function actionResult(deps) {
+  return { state: deps.status().state };
+}
+async function settingsSet(ctx, deps, payload) {
+  const editor = editorOf(ctx);
+  if (editor === void 0) {
+    throw new ProtocolError("config/unavailable", "This build cannot edit configuration from the UI");
+  }
+  const current = deps.settings();
+  const next = mergeSettings(current, payload);
+  if (sameSettings(current, next)) return { settings: current };
+  const entry = editor.entries().find((row) => row?.options?.name === ROW_PACKAGE);
+  if (entry === void 0) {
+    throw new ProtocolError("config/unknown-entry", "The plugin row is missing from this profile configuration");
+  }
+  await editor.edit(entry, (raw) => writeRow(raw, next));
+  return { settings: next };
+}
+function editorOf(ctx) {
+  const service = ctx.get("configEditor");
+  return service !== void 0 && typeof service.edit === "function" && typeof service.entries === "function" ? service : void 0;
+}
+function mergeSettings(current, payload) {
+  let enabled = current.enabled;
+  if (payload.enabled !== void 0) {
+    if (typeof payload.enabled !== "boolean") {
+      throw new ProtocolError("input/invalid", "enabled must be true or false");
+    }
+    enabled = payload.enabled;
+  }
+  const relayUrl = payload.relayUrl === void 0 ? current.relayUrl : text(payload.relayUrl, "relayUrl", MAX_RELAY_URL);
+  if (relayUrl.length > 0) relayEndpoints(relayUrl);
+  const rawName = payload.deviceName === void 0 ? current.deviceName : text(payload.deviceName, "deviceName", MAX_DEVICE_NAME);
+  const deviceName = rawName.trim();
+  let autoPair = current.autoPair;
+  if (payload.autoPair !== void 0) {
+    if (typeof payload.autoPair !== "boolean") {
+      throw new ProtocolError("input/invalid", "autoPair must be true or false");
+    }
+    autoPair = payload.autoPair;
+  }
+  return {
+    enabled,
+    relayUrl,
+    deviceName,
+    effectiveDeviceName: deviceName.length > 0 ? deviceName : current.effectiveDeviceName,
+    autoPair
+  };
+}
+function text(value, name2, max) {
+  if (typeof value !== "string") throw new ProtocolError("input/invalid", `${name2} must be a string`);
+  const trimmed = value.trim();
+  if (trimmed.length > max) {
+    throw new ProtocolError("input/invalid", `${name2} is longer than ${max} characters`);
+  }
+  return trimmed;
+}
+function sameSettings(left, right) {
+  return left.enabled === right.enabled && left.relayUrl === right.relayUrl && left.deviceName === right.deviceName && left.autoPair === right.autoPair;
+}
+function writeRow(raw, settings) {
+  const row = record(raw);
+  return {
+    ...row,
+    webRemote: {
+      ...record(row.webRemote),
+      enabled: settings.enabled,
+      relayUrl: settings.relayUrl,
+      deviceName: settings.deviceName,
+      autoPair: settings.autoPair
+    }
+  };
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function failure2(code, message3) {
+  return { ok: false, error: { code, message: message3 } };
+}
+function failureOf2(error) {
+  if (error instanceof ProtocolError || error instanceof PairingError) {
+    return failure2(error.code, error.message);
+  }
+  return failure2("system/failed", messageOf7(error));
+}
+function messageOf7(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // src/features/web-remote.ts
 var REFRESH_CREDENTIAL = "DSH_WEB_REMOTE_REFRESH_TOKEN";
 var SUPPORTED_METHODS = ["list", "state", "create", "prompt", "cancel", "follow", "control"];
@@ -9252,6 +9471,9 @@ function mountWebRemote(ctx, config, deps = {}) {
   let lastPublished = "";
   let writeChain = Promise.resolve();
   let pairingAttempt = 0;
+  let pairingController;
+  let rewriteTimer;
+  let rewriteAttempts = 0;
   logger.info("web-remote: mounted, data directory %s", dataDir);
   const missing = SUPPORTED_METHODS.filter((method) => typeof sessionController[method] !== "function");
   if (missing.length > 0) {
@@ -9260,33 +9482,66 @@ function mountWebRemote(ctx, config, deps = {}) {
   const ready = initialize().catch((error) => {
     reportError("initialization failed", error);
   });
+  const routesDisposer = mountWebRemoteRoutes(ctx, {
+    logger,
+    settings: settingsView,
+    status: statusView,
+    pair: pairNow,
+    cancelPairing: async () => {
+      cancelPairing();
+    },
+    unpair
+  });
   function publish(patch) {
     published = { ...published, ...patch, updatedAt: new Date(now()).toISOString() };
     const snapshot = { ...published };
-    const text = JSON.stringify(snapshot);
-    if (text === lastPublished) return;
-    lastPublished = text;
-    writeChain = writeChain.then(() => writeJsonFile(statusFile, snapshot)).catch((error) => logger.warn("web-remote: cannot write status file: %s", message(error)));
+    const text2 = JSON.stringify(snapshot);
+    if (text2 === lastPublished) return;
+    lastPublished = text2;
+    writeChain = writeChain.then(() => writeJsonFile(statusFile, snapshot)).then(() => {
+      rewriteAttempts = 0;
+    }).catch((error) => {
+      logger.warn("web-remote: cannot write status file: %s", message(error));
+      lastPublished = "";
+      scheduleRewrite();
+    });
+  }
+  function scheduleRewrite() {
+    if (stopped || rewriteTimer !== void 0 || rewriteAttempts >= 3) return;
+    rewriteAttempts += 1;
+    const wait = 250 * rewriteAttempts;
+    rewriteTimer = setTimeout(() => {
+      rewriteTimer = void 0;
+      if (stopped) return;
+      publish({});
+    }, wait);
+    rewriteTimer.unref?.();
   }
   async function initialize() {
     await mkdir5(dataDir, { recursive: true, mode: 448 });
-    identity = deps.identity ?? await loadOrCreateIdentity({ dir: dataDir });
+    if (config.enabled) {
+      identity = deps.identity ?? await loadOrCreateIdentity({ dir: dataDir });
+    }
     await stateStore.load();
     const previousRelay = stateStore.state.relayUrl;
     if (previousRelay !== config.relayUrl && previousRelay !== "") {
       await clearRefreshToken();
     }
     await stateStore.update((state) => {
-      state.deviceId = identity.deviceId;
+      if (identity !== void 0) state.deviceId = identity.deviceId;
       state.relayUrl = config.relayUrl;
     });
     publish({
-      state: config.relayUrl.length > 0 ? "starting" : "waiting-relay",
-      deviceId: identity.deviceId,
-      fingerprint: identity.fingerprint,
+      state: config.enabled ? config.relayUrl.length > 0 ? "starting" : "waiting-relay" : "disabled",
+      deviceId: identity?.deviceId,
+      fingerprint: identity?.fingerprint,
       deviceName,
       relayUrl: config.relayUrl
     });
+    if (!config.enabled) {
+      logger.info("web-remote: disabled by configuration; the settings card can turn it on");
+      return;
+    }
     if (config.relayUrl.length === 0) {
       logger.info("web-remote: no relayUrl configured; waiting for one in the plugin settings");
       return;
@@ -9312,12 +9567,21 @@ function mountWebRemote(ctx, config, deps = {}) {
   }
   async function pair() {
     if (stopped) return;
+    const device = identity;
+    if (device === void 0) {
+      logger.warn("web-remote: cannot pair while the feature is disabled");
+      return false;
+    }
+    if (pairingController !== void 0) return false;
+    const attempt = new AbortController();
+    pairingController = attempt;
+    const signal = AbortSignal.any([lifecycle.signal, attempt.signal]);
     pairingAttempt += 1;
-    publish({ state: "pairing" });
+    publish({ state: "pairing", pairing: void 0, pairingStatus: "authorize", lastError: null });
     logger.info(
       "web-remote: pairing device %s (%s) with %s",
       deviceName,
-      identity.deviceId,
+      device.deviceId,
       config.relayUrl
     );
     try {
@@ -9325,11 +9589,11 @@ function mountWebRemote(ctx, config, deps = {}) {
         relayUrl: config.relayUrl,
         name: deviceName,
         platform: process.platform,
-        pubkey: identity.publicKeyBase64,
-        deviceId: identity.deviceId,
+        pubkey: device.publicKeyBase64,
+        deviceId: device.deviceId,
         scopes: config.scopes,
         fetchImpl: deps.fetchImpl,
-        signal: lifecycle.signal,
+        signal,
         now,
         ...typeof deps.pairingPollMs === "number" && deps.pairingPollMs > 0 ? { pollIntervalMs: deps.pairingPollMs } : {},
         onCode: (code) => {
@@ -9358,13 +9622,14 @@ function mountWebRemote(ctx, config, deps = {}) {
       accessExpiresAt = now() + (Number(tokens.expires_in) || 900) * 1e3;
       await stateStore.update((state) => {
         state.pairedAt = now();
-        state.deviceId = identity.deviceId;
+        state.deviceId = device.deviceId;
         state.relayUrl = config.relayUrl;
       });
       publish({
         state: "paired",
         pairedAt: new Date(now()).toISOString(),
         pairing: void 0,
+        pairingStatus: null,
         lastError: null
       });
       logger.info("web-remote: paired; connecting to relay");
@@ -9374,7 +9639,82 @@ function mountWebRemote(ctx, config, deps = {}) {
       reportError("pairing failed", error);
       publish({ state: "pairing-required", pairing: void 0 });
       return false;
+    } finally {
+      if (pairingController === attempt) pairingController = void 0;
     }
+  }
+  async function pairNow() {
+    if (stopped) throw new ProtocolError("transport/closed", "the Web Remote feature is shutting down");
+    if (!config.enabled) {
+      throw new PairingError("pair/disabled", "Web Remote is turned off in the profile configuration");
+    }
+    if (config.relayUrl.length === 0) {
+      throw new PairingError("pair/no-relay", "Set a relay URL before pairing this device");
+    }
+    relayEndpoints(config.relayUrl);
+    if (pairingController !== void 0) return;
+    transport?.stop("pairing");
+    await clearRefreshToken();
+    pairingAttempt = 0;
+    void pair().then((paired) => paired === true ? connect() : void 0).catch((error) => reportError("pairing failed", error));
+  }
+  function cancelPairing() {
+    if (stopped || pairingController === void 0) return;
+    pairingController.abort();
+    pairingAttempt = 0;
+    publish({
+      state: "pairing-required",
+      pairing: void 0,
+      pairingStatus: "cancelled",
+      connectedAt: void 0,
+      watching: []
+    });
+  }
+  async function unpair() {
+    if (stopped) throw new ProtocolError("transport/closed", "the Web Remote feature is shutting down");
+    pairingController?.abort();
+    pairingAttempt = 0;
+    await clearRefreshToken();
+    try {
+      transport?.stop("unpaired");
+    } catch (error) {
+      logger.warn("web-remote: transport stop failed: %s", message(error));
+    }
+    publish({
+      state: "pairing-required",
+      pairing: void 0,
+      pairingStatus: "unpaired",
+      connectedAt: void 0,
+      watching: [],
+      lastError: null
+    });
+    logger.info("web-remote: unpaired; the web client lost access to this device");
+  }
+  function settingsView() {
+    return {
+      enabled: config.enabled,
+      relayUrl: config.relayUrl,
+      deviceName: config.deviceName,
+      effectiveDeviceName: deviceName,
+      autoPair: config.autoPair
+    };
+  }
+  function statusView() {
+    return {
+      state: published.state,
+      deviceId: published.deviceId ?? "",
+      deviceName: published.deviceName ?? deviceName,
+      fingerprint: published.fingerprint ?? identity?.fingerprint ?? "",
+      relayUrl: published.relayUrl ?? config.relayUrl,
+      paired: refreshToken.length > 0,
+      pairedAt: published.pairedAt ?? null,
+      connectedAt: published.connectedAt ?? null,
+      pairing: published.pairing ?? null,
+      pairingStatus: published.pairingStatus ?? null,
+      watching: [...published.watching ?? []],
+      lastError: published.lastError ?? null,
+      updatedAt: published.updatedAt ?? null
+    };
   }
   const transportProxy = {
     get status() {
@@ -9410,6 +9750,10 @@ function mountWebRemote(ctx, config, deps = {}) {
   }
   async function connect() {
     if (stopped) return;
+    if (identity === void 0) {
+      reportError("cannot connect", new Error("the device key was never loaded; enable Web Remote first"));
+      return;
+    }
     transport?.stop("reconnecting");
     const endpoints = relayEndpoints(config.relayUrl);
     const transportOptions = {
@@ -9451,6 +9795,7 @@ function mountWebRemote(ctx, config, deps = {}) {
         state: "connected",
         connectedAt: new Date(now()).toISOString(),
         lastError: null,
+        pairingStatus: null,
         watching: bridge?.watchedSessions ?? []
       });
       return;
@@ -9482,7 +9827,7 @@ function mountWebRemote(ctx, config, deps = {}) {
     const attempt = pairingAttempt;
     setTimeout(() => {
       if (stopped) return;
-      void pair().then((paired) => paired ? connect() : void 0).catch((failure2) => reportError("re-pairing failed", failure2));
+      void pair().then((paired) => paired ? connect() : void 0).catch((failure3) => reportError("re-pairing failed", failure3));
     }, Math.min(3e4, 1500 * Math.max(1, attempt))).unref?.();
   }
   async function getAccessToken() {
@@ -9557,13 +9902,22 @@ function mountWebRemote(ctx, config, deps = {}) {
     }
   }
   function reportError(context, error) {
-    const text = message(error);
-    publish({ state: "error", lastError: `${context}: ${text}` });
-    logger.error("web-remote: %s: %s", context, text);
+    const text2 = message(error);
+    publish({ state: "error", lastError: `${context}: ${text2}` });
+    logger.error("web-remote: %s: %s", context, text2);
   }
   function dispose() {
     if (stopped) return;
     stopped = true;
+    if (rewriteTimer !== void 0) {
+      clearTimeout(rewriteTimer);
+      rewriteTimer = void 0;
+    }
+    try {
+      routesDisposer();
+    } catch (error) {
+      logger.warn("web-remote: route disposal failed: %s", message(error));
+    }
     lifecycle.abort();
     try {
       transport?.stop("plugin-disposed");
@@ -9626,7 +9980,7 @@ function apply(ctx, config) {
     for (const feature of FEATURES) {
       const featureConfig = settings[feature.key];
       if (featureConfig === void 0) continue;
-      if (featureConfig.enabled === false) {
+      if (featureConfig.enabled === false && feature.key !== "webRemote") {
         logger.info("personal-hub: %s disabled by configuration", feature.label);
         continue;
       }

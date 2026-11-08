@@ -841,3 +841,88 @@ export type GitResponse<K extends GitEndpoint> = Awaited<ReturnType<GitApi[K]>>
 
 /** The caller the browser half holds: one method per route. */
 export type GitClient = GitApi
+
+/* ------------------------------------------------------------------ */
+/* Web Remote card                                                     */
+/* ------------------------------------------------------------------ */
+
+/** The pairing code the card shows while the relay waits for approval. */
+export interface WebRemotePairingView {
+  code: string
+  /** The page the approver opens; the relay's `/pair` screen by default. */
+  uri: string
+  /** ISO instant the code stops being valid. */
+  expiresAt: string
+}
+
+/** One runtime status snapshot, shaped for the card. */
+export interface WebRemoteRuntimeStatus {
+  /** `waiting-relay`, `pairing`, `connected`, `error`, … */
+  state: string
+  deviceId: string
+  /** The name this device reports, after the hostname fallback. */
+  deviceName: string
+  fingerprint: string
+  relayUrl: string
+  /** True once a refresh token is stored, so the device is paired. */
+  paired: boolean
+  pairedAt: string | null
+  connectedAt: string | null
+  pairing: WebRemotePairingView | null
+  /** The last pairing issue the relay reported, `cancelled`, or `unpaired`. */
+  pairingStatus: string | null
+  /** Sessions a web client is following right now. */
+  watching: string[]
+  lastError: string | null
+  updatedAt: string | null
+}
+
+/** The relay settings the card edits. */
+export interface WebRemoteSettingsView {
+  /** Whether the bridge may open a socket at all. */
+  enabled: boolean
+  relayUrl: string
+  deviceName: string
+  /** The name actually sent to the relay: `deviceName`, or the hostname when empty. */
+  effectiveDeviceName: string
+  autoPair: boolean
+}
+
+/** One settings edit from the card. */
+export interface WebRemoteSettingsPatch {
+  enabled?: boolean
+  relayUrl?: string
+  deviceName?: string
+  autoPair?: boolean
+}
+
+/** What the card reads: settings, runtime status, and whether it may edit. */
+export interface WebRemoteCardState {
+  writable: boolean
+  settings: WebRemoteSettingsView
+  status: WebRemoteRuntimeStatus
+}
+
+/** What a pairing control answers. */
+export interface WebRemoteActionResult {
+  /** The state the Host published after the action. */
+  state: string
+}
+
+/** Every route the Web Remote card may call. */
+export interface WebRemoteApi {
+  state(payload?: Record<string, never>): Promise<WebRemoteCardState>
+  settingsSet(payload: WebRemoteSettingsPatch): Promise<{ settings: WebRemoteSettingsView }>
+  pair(payload?: Record<string, never>): Promise<WebRemoteActionResult>
+  pairCancel(payload?: Record<string, never>): Promise<WebRemoteActionResult>
+  unpair(payload?: Record<string, never>): Promise<WebRemoteActionResult>
+}
+
+/** The name of one callable Web Remote route. */
+export type WebRemoteEndpoint = keyof WebRemoteApi
+
+/** The payload of one Web Remote route. */
+export type WebRemoteRequest<K extends WebRemoteEndpoint> = Parameters<WebRemoteApi[K]>[0]
+
+/** What one Web Remote route answers when it succeeds. */
+export type WebRemoteResponse<K extends WebRemoteEndpoint> = Awaited<ReturnType<WebRemoteApi[K]>>

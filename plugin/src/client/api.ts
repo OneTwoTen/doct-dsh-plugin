@@ -27,12 +27,19 @@ import type {
   PushRequest,
   StackedActionRequest,
   SwitchBranchRequest,
+  WebRemoteActionResult,
+  WebRemoteApi,
+  WebRemoteCardState,
+  WebRemoteSettingsView,
 } from '../shared/protocol.ts'
 
-export type { GitApi, GitRequest, GitResponse } from '../shared/protocol.ts'
+export type { GitApi, GitRequest, GitResponse, WebRemoteApi } from '../shared/protocol.ts'
 
 /** The Host route prefix, relative to the page. */
 export const GIT_PATH = 'api/personal-hub-git'
+
+/** The Web Remote card's Host route prefix, relative to the page. */
+export const WEB_REMOTE_PATH = 'api/personal-hub-web-remote'
 
 /** One raw route call, before the envelope is unwrapped. */
 export type RawCall = (endpoint: string, payload?: unknown) => Promise<unknown>
@@ -62,12 +69,14 @@ export function requestError(failure: FailureInfo): GitRequestError {
  * The request rides the Connection shared channel, so the browser's session
  * cookie is the only credential it needs; a page that cannot reach the Host
  * half sees a transport failure and the panel says so.
+ *
+ * @param prefix route prefix, for example `api/personal-hub-git`.
  */
-export function createGitCaller(): RawCall {
+export function createCaller(prefix: string): RawCall {
   return async function call(endpoint, payload) {
     let response: Response
     try {
-      response = await fetch(`${GIT_PATH}/${endpoint}`, {
+      response = await fetch(`${prefix}/${endpoint}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload ?? {}),
@@ -94,11 +103,33 @@ export function createGitCaller(): RawCall {
       const detail = envelope.error
       throw new GitRequestError(
         detail?.code ?? 'system/failed',
-        detail?.message ?? 'The Git request failed',
+        detail?.message ?? 'The request failed',
         detail?.details,
       )
     }
     return envelope.value
+  }
+}
+
+/**
+ * The Git routes' caller.
+ * @returns one raw route call bound to the Git prefix.
+ */
+export function createGitCaller(): RawCall {
+  return createCaller(GIT_PATH)
+}
+
+/**
+ * The Web Remote card's caller and typed API.
+ * @param call one raw route call; defaults to its own prefix.
+ */
+export function createWebRemoteApi(call: RawCall = createCaller(WEB_REMOTE_PATH)): WebRemoteApi {
+  return {
+    state: (payload) => call('state', payload) as Promise<WebRemoteCardState>,
+    settingsSet: (payload) => call('settingsSet', payload) as Promise<{ settings: WebRemoteSettingsView }>,
+    pair: (payload) => call('pair', payload) as Promise<WebRemoteActionResult>,
+    pairCancel: (payload) => call('pairCancel', payload) as Promise<WebRemoteActionResult>,
+    unpair: (payload) => call('unpair', payload) as Promise<WebRemoteActionResult>,
   }
 }
 

@@ -452,13 +452,14 @@ vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn s
 ## 7. Web Remote (Phase 1 — bridge)
 
 Điều khiển DSH từ điện thoại qua một relay WebSocket. Plugin là bên **chủ động nối ra ngoài**;
-máy chạy DSH không mở port nào. Phần đã xong là **bridge Host** và **giao thức v1**
-([`protocol/`](../protocol/README.md)). Relay Zig là Phase 2 và web client SvelteKit là Phase 3;
-để chạy thử ngay, repo có relay phát triển bằng Node tại [`tools/dev-relay/`](../tools/dev-relay/).
+máy chạy DSH không mở port nào. Phần đã xong là **bridge Host**, **giao thức v1**
+([`protocol/`](../protocol/README.md)) và **thẻ Web Remote** trong hàng plugin (trạng thái, mã ghép
+cặp, ngắt ghép nối). Relay Zig là Phase 2 và web client SvelteKit là Phase 3; để chạy thử ngay, repo
+có relay phát triển bằng Node tại [`tools/dev-relay/`](../tools/dev-relay/).
 
 ```powershell
 node tools/dev-relay/index.mjs --port 8787
-# rồi đặt relayUrl: 'http://127.0.0.1:8787' và bật webRemote
+# rồi bật Web Remote trong thẻ của hàng personal-hub và đặt relayUrl: 'http://127.0.0.1:8787'
 ```
 
 ### Cấu hình
@@ -479,9 +480,29 @@ webRemote:
   reconnectMaxMs: 30000
 ```
 
-Bật bằng **Plugins** → thẻ cấu hình hàng `personal-hub` → `webRemote` → **Lưu** (hoặc sửa
-`cordis.patch.yml` của profile). Sửa `relayUrl` của một thiết bị đã ghép cặp sẽ xoá credential cũ:
-thiết bị phải ghép cặp lại với relay mới.
+Bật bằng **Plugins** → thẻ cấu hình hàng `personal-hub` → **Web Remote** → tick **Bật Web Remote** →
+**Lưu** (hoặc sửa `cordis.patch.yml` của profile). Sửa `relayUrl` của một thiết bị đã ghép cặp sẽ xoá
+credential cũ: thiết bị phải ghép cặp lại với relay mới.
+
+### Thẻ Web Remote trong DSH
+
+Hàng `personal-hub` trong **Plugins** có thẻ **Web Remote** nằm giữa thẻ Telegram và phần thiết lập
+Git; thẻ này là chỗ duy nhất thấy mã ghép cặp mà không phải đọc log.
+
+- **Bật/tắt Web Remote** — `webRemote.enabled`. Khi tắt, feature không mở socket và không đọc/tạo khoá
+  thiết bị, nhưng thẻ vẫn sống để bật lại; bật lên thì Harness tải lại hàng plugin và tự ghép cặp nếu
+  chưa có credential.
+- **Thiết lập relay** — địa chỉ relay, tên thiết bị, tự ghép cặp. Lưu bằng configuration editor của
+  profile, nên Harness tải lại hàng plugin và thay đổi áp dụng ngay; đổi relay xoá credential cũ.
+- **Trạng thái** — cùng các giá trị `state` trong bảng dưới, tự làm mới mỗi 2 giây khi thẻ đang mở.
+- **Mã ghép cặp** — hiện to, kèm liên kết tới trang duyệt, nút sao chép và đếm ngược hết hạn;
+  **Huỷ ghép cặp** dừng lượt đang chờ mà không cần khởi động lại DSH.
+- **Thiết bị** — tên, fingerprint `SHA256:…`, số phiên web đang theo dõi, lỗi gần nhất.
+- **Ghép cặp ngay / Ghép cặp lại** và **Ngắt ghép nối** (xoá credential đã lưu rồi đóng socket).
+
+Thẻ gọi các route POST `/api/personal-hub-web-remote/{state,settingsSet,pair,pairCancel,unpair}` trên
+Connection service; không route nào mở thêm cổng. Mã và trạng thái vẫn được ghi ra `status.json` cho
+script đọc.
 
 ### Ghép cặp (luồng B)
 
@@ -503,9 +524,10 @@ trong query string.
 
 | `state` | Nghĩa |
 |---|---|
+| `disabled` | `webRemote.enabled: false`; không mở socket, không đọc/tạo khoá (thẻ vẫn bật được) |
 | `waiting-relay` | chưa cấu hình `relayUrl` |
 | `pairing` | đang chờ duyệt; `pairing.code`/`pairing.uri` để nhập |
-| `pairing-required` | chưa có credential và `autoPair: false`, hoặc ghép cặp thất bại |
+| `pairing-required` | chưa có credential và `autoPair: false`, hoặc ghép cặp thất bại/bị huỷ/đã ngắt |
 | `connecting` / `reconnecting` | đang mở hoặc mở lại WebSocket (backoff 1→30 giây, full jitter) |
 | `connected` | đã `hello.ok`; `watching` là các phiên đang được web theo dõi |
 | `auth-required` | relay từ chối token; plugin xoá credential và ghép cặp lại (tối đa 2 lần) |
@@ -535,7 +557,6 @@ Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
 - Relay Zig và web client SvelteKit chưa có. Relay Node trong `tools/dev-relay/` chỉ để phát triển
   (RAM, một người dùng, không TLS); không dùng cho dữ liệu thật.
 - Chỉ prompt văn bản; ảnh/tệp, xoá phiên, đổi workspace chưa có trong giao thức.
-- Chưa có màn hình hiển thị mã ghép cặp trong DSH UI; mã nằm ở log Host và `status.json`.
 - Chưa có E2E: relay thấy plaintext. Chỉ dùng TLS và relay do bạn kiểm soát.
 
 ## 8. Tệp dữ liệu
@@ -612,7 +633,9 @@ bằng một React giả nên kiểm được cây render mà không cần trìn
 
 Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký Ed25519, pairing qua
 `fetch` giả, transport trên WebSocket giả (hello, heartbeat, backoff, stream), và bridge với
-`sessionController` giả. Không có test nào cần relay hay mạng thật.
+`sessionController` giả. Thẻ Web Remote có test riêng: mount Host trên Connection giả rồi gọi các
+route `/api/personal-hub-web-remote/*` (trạng thái, lưu thiết lập, ghép cặp, huỷ, ngắt) và render
+thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
 
 ## Giới hạn hiện tại
 
@@ -635,5 +658,5 @@ Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký
   công khai (không có chi tiết kiểm tra), còn GitLab đọc được bằng REST khi có token. GitLab tự host
   phải có host trong `git.gitlabHosts` (hoặc `git.forge: gitlab`) và `glab` đăng nhập đúng host, hoặc
   `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` cho REST.
-- Web Remote có bridge + relay phát triển; chưa có relay production (Zig) và web client SvelteKit,
-  chưa hiển thị mã ghép cặp trong DSH UI, chỉ nhận prompt văn bản. Xem mục 7.
+- Web Remote có bridge, thẻ cấu hình/ghép cặp trong DSH UI và relay phát triển; chưa có relay
+  production (Zig) và web client SvelteKit, chỉ nhận prompt văn bản. Xem mục 7.
