@@ -56,7 +56,9 @@ export function parseRemoteUrl(input: string | null | undefined): GitRemoteInfo 
       return undefined
     }
     if (parsed.protocol === 'file:') return undefined
-    host = parsed.hostname
+    // Keep the port: a self-hosted GitLab may live on :8443, and the CLI/API
+    // need the same host the remote names.
+    host = parsed.host
     path = parsed.pathname
   }
 
@@ -70,9 +72,10 @@ export function parseRemoteUrl(input: string | null | undefined): GitRemoteInfo 
   const name = segments[segments.length - 1]
   const owner = segments.slice(0, -1).join('/')
   const lowered = host.toLowerCase()
-  const provider = /(^|\.)github\.com$/.test(lowered) || lowered === 'github.com'
+  const hostname = lowered.replace(/:\d+$/, '')
+  const provider = hostname === 'github.com' || hostname.endsWith('.github.com')
     ? 'github'
-    : lowered.includes('gitlab')
+    : hostname.includes('gitlab')
       ? 'gitlab'
       : 'other'
 

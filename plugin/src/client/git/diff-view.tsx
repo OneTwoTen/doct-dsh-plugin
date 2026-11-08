@@ -86,12 +86,17 @@ export function DiffFileSection(props: DiffFileSectionProps): ReturnType<typeof 
       h(Icon, { name: 'chevron', size: 11 })),
     h('span', { className: 'ph-badge', 'data-tone': badge.tone, 'aria-hidden': 'true' }, badge.letter),
     h('span', { className: 'ph-file-path', title: file.path },
-      parts.dir.length > 0 ? h('span', { className: 'ph-file-dir' }, parts.dir) : null,
+      parts.dir.length > 0
+        ? [
+            h('span', { className: 'ph-file-dir', key: 'dir' }, parts.dir),
+            h('span', { className: 'ph-file-sep', key: 'sep' }, '/'),
+          ]
+        : null,
       h('span', { className: 'ph-file-name' }, parts.name)),
     h(Counts, { additions: file.additions, deletions: file.deletions }),
     h('button', {
       type: 'button',
-      className: 'ph-icon-button',
+      className: 'ph-icon-button ph-file-copy',
       title: copied ? t('gitCopied') : t('gitCopyPath'),
       'aria-label': t('gitCopyPath'),
       onClick: copy,

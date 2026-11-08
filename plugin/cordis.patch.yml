@@ -16,6 +16,10 @@
         git:
           enabled: true
           forge: auto
+          # Self-hosted GitLab hosts; gitlab.com is detected automatically.
+          gitlabHosts: []
+          # Token env for the GitLab REST fallback when glab is unavailable.
+          gitlabTokenEnv: GITLAB_TOKEN
           refreshMs: 30000
           # Tạo pull request: model hiện tại của phiên, effort thấp nhất.
           pull:

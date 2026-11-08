@@ -12,6 +12,7 @@ import type { CleanupSettings, MergeSettings, MergeSettingsState } from '../../s
 export interface SettingsPatch {
   merge?: Partial<MergeSettings>
   cleanup?: Partial<CleanupSettings>
+  forge?: Partial<Pick<MergeSettingsState, 'forge' | 'gitlabHosts' | 'cliPath'>>
 }
 
 /** Props of the settings card. */
@@ -39,17 +40,33 @@ function emptySettings(): MergeSettingsState {
     },
     cleanupLast: null,
     writable: false,
+    forge: 'auto',
+    gitlabHosts: [],
+    cliPath: '',
   }
 }
 
+/** Parse the comma or newline separated host field. */
+function parseHostList(value: string): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value.split(/[\s,]+/)) {
+    const host = item.trim().replace(/\/+$/, '')
+    if (host.length === 0 || seen.has(host.toLowerCase())) continue
+    seen.add(host.toLowerCase())
+    result.push(host)
+  }
+  return result
+}
+
 /** The settings card. */
-export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typeof h> {
-  const { t, api } = props
+export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typeof h> {  const { t, api } = props
   const [settings, setSettings] = useState<MergeSettingsState | undefined>(undefined)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [runningCleanup, setRunningCleanup] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [hostsText, setHostsText] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -57,6 +74,7 @@ export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typ
       .then((value) => {
         if (!alive) return
         setSettings(value)
+        setHostsText(value.gitlabHosts.join(', '))
         setStatus('ready')
       })
       .catch((failure) => {
@@ -78,7 +96,12 @@ export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typ
       const cleanup = patch.cleanup === undefined
         ? base.cleanup
         : ({ ...base.cleanup, ...patch.cleanup } as CleanupSettings)
-      return { ...base, ...(patch.merge ?? {}), cleanup }
+      return {
+        ...base,
+        ...(patch.merge ?? {}),
+        ...(patch.forge ?? {}),
+        cleanup,
+      }
     })
   }
 
@@ -93,12 +116,17 @@ export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typ
         deleteBranch: settings?.deleteBranch === true,
         archiveSession: settings?.archiveSession === true,
         cleanup: settings?.cleanup ?? {},
+        forge: settings?.forge ?? 'auto',
+        gitlabHosts: settings?.gitlabHosts ?? [],
+        cliPath: settings?.cliPath ?? '',
       })
       setSettings((current) => ({
         ...(current ?? emptySettings()),
         ...value.merged,
         cleanup: value.cleanup,
+        ...value.forge,
       }))
+      setHostsText(value.forge.gitlabHosts.join(', '))
       setStatus('ready')
       setNotice(t('gitSettingsSaved'))
     } catch (failure) {
@@ -129,11 +157,16 @@ export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typ
   return h(MergeSettingsForm, {
     t,
     settings: value,
+    hostsText,
     status,
     error,
     notice,
     runningCleanup,
     onChange: update,
+    onHostsText: (text: string) => {
+      setHostsText(text)
+      update({ forge: { gitlabHosts: parseHostList(text) } })
+    },
     onSave: () => void save(),
     onRunCleanup: () => void runCleanup(),
   })
@@ -143,11 +176,13 @@ export function MergeSettingsCard(props: MergeSettingsCardProps): ReturnType<typ
 export interface MergeSettingsFormProps {
   t: Translate
   settings: MergeSettingsState
+  hostsText: string
   status: string
   error: string
   notice: string
   runningCleanup: boolean
   onChange(patch: SettingsPatch): void
+  onHostsText(value: string): void
   onSave(): void
   onRunCleanup(): void
 }
@@ -160,6 +195,46 @@ export function MergeSettingsForm(props: MergeSettingsFormProps): ReturnType<typ
   const busy = props.status === 'saving'
   const disabled = !writable || busy
   return h('div', { 'data-personal-hub-git-settings': true },
+    h('div', { className: 'ph-setting' },
+      h('div', { className: 'ph-setting-head' }, t('gitCodeHost')),
+      h('label', { className: 'ph-field' },
+        h('span', { className: 'ph-field-label' }, t('gitCodeHostProvider')),
+        h('select', {
+          className: 'ph-select',
+          value: settings.forge,
+          disabled,
+          onChange: (event: { target: { value: string } }) => props.onChange({
+            forge: { forge: event.target.value as MergeSettingsState['forge'] },
+          }),
+        },
+          h('option', { value: 'auto' }, t('gitCodeHostAuto')),
+          h('option', { value: 'github' }, 'GitHub'),
+          h('option', { value: 'gitlab' }, 'GitLab'),
+          h('option', { value: 'none' }, t('gitCodeHostNone')))),
+      h('label', { className: 'ph-field' },
+        h('span', { className: 'ph-field-label' }, t('gitCodeHostGitlabHosts')),
+        h('input', {
+          className: 'ph-input',
+          value: props.hostsText,
+          placeholder: 'gitlab.example.com',
+          spellcheck: false,
+          disabled,
+          onInput: (event: { target: { value: string } }) => props.onHostsText(event.target.value),
+          onChange: (event: { target: { value: string } }) => props.onHostsText(event.target.value),
+        })),
+      h('p', { className: 'ph-hint' }, t('gitCodeHostHint')),
+      h('label', { className: 'ph-field' },
+        h('span', { className: 'ph-field-label' }, t('gitCodeHostCli')),
+        h('input', {
+          className: 'ph-input',
+          value: settings.cliPath,
+          placeholder: 'gh / glab',
+          spellcheck: false,
+          disabled,
+          onInput: (event: { target: { value: string } }) => props.onChange({ forge: { cliPath: event.target.value } }),
+          onChange: (event: { target: { value: string } }) => props.onChange({ forge: { cliPath: event.target.value } }),
+        }))),
+
     h('div', { className: 'ph-setting' },
       h('div', { className: 'ph-setting-head' }, t('gitSettingsMerged')),
       h('label', { className: 'ph-check-row' },

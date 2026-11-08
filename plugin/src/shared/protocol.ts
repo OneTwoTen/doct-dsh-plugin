@@ -557,8 +557,18 @@ export interface MergeSettings {
   archiveSession: boolean
 }
 
+/** The code-host options the settings card edits. */
+export interface ForgeSettings {
+  /** `auto` detects from the remote; `github`/`gitlab` force one provider. */
+  forge: 'auto' | 'github' | 'gitlab' | 'none'
+  /** Self-hosted GitLab hosts or base URLs beyond gitlab.com. */
+  gitlabHosts: string[]
+  /** A specific `gh`/`glab` executable, or empty to resolve it from PATH. */
+  cliPath: string
+}
+
 /** What the settings card reads: the merge rules flat, plus the cleanup rules. */
-export interface MergeSettingsState extends MergeSettings {
+export interface MergeSettingsState extends MergeSettings, ForgeSettings {
   cleanup: CleanupSettings
   cleanupLast: CleanupRunResult | null
   writable: boolean
@@ -805,7 +815,10 @@ export interface GitApi {
     deleteBranch?: boolean
     archiveSession?: boolean
     cleanup?: Partial<CleanupSettings>
-  }): Promise<{ merged: MergeSettings; cleanup: CleanupSettings }>
+    forge?: ForgeSettings['forge']
+    gitlabHosts?: string[] | string
+    cliPath?: string
+  }): Promise<{ merged: MergeSettings; cleanup: CleanupSettings; forge: ForgeSettings }>
   cleanupState(payload?: Record<string, never>): Promise<{
     settings: CleanupSettings
     last: CleanupRunResult | null

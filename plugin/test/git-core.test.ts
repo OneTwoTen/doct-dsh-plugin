@@ -34,6 +34,15 @@ test('parseRemoteUrl reads the https, ssh, and scp spellings', () => {
   assert.equal(withCredentials.slug, 'owner/repo')
   assert.equal(withCredentials.url.includes('secret'), true)
 
+  const selfHosted = parseRemoteUrl('https://git.company.test:8443/team/sub/repo.git')!
+  assert.equal(selfHosted.provider, 'other')
+  assert.equal(selfHosted.host, 'git.company.test:8443')
+  assert.equal(selfHosted.slug, 'team/sub/repo')
+
+  const githubPort = parseRemoteUrl('ssh://git@github.com:2222/owner/repo.git')!
+  assert.equal(githubPort.provider, 'github')
+  assert.equal(githubPort.host, 'github.com:2222')
+
   assert.equal(parseRemoteUrl(''), undefined)
   assert.equal(parseRemoteUrl('not a url'), undefined)
   assert.equal(parseRemoteUrl('https://example.com/onlyone'), undefined)

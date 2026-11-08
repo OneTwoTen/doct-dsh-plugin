@@ -189,6 +189,26 @@ Lỗi checkout (cây bẩn, nhánh đã bị checkout ở worktree khác) hiện
 - Issue: danh sách lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả và bình luận.
 - Tab **Commit**: lịch sử gần nhất; bấm một commit để xem mô tả, tệp thay đổi và toàn bộ patch.
 
+### GitHub, GitLab và GitLab tự host
+
+Plugin nhận diện máy chủ từ remote:
+
+- `github.com` → GitHub; `gitlab.com` → GitLab.
+- Host có chữ `gitlab` (ví dụ `gitlab.company.com`) → GitLab.
+- Host tự host không có chữ `gitlab` (ví dụ `code.company.com`) → thêm vào **GitLab hosts** trong thẻ
+  cấu hình plugin, hoặc đặt `git.gitlabHosts` trong `cordis.patch.yml`. Có thể nhập hostname
+  (`gitlab.company.com`) hoặc URL đầy đủ (`https://gitlab.company.com`).
+- Ép một máy chủ bằng `git.forge: github|gitlab` nếu muốn bỏ qua bước nhận diện.
+
+GitLab đọc qua `glab` khi CLI đã cài và đăng nhập; lệnh dùng `glab api --hostname <host>` nên hỗ trợ
+cả instance tự host. Khi không có `glab`, plugin dùng REST API v4 với token đọc từ `GITLAB_TOKEN`
+(hoặc `GLAB_TOKEN`, credential `DSH_GITLAB_TOKEN`); đặt `git.gitlabTokenEnv` nếu muốn dùng tên biến
+khác. GitLab.com cũng dùng được cách này. Với GitLab tự host, cần thêm host vào `gitlabHosts` để plugin
+biết dùng API GitLab thay vì coi remote là máy chủ lạ.
+
+Thẻ cấu hình plugin có mục **Code host** để chọn `Tự nhận diện` / GitHub / GitLab / Tắt, nhập GitLab
+tự host và đường dẫn CLI. Cấu hình được lưu vào profile qua Config Editor, không cần sửa tay YAML.
+
 ### Tạo pull request bằng AI
 
 Tạo PR là một bước trong chuỗi thao tác (`commit_push_pr`, `create_pr`) hoặc mục **Tạo pull request**
@@ -200,8 +220,8 @@ trong menu:
 3. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ các commit cùng diff của nhánh, với
    **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`). Có thể ghim route
    khác bằng `git.pull.provider` + `git.pull.model`.
-4. Pull request được mở bằng `gh pr create` (GitLab: `glab mr create`), hoặc REST API GitHub khi
-   không có CLI đã đăng nhập.
+4. Pull request được mở bằng `gh pr create`; GitLab dùng `glab api` (hoặc REST API v4 khi có token),
+   nên hỗ trợ cả merge request và GitLab tự host.
 5. Pull request vừa tạo được **gắn với phiên** để theo dõi việc gộp.
 
 Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì plugin vẫn tạo PR bằng bản nháp dựng
@@ -332,7 +352,8 @@ Git chạy qua dịch vụ `subprocess` của DSH (có dự phòng `child_proces
 kích thước đầu ra cho mỗi lệnh. Pull request và issue đọc qua **GitHub CLI** (`gh`) vì nó dùng đúng
 phiên đăng nhập của bạn. Nếu `gh` không có hoặc chưa đăng nhập, plugin dùng REST API công khai của
 GitHub (60 lượt/giờ khi không có token; đặt token ở `GITHUB_TOKEN`, `GH_TOKEN` hoặc credential
-`DSH_GITHUB_TOKEN` để tăng hạn mức). Với GitLab, plugin gọi `glab` nếu có.
+`DSH_GITHUB_TOKEN` để tăng hạn mức). Với GitLab, plugin gọi `glab` nếu có; thiếu `glab` thì dùng REST
+với `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` (xem mục **GitHub, GitLab và GitLab tự host** ở trên).
 
 ### Cầu nối với Host (lưu ý khi nâng cấp DSH)
 
@@ -361,9 +382,11 @@ kênh RPC riêng, nhưng route Fetch vẫn hợp lệ và ổn định.
 git:
   enabled: true          # tắt bảng Git mà vẫn giữ tính năng Telegram
   forge: auto            # auto | github | gitlab | none  (none = ẩn PR/issue)
+  gitlabHosts: []        # GitLab tự host: ['gitlab.example.com', 'https://code.example.com']
   remote: ''             # remote ưu tiên; rỗng = remote của upstream, rồi origin
   cliPath: ''            # đường dẫn gh/glab; rỗng = tự chọn theo máy chủ
   tokenEnv: GITHUB_TOKEN
+  gitlabTokenEnv: GITLAB_TOKEN
   commandTimeoutMs: 15000
   worktreeTimeoutMs: 180000   # thời gian cho git fetch / git worktree
   maxDiffBytes: 393216   # bytes diff giữ cho mỗi tệp
@@ -626,12 +649,14 @@ thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
   chưa theo dõi khi bật `includeUntracked`).
 - Worktree được tạo **ngay khi bấm Tạo**, trước tin nhắn đầu tiên, nên phiên chưa mở hoặc kho mã là
   worktree liên kết sẽ bị từ chối thay vì chờ. Worktree đã tạo không tự xoá khi bạn đổi ý: dùng nút ✕.
-- Tạo pull request cần đẩy được nhánh lên remote và `gh`/`glab` đã đăng nhập (GitHub không có CLI
-  vẫn tạo được bằng REST nếu có token, nhưng không đọc được chi tiết kiểm tra).
+- Tạo pull request cần đẩy được nhánh lên remote và `gh`/`glab` đã đăng nhập (GitHub/GitLab không có
+  CLI vẫn tạo được bằng REST nếu có token, nhưng không đọc được chi tiết kiểm tra của GitHub).
 - Dọn dẹp sau khi gộp chỉ chạy khi PR đó đã được plugin nhìn thấy (do chính nó tạo, hoặc đọc được ở
   chip PR của nhánh lúc bảng làm mới) và khi `git.merged.enabled` bật.
 - Diff dừng sau 4000 dòng và bị cắt theo `maxDiffBytes` để giao diện giữ được nhịp.
-- PR/issue cần remote GitHub/GitLab và `gh` (hoặc `glab`); thiếu CLI thì GitHub vẫn đọc được bằng
-  REST công khai nhưng **không có chi tiết kiểm tra** và hạn mức thấp.
+- PR/issue cần remote GitHub/GitLab và `gh` (hoặc `glab`); thiếu CLI thì GitHub đọc được bằng REST
+  công khai (không có chi tiết kiểm tra), còn GitLab đọc được bằng REST khi có token. GitLab tự host
+  phải có host trong `git.gitlabHosts` (hoặc `git.forge: gitlab`) và `glab` đăng nhập đúng host, hoặc
+  `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` cho REST.
 - Web Remote có bridge, thẻ cấu hình/ghép cặp trong DSH UI và relay phát triển; chưa có relay
   production (Zig) và web client SvelteKit, chỉ nhận prompt văn bản. Xem mục 7.

@@ -104,6 +104,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 /* Commit box */
 .ph-commit{border-top:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);padding:8px 10px;display:flex;flex-direction:column;gap:6px;flex:none}
 .ph-commit-head{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.ph-check-inline{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:10.5px;white-space:nowrap}
+.ph-check-inline input{flex:none;margin:0;cursor:pointer}
 .ph-commit-files{max-height:132px;overflow:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:var(--dsw-alias-bg-base)}
 .ph-commit-file{display:flex;align-items:center;gap:6px;width:100%;padding:3px 7px;border:0;background:transparent;cursor:pointer;font-size:11.5px;text-align:left;min-width:0}
 .ph-commit-file:hover{background:var(--dsw-alias-bg-layer-2)}
@@ -123,10 +125,13 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-file-head:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-file-head[data-expanded=true]{border-bottom:1px solid var(--dsw-alias-border-l3)}
 .ph-file-check{flex:none;margin:0;cursor:pointer}
-.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
-.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;direction:rtl;text-align:left}
-.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap}
-.ph-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:4px;font-size:9.5px;font-weight:700;font-family:ui-monospace,monospace;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
+.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;direction:rtl;text-align:left}
+.ph-file-sep{color:var(--dsw-alias-label-tertiary);flex:none}
+.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;max-width:78%}
+.ph-file-copy{opacity:0}
+.ph-file-head:hover .ph-file-copy,.ph-file-head:focus-within .ph-file-copy{opacity:1}
+.ph-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;font-family:ui-monospace,monospace;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
 .ph-badge[data-tone=success]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 18%,transparent);color:var(--dsw-alias-state-success-primary)}
 .ph-badge[data-tone=warn]{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 18%,transparent);color:var(--dsw-alias-state-warn-primary)}
 .ph-badge[data-tone=error]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 18%,transparent);color:var(--dsw-alias-state-error-primary)}

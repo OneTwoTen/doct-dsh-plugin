@@ -159,6 +159,13 @@
     gitSettingsTitle: "Worktrees and merged pull requests",
     gitSettingsSummary: "Clean up after a chat\u2019s pull request merges",
     gitSettingsMerged: "When the pull request of a chat is merged",
+    gitCodeHost: "Code host",
+    gitCodeHostProvider: "Provider",
+    gitCodeHostAuto: "Detect from the remote",
+    gitCodeHostNone: "Off (no pull requests or issues)",
+    gitCodeHostGitlabHosts: "Self-hosted GitLab hosts",
+    gitCodeHostHint: "Comma-separated hostnames or base URLs, for example gitlab.example.com. gitlab.com is detected automatically. Set GITLAB_TOKEN or the DSH_GITLAB_TOKEN credential to read without glab.",
+    gitCodeHostCli: "CLI path (optional)",
     gitSettingsRemove: "Delete the worktree",
     gitSettingsDeleteBranch: "Delete its branch too",
     gitSettingsArchive: "Hide the chat from the list",
@@ -552,6 +559,13 @@
     gitSettingsTitle: "Worktree v\xE0 pull request \u0111\xE3 g\u1ED9p",
     gitSettingsSummary: "D\u1ECDn d\u1EB9p sau khi pull request c\u1EE7a phi\xEAn \u0111\u01B0\u1EE3c g\u1ED9p",
     gitSettingsMerged: "Khi pull request c\u1EE7a phi\xEAn \u0111\u01B0\u1EE3c g\u1ED9p",
+    gitCodeHost: "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n",
+    gitCodeHostProvider: "Nh\xE0 cung c\u1EA5p",
+    gitCodeHostAuto: "T\u1EF1 nh\u1EADn di\u1EC7n t\u1EEB remote",
+    gitCodeHostNone: "T\u1EAFt (kh\xF4ng \u0111\u1ECDc pull request/issue)",
+    gitCodeHostGitlabHosts: "GitLab t\u1EF1 host",
+    gitCodeHostHint: "Nh\u1EADp hostname ho\u1EB7c URL, c\xE1ch nhau b\u1EB1ng d\u1EA5u ph\u1EA9y, v\xED d\u1EE5 gitlab.example.com. gitlab.com \u0111\u01B0\u1EE3c nh\u1EADn di\u1EC7n t\u1EF1 \u0111\u1ED9ng. \u0110\u1EB7t GITLAB_TOKEN ho\u1EB7c credential DSH_GITLAB_TOKEN \u0111\u1EC3 \u0111\u1ECDc m\xE0 kh\xF4ng c\u1EA7n glab.",
+    gitCodeHostCli: "\u0110\u01B0\u1EDDng d\u1EABn CLI (tu\u1EF3 ch\u1ECDn)",
     gitSettingsRemove: "Xo\xE1 worktree",
     gitSettingsDeleteBranch: "Xo\xE1 c\u1EA3 nh\xE1nh c\u1EE7a n\xF3",
     gitSettingsArchive: "\u1EA8n phi\xEAn kh\u1ECFi danh s\xE1ch",
@@ -1031,6 +1045,8 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 /* Commit box */
 .ph-commit{border-top:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);padding:8px 10px;display:flex;flex-direction:column;gap:6px;flex:none}
 .ph-commit-head{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.ph-check-inline{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:10.5px;white-space:nowrap}
+.ph-check-inline input{flex:none;margin:0;cursor:pointer}
 .ph-commit-files{max-height:132px;overflow:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:var(--dsw-alias-bg-base)}
 .ph-commit-file{display:flex;align-items:center;gap:6px;width:100%;padding:3px 7px;border:0;background:transparent;cursor:pointer;font-size:11.5px;text-align:left;min-width:0}
 .ph-commit-file:hover{background:var(--dsw-alias-bg-layer-2)}
@@ -1050,10 +1066,13 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-file-head:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-file-head[data-expanded=true]{border-bottom:1px solid var(--dsw-alias-border-l3)}
 .ph-file-check{flex:none;margin:0;cursor:pointer}
-.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
-.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;direction:rtl;text-align:left}
-.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap}
-.ph-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:4px;font-size:9.5px;font-weight:700;font-family:ui-monospace,monospace;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
+.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;direction:rtl;text-align:left}
+.ph-file-sep{color:var(--dsw-alias-label-tertiary);flex:none}
+.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;max-width:78%}
+.ph-file-copy{opacity:0}
+.ph-file-head:hover .ph-file-copy,.ph-file-head:focus-within .ph-file-copy{opacity:1}
+.ph-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;font-family:ui-monospace,monospace;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
 .ph-badge[data-tone=success]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 18%,transparent);color:var(--dsw-alias-state-success-primary)}
 .ph-badge[data-tone=warn]{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 18%,transparent);color:var(--dsw-alias-state-warn-primary)}
 .ph-badge[data-tone=error]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 18%,transparent);color:var(--dsw-alias-state-error-primary)}
@@ -1580,7 +1599,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
   function splitPath(path) {
     const text = String(path ?? "");
     const index = text.lastIndexOf("/");
-    return index < 0 ? { dir: "", name: text } : { dir: text.slice(0, index + 1), name: text.slice(index + 1) };
+    return index < 0 ? { dir: "", name: text } : { dir: text.slice(0, index), name: text.slice(index + 1) };
   }
   function formatElapsed(startedAtMs, nowMs) {
     if (startedAtMs === null) return null;
@@ -2065,8 +2084,22 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         deleteBranch: false
       },
       cleanupLast: null,
-      writable: false
+      writable: false,
+      forge: "auto",
+      gitlabHosts: [],
+      cliPath: ""
     };
+  }
+  function parseHostList(value) {
+    const seen = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const item of value.split(/[\s,]+/)) {
+      const host = item.trim().replace(/\/+$/, "");
+      if (host.length === 0 || seen.has(host.toLowerCase())) continue;
+      seen.add(host.toLowerCase());
+      result.push(host);
+    }
+    return result;
   }
   function MergeSettingsCard(props) {
     const { t, api } = props;
@@ -2075,11 +2108,13 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const [runningCleanup, setRunningCleanup] = useState(false);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
+    const [hostsText, setHostsText] = useState("");
     useEffect(() => {
       let alive = true;
       api.mergeSettings({}).then((value2) => {
         if (!alive) return;
         setSettings(value2);
+        setHostsText(value2.gitlabHosts.join(", "));
         setStatus("ready");
       }).catch((failure) => {
         if (!alive) return;
@@ -2096,7 +2131,12 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       setSettings((current) => {
         const base = current ?? emptySettings();
         const cleanup = patch.cleanup === void 0 ? base.cleanup : { ...base.cleanup, ...patch.cleanup };
-        return { ...base, ...patch.merge ?? {}, cleanup };
+        return {
+          ...base,
+          ...patch.merge ?? {},
+          ...patch.forge ?? {},
+          cleanup
+        };
       });
     };
     const save = async () => {
@@ -2109,13 +2149,18 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           removeWorktree: settings?.removeWorktree === true,
           deleteBranch: settings?.deleteBranch === true,
           archiveSession: settings?.archiveSession === true,
-          cleanup: settings?.cleanup ?? {}
+          cleanup: settings?.cleanup ?? {},
+          forge: settings?.forge ?? "auto",
+          gitlabHosts: settings?.gitlabHosts ?? [],
+          cliPath: settings?.cliPath ?? ""
         });
         setSettings((current) => ({
           ...current ?? emptySettings(),
           ...value2.merged,
-          cleanup: value2.cleanup
+          cleanup: value2.cleanup,
+          ...value2.forge
         }));
+        setHostsText(value2.forge.gitlabHosts.join(", "));
         setStatus("ready");
         setNotice(t("gitSettingsSaved"));
       } catch (failure) {
@@ -2144,11 +2189,16 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     return h(MergeSettingsForm, {
       t,
       settings: value,
+      hostsText,
       status,
       error,
       notice,
       runningCleanup,
       onChange: update,
+      onHostsText: (text) => {
+        setHostsText(text);
+        update({ forge: { gitlabHosts: parseHostList(text) } });
+      },
       onSave: () => void save(),
       onRunCleanup: () => void runCleanup()
     });
@@ -2162,6 +2212,60 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     return h(
       "div",
       { "data-personal-hub-git-settings": true },
+      h(
+        "div",
+        { className: "ph-setting" },
+        h("div", { className: "ph-setting-head" }, t("gitCodeHost")),
+        h(
+          "label",
+          { className: "ph-field" },
+          h("span", { className: "ph-field-label" }, t("gitCodeHostProvider")),
+          h(
+            "select",
+            {
+              className: "ph-select",
+              value: settings.forge,
+              disabled,
+              onChange: (event) => props.onChange({
+                forge: { forge: event.target.value }
+              })
+            },
+            h("option", { value: "auto" }, t("gitCodeHostAuto")),
+            h("option", { value: "github" }, "GitHub"),
+            h("option", { value: "gitlab" }, "GitLab"),
+            h("option", { value: "none" }, t("gitCodeHostNone"))
+          )
+        ),
+        h(
+          "label",
+          { className: "ph-field" },
+          h("span", { className: "ph-field-label" }, t("gitCodeHostGitlabHosts")),
+          h("input", {
+            className: "ph-input",
+            value: props.hostsText,
+            placeholder: "gitlab.example.com",
+            spellcheck: false,
+            disabled,
+            onInput: (event) => props.onHostsText(event.target.value),
+            onChange: (event) => props.onHostsText(event.target.value)
+          })
+        ),
+        h("p", { className: "ph-hint" }, t("gitCodeHostHint")),
+        h(
+          "label",
+          { className: "ph-field" },
+          h("span", { className: "ph-field-label" }, t("gitCodeHostCli")),
+          h("input", {
+            className: "ph-input",
+            value: settings.cliPath,
+            placeholder: "gh / glab",
+            spellcheck: false,
+            disabled,
+            onInput: (event) => props.onChange({ forge: { cliPath: event.target.value } }),
+            onChange: (event) => props.onChange({ forge: { cliPath: event.target.value } })
+          })
+        )
+      ),
       h(
         "div",
         { className: "ph-setting" },
@@ -3146,13 +3250,16 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       h(
         "span",
         { className: "ph-file-path", title: file.path },
-        parts.dir.length > 0 ? h("span", { className: "ph-file-dir" }, parts.dir) : null,
+        parts.dir.length > 0 ? [
+          h("span", { className: "ph-file-dir", key: "dir" }, parts.dir),
+          h("span", { className: "ph-file-sep", key: "sep" }, "/")
+        ] : null,
         h("span", { className: "ph-file-name" }, parts.name)
       ),
       h(Counts, { additions: file.additions, deletions: file.deletions }),
       h("button", {
         type: "button",
-        className: "ph-icon-button",
+        className: "ph-icon-button ph-file-copy",
         title: copied ? t("gitCopied") : t("gitCopyPath"),
         "aria-label": t("gitCopyPath"),
         onClick: copy
@@ -3390,14 +3497,21 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           { className: "ph-dim ph-tiny" },
           allSelected ? t("gitFilesMany", { count: files.length }) : t("gitCommitSelected", { selected: selectedPaths.length, total: files.length })
         ),
-        h("button", {
-          type: "button",
-          className: "ph-icon-button",
-          title: allSelected ? t("gitClearSelection") : t("gitSelectAll"),
-          "aria-label": allSelected ? t("gitClearSelection") : t("gitSelectAll"),
-          disabled: files.length === 0,
-          onClick: () => props.onSelectAll(!allSelected)
-        }, h(Icon, { name: allSelected ? "check" : "plus", size: 12 })),
+        h(
+          "label",
+          {
+            className: "ph-check-inline",
+            title: allSelected ? t("gitClearSelection") : t("gitSelectAll")
+          },
+          h("input", {
+            type: "checkbox",
+            checked: allSelected,
+            disabled: files.length === 0,
+            "aria-label": allSelected ? t("gitClearSelection") : t("gitSelectAll"),
+            onChange: () => props.onSelectAll(!allSelected)
+          }),
+          h("span", null, allSelected ? t("gitClearSelection") : t("gitSelectAll"))
+        ),
         h("button", {
           type: "button",
           className: "ph-icon-button",
@@ -3528,6 +3642,9 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     useEffect(() => {
       writePreferences({ layout, wrap, hideWhitespace, scope });
     }, [layout, wrap, hideWhitespace, scope]);
+    useEffect(() => {
+      props.onScope?.(scope);
+    }, [scope, props.onScope]);
     const signature = files.map((file) => file.path).join("\n");
     useEffect(() => {
       const paths = files.map((file) => file.path);
@@ -3695,8 +3812,9 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     );
   }
   function ChangesSummary(props) {
-    const totals = props.branchChanges !== null && (props.branchChanges.insertions > 0 || props.branchChanges.deletions > 0) ? props.branchChanges : { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions };
-    const base = totals.baseRef === null ? props.t("gitUncommitted") : props.t("gitScopeLabel", { base: totals.baseRef });
+    const branch = props.scope === "branch" ? props.branchChanges : null;
+    const totals = branch ?? { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions };
+    const base = props.scope === "branch" ? branch !== null && branch.baseRef !== null ? props.t("gitScopeLabel", { base: branch.baseRef }) : props.t("gitScopeBranch") : props.t("gitUncommitted");
     return h(
       "button",
       {
@@ -3757,7 +3875,10 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       h(
         "span",
         { className: "ph-file-path", title: props.name },
-        props.dir !== void 0 && props.dir.length > 0 ? h("span", { className: "ph-file-dir" }, props.dir) : null,
+        props.dir !== void 0 && props.dir.length > 0 ? [
+          h("span", { className: "ph-file-dir", key: "dir" }, props.dir.replace(/\/+$/, "")),
+          h("span", { className: "ph-file-sep", key: "sep" }, "/")
+        ] : null,
         h("span", { className: "ph-file-name" }, props.name)
       ),
       h("span", { className: "ph-spacer" }),
@@ -4792,6 +4913,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const documentVisible = useDocumentVisible();
     const cwd = typeof props.useSessions === "function" ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? "") : "";
     const [view, setView] = useState("changes");
+    const [changesScope, setChangesScope] = useState("working");
     const [selection, setSelection] = useState(null);
     const [pullFilter, setPullFilter] = useState("open");
     const [issueFilter, setIssueFilter] = useState("open");
@@ -5045,6 +5167,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       api,
       sessionId,
       cwd,
+      scope: changesScope,
       onToggleMenu: () => setMenuOpen((value) => !value),
       onQuick: runQuick,
       onRun: onMenuRun,
@@ -5170,7 +5293,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         busy: running,
         onCommit,
         onToast: toast,
-        onRefresh: reload
+        onRefresh: reload,
+        onScope: setChangesScope
       });
     }
     const isDetail = selection !== null;
@@ -5326,6 +5450,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         t,
         stats: overview.stats,
         branchChanges: overview.branchChanges,
+        scope: props.scope,
         onClick: props.onOpenChanges
       })
     );

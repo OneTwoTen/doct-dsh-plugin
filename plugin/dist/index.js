@@ -37,12 +37,16 @@ var GIT_DEFAULTS = Object.freeze({
   enabled: true,
   /** `auto` detects the code host from the remote; `none` disables pull requests and issues. */
   forge: "auto",
+  /** Self-hosted GitLab hosts, beyond gitlab.com. */
+  gitlabHosts: [],
   /** Remote to prefer; empty means the branch's upstream remote, then `origin`. */
   remote: "",
   /** Code host CLI to run (`gh`, `glab`, or an absolute path); empty picks by provider. */
   cliPath: "",
   /** Environment variable holding a GitHub token for the REST fallback. */
   tokenEnv: "GITHUB_TOKEN",
+  /** Environment variable holding a GitLab token for the REST fallback. */
+  gitlabTokenEnv: "GITLAB_TOKEN",
   commandTimeoutMs: 15e3,
   /** Longest `git fetch` or worktree command; the default command limit is too short for a network fetch. */
   worktreeTimeoutMs: 18e4,
@@ -161,6 +165,20 @@ function asStringList(value, fallback) {
   const list = value.map((item) => String(item).trim()).filter((item) => item.length > 0);
   return list.length > 0 ? list : [...fallback];
 }
+function asHostList(value) {
+  const items = typeof value === "string" ? value.split(/[\s,]+/) : Array.isArray(value) ? value.map((item) => String(item)) : [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const item of items) {
+    const host = item.trim().replace(/\/+$/, "");
+    if (host.length === 0) continue;
+    const key = host.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(host);
+  }
+  return result;
+}
 function asChoice(value, choices, fallback) {
   const text2 = typeof value === "string" ? value.trim().toLowerCase() : "";
   return choices.includes(text2) ? text2 : fallback;
@@ -221,9 +239,11 @@ function normalizeConfig(raw) {
     git: {
       enabled: asBoolean(git.enabled, GIT_DEFAULTS.enabled),
       forge: asChoice(git.forge, ["auto", "github", "gitlab", "none"], GIT_DEFAULTS.forge),
+      gitlabHosts: asHostList(git.gitlabHosts),
       remote: asString(git.remote, GIT_DEFAULTS.remote).trim(),
       cliPath: asString(git.cliPath, GIT_DEFAULTS.cliPath).trim(),
       tokenEnv: asString(git.tokenEnv, GIT_DEFAULTS.tokenEnv).trim(),
+      gitlabTokenEnv: asString(git.gitlabTokenEnv, GIT_DEFAULTS.gitlabTokenEnv).trim(),
       commandTimeoutMs: asPositiveInteger(git.commandTimeoutMs, GIT_DEFAULTS.commandTimeoutMs, { min: 1e3 }),
       maxDiffBytes: asPositiveInteger(git.maxDiffBytes, GIT_DEFAULTS.maxDiffBytes, { min: 4096 }),
       maxUntrackedBytes: asPositiveInteger(git.maxUntrackedBytes, GIT_DEFAULTS.maxUntrackedBytes, { min: 1024 }),
@@ -317,7 +337,7 @@ function parseRemoteUrl(input) {
       return void 0;
     }
     if (parsed.protocol === "file:") return void 0;
-    host = parsed.hostname;
+    host = parsed.host;
     path = parsed.pathname;
   }
   const segments = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "").split("/").filter((segment) => segment.length > 0);
@@ -325,7 +345,8 @@ function parseRemoteUrl(input) {
   const name2 = segments[segments.length - 1];
   const owner = segments.slice(0, -1).join("/");
   const lowered = host.toLowerCase();
-  const provider = /(^|\.)github\.com$/.test(lowered) || lowered === "github.com" ? "github" : lowered.includes("gitlab") ? "gitlab" : "other";
+  const hostname2 = lowered.replace(/:\d+$/, "");
+  const provider = hostname2 === "github.com" || hostname2.endsWith(".github.com") ? "github" : hostname2.includes("gitlab") ? "gitlab" : "other";
   return {
     name: name2,
     url: raw,
@@ -2165,6 +2186,167 @@ function normalizeReview(value) {
       return "none";
   }
 }
+function gitlabState(value) {
+  switch (String(value ?? "").toLowerCase()) {
+    case "merged":
+      return "merged";
+    case "closed":
+      return "closed";
+    case "locked":
+      return "open";
+    default:
+      return "open";
+  }
+}
+function gitlabCheckOutcome(status) {
+  switch (String(status ?? "").toLowerCase()) {
+    case "success":
+      return "success";
+    case "failed":
+      return "failure";
+    case "canceled":
+    case "cancelled":
+    case "cancelling":
+      return "cancelled";
+    case "skipped":
+      return "neutral";
+    case "manual":
+      return "neutral";
+    case "created":
+    case "pending":
+    case "running":
+    case "preparing":
+    case "waiting_for_resource":
+    case "scheduled":
+      return "pending";
+    default:
+      return "pending";
+  }
+}
+function summarizeGitLabPipeline(pipeline) {
+  const totals = { state: "none", total: 0, success: 0, failure: 0, pending: 0, neutral: 0, cancelled: 0 };
+  if (pipeline === null || typeof pipeline !== "object") return totals;
+  const node = pipeline;
+  if (typeof node.status !== "string") return totals;
+  const outcome = gitlabCheckOutcome(node.status);
+  totals.total = 1;
+  totals[outcome] = 1;
+  totals.state = outcome;
+  return totals;
+}
+function describeGitLabPipeline(pipeline, jobs) {
+  const node = pipeline !== null && typeof pipeline === "object" ? pipeline : {};
+  if (Array.isArray(jobs) && jobs.length > 0) {
+    return jobs.map((job) => {
+      const entry = job !== null && typeof job === "object" ? job : {};
+      return {
+        name: String(entry.name ?? "job"),
+        state: gitlabCheckOutcome(entry.status),
+        url: typeof entry.web_url === "string" ? entry.web_url : null,
+        description: typeof entry.stage === "string" ? entry.stage : "",
+        workflow: typeof node.name === "string" ? node.name : null,
+        startedAt: typeof entry.started_at === "string" ? entry.started_at : null,
+        completedAt: typeof entry.finished_at === "string" ? entry.finished_at : null
+      };
+    });
+  }
+  if (typeof node.status !== "string") return [];
+  return [{
+    name: typeof node.name === "string" && node.name.length > 0 ? node.name : "Pipeline",
+    state: gitlabCheckOutcome(node.status),
+    url: typeof node.web_url === "string" ? node.web_url : null,
+    description: typeof node.ref === "string" ? node.ref : "",
+    workflow: typeof node.name === "string" ? node.name : null,
+    startedAt: typeof node.started_at === "string" ? node.started_at : null,
+    completedAt: typeof node.finished_at === "string" ? node.finished_at : null
+  }];
+}
+function normalizeGitLabPull(raw) {
+  const node = raw !== null && typeof raw === "object" ? raw : {};
+  const author = asRecord2(node.author);
+  const title = String(node.title ?? "");
+  const state = gitlabState(node.state);
+  const pipeline = node.head_pipeline ?? node.pipeline;
+  const conflicts = node.has_conflicts === true;
+  const mergeStatus = String(node.detailed_merge_status ?? node.merge_status ?? "");
+  return {
+    number: Number(node.iid ?? node.number) || 0,
+    title,
+    state: state === "open" && (node.draft === true || node.work_in_progress === true || /^(draft|wip)\s*:/i.test(title)) ? "draft" : state,
+    isDraft: node.draft === true || node.work_in_progress === true,
+    url: String(node.web_url ?? ""),
+    author: String(author.name ?? author.username ?? ""),
+    branch: String(node.source_branch ?? ""),
+    base: String(node.target_branch ?? ""),
+    createdAt: asTimestamp(node.created_at),
+    updatedAt: asTimestamp(node.updated_at),
+    mergedAt: asTimestamp(node.merged_at),
+    closedAt: asTimestamp(node.closed_at),
+    additions: 0,
+    deletions: 0,
+    changedFiles: Number(node.changes_count) || 0,
+    mergeable: conflicts ? false : mergeStatus === "mergeable" || mergeStatus === "can_be_merged" ? true : mergeStatus === "cannot_be_merged" || mergeStatus === "conflict" || mergeStatus === "not_mergeable" || mergeStatus === "broken" ? false : null,
+    mergeState: mergeStatus.length > 0 ? mergeStatus : null,
+    review: "none",
+    checks: summarizeGitLabPipeline(pipeline),
+    commentCount: Number(node.user_notes_count) || 0,
+    labels: labelsOf(node.labels)
+  };
+}
+function summarizeCheckDescriptions(checks) {
+  const totals = { state: "none", total: 0, success: 0, failure: 0, pending: 0, neutral: 0, cancelled: 0 };
+  for (const check of checks) {
+    totals.total += 1;
+    totals[check.state] += 1;
+  }
+  if (totals.failure > 0) totals.state = "failure";
+  else if (totals.pending > 0) totals.state = "pending";
+  else if (totals.success > 0) totals.state = "success";
+  else if (totals.cancelled > 0) totals.state = "cancelled";
+  else if (totals.neutral > 0) totals.state = "neutral";
+  return totals;
+}
+function normalizeGitLabReview(raw) {
+  const node = raw !== null && typeof raw === "object" ? raw : {};
+  const user = asRecord2(node.user ?? node);
+  return {
+    author: String(user.name ?? user.username ?? ""),
+    state: "approved",
+    body: "",
+    submittedAt: asTimestamp(node.created_at ?? node.updated_at)
+  };
+}
+function gitlabDiffStats(node) {
+  const entry = node !== null && typeof node === "object" ? node : {};
+  let additions = 0;
+  let deletions = 0;
+  const text2 = typeof entry.diff === "string" ? entry.diff : "";
+  for (const line of text2.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  }
+  return {
+    path: String(entry.new_path ?? entry.old_path ?? ""),
+    additions,
+    deletions
+  };
+}
+function normalizeGitLabIssue(raw) {
+  const node = raw !== null && typeof raw === "object" ? raw : {};
+  const author = asRecord2(node.author);
+  return {
+    number: Number(node.iid ?? node.number) || 0,
+    title: String(node.title ?? ""),
+    state: String(node.state ?? "opened").toLowerCase() === "closed" ? "closed" : "open",
+    url: String(node.web_url ?? ""),
+    author: String(author.name ?? author.username ?? ""),
+    createdAt: asTimestamp(node.created_at),
+    updatedAt: asTimestamp(node.updated_at),
+    closedAt: asTimestamp(node.closed_at),
+    commentCount: Number(node.user_notes_count) || 0,
+    labels: labelsOf(node.labels)
+  };
+}
 function pullState(state, isDraft, mergedAt) {
   if (typeof mergedAt === "string" && mergedAt.length > 0) return "merged";
   switch (String(state ?? "").toUpperCase()) {
@@ -2246,9 +2428,9 @@ function normalizeComment(raw) {
   const author = asRecord2(node.author);
   const user = asRecord2(node.user);
   return {
-    author: String(author.login ?? user.login ?? ""),
+    author: String(author.login ?? author.name ?? author.username ?? user.login ?? user.username ?? ""),
     body: String(node.body ?? ""),
-    createdAt: asTimestamp(node.createdAt),
+    createdAt: asTimestamp(node.createdAt ?? node.created_at),
     url: typeof node.url === "string" ? node.url : typeof node.html_url === "string" ? node.html_url : null
   };
 }
@@ -2257,7 +2439,7 @@ function normalizeReviewEntry(raw) {
   const author = asRecord2(node.author);
   const user = asRecord2(node.user);
   return {
-    author: String(author.login ?? user.login ?? ""),
+    author: String(author.login ?? author.name ?? author.username ?? user.login ?? user.username ?? ""),
     state: String(node.state ?? "").toLowerCase(),
     body: String(node.body ?? ""),
     submittedAt: asTimestamp(node.submittedAt ?? node.submitted_at)
@@ -2291,19 +2473,62 @@ var PULL_FIELDS = [
 var PULL_DETAIL_FIELDS = `${PULL_FIELDS},body,reviews,files`;
 var ISSUE_FIELDS = ["number", "title", "state", "url", "author", "createdAt", "updatedAt", "closedAt", "labels", "comments"].join(",");
 var ISSUE_DETAIL_FIELDS = `${ISSUE_FIELDS},body`;
-function createForge({ runner, config, logger, resolveToken, env = process.env }) {
+function createForge({ runner, config, logger, resolveToken, resolveGitLabToken, env = process.env }) {
   const cache = /* @__PURE__ */ new Map();
   const inflight = /* @__PURE__ */ new Map();
   const probes = /* @__PURE__ */ new Map();
   const ttl = Math.max(0, Number(config.cacheMs) || 0);
   const providerChoice = String(config.forge ?? "auto");
   let tokenCache;
+  let gitlabTokenCache;
   async function exec(program, args, options) {
     return await runner.run(program, args, {
       cwd: options.cwd,
       signal: options.signal,
-      maxBytes: options.maxBytes ?? 4 * 1024 * 1024
+      maxBytes: options.maxBytes ?? 4 * 1024 * 1024,
+      ...options.env === void 0 ? {} : { env: options.env },
+      ...options.stdin === void 0 ? {} : { stdin: options.stdin }
     });
+  }
+  function normalizedHost(value) {
+    const raw = String(value ?? "").trim();
+    if (raw.length === 0) return "";
+    const withScheme = raw.includes("://") ? raw : `https://${raw}`;
+    try {
+      return new URL(withScheme).host.toLowerCase();
+    } catch {
+      return raw.toLowerCase().replace(/\/+$/, "");
+    }
+  }
+  function isConfiguredGitLabHost(host) {
+    if (host.length === 0) return false;
+    return config.gitlabHosts.some((item) => normalizedHost(item) === host);
+  }
+  function providerFor(remote) {
+    if (providerChoice === "github" || providerChoice === "gitlab" || providerChoice === "none") return providerChoice;
+    const host = normalizedHost(remote?.host);
+    const hostname2 = host.replace(/:\d+$/, "");
+    if (hostname2 === "github.com" || hostname2.endsWith(".github.com")) return "github";
+    if (hostname2 === "gitlab.com" || hostname2.endsWith(".gitlab.com")) return "gitlab";
+    if (hostname2.includes("gitlab")) return "gitlab";
+    if (isConfiguredGitLabHost(host)) return "gitlab";
+    return "other";
+  }
+  function gitlabApiBase(host) {
+    const key = normalizedHost(host);
+    for (const item of config.gitlabHosts) {
+      const raw = String(item ?? "").trim();
+      if (raw.length === 0) continue;
+      const withScheme = raw.includes("://") ? raw : `https://${raw}`;
+      try {
+        const url = new URL(withScheme);
+        if (url.host.toLowerCase() !== key) continue;
+        const prefix = url.pathname.replace(/\/+$/, "");
+        return `${url.origin}${prefix}/api/v4`;
+      } catch {
+      }
+    }
+    return `https://${key}/api/v4`;
   }
   function cliFor(provider) {
     const configured = String(config.cliPath ?? "").trim();
@@ -2312,8 +2537,8 @@ function createForge({ runner, config, logger, resolveToken, env = process.env }
     if (provider === "gitlab") return "glab";
     return void 0;
   }
-  async function probe(program, cwd, signal) {
-    const key = program;
+  async function probe(program, cwd, provider, host, signal) {
+    const key = `${program}|${provider === "gitlab" ? normalizedHost(host) : ""}`;
     const cached = probes.get(key);
     if (cached !== void 0 && Date.now() - cached.at < 3e4) return cached.value;
     const value = await (async () => {
@@ -2327,20 +2552,22 @@ function createForge({ runner, config, logger, resolveToken, env = process.env }
       if (version.code !== 0) {
         return { installed: false, signedIn: false, login: null, reason: "CLI kh\xF4ng ch\u1EA1y \u0111\u01B0\u1EE3c" };
       }
+      const hostName = normalizedHost(host);
+      const authArgs = provider === "gitlab" && hostName.length > 0 ? ["auth", "status", "--hostname", hostName] : ["auth", "status"];
       let status;
       try {
-        status = await exec(program, ["auth", "status"], { cwd, signal, maxBytes: 16384 });
+        status = await exec(program, authArgs, { cwd, signal, maxBytes: 16384 });
       } catch (error) {
         if (signal?.aborted === true) throw error;
         return { installed: true, signedIn: false, login: null, reason: messageOf(error) };
       }
       const text2 = `${status.stdout}
 ${status.stderr}`;
-      const login = /account\s+(\S+)|as\s+(\S+)/i.exec(text2);
+      const login = /account\s+(\S+)|as\s+([^\s(]+)|Logged in to .*?\bas\s+(\S+)/i.exec(text2);
       return {
         installed: true,
         signedIn: status.code === 0,
-        login: login?.[1] ?? login?.[2] ?? null,
+        login: login?.[1] ?? login?.[2] ?? login?.[3] ?? null,
         reason: status.code === 0 ? null : text2.trim().split("\n").slice(-1)[0] ?? "Ch\u01B0a \u0111\u0103ng nh\u1EADp"
       };
     })();
@@ -2368,56 +2595,84 @@ ${status.stderr}`;
     tokenCache = { at: Date.now(), value };
     return value;
   }
+  async function gitlabToken() {
+    if (gitlabTokenCache !== void 0 && Date.now() - gitlabTokenCache.at < 6e4) return gitlabTokenCache.value;
+    const names = [String(config.gitlabTokenEnv ?? "").trim(), "GITLAB_TOKEN", "GLAB_TOKEN"].filter((name2) => name2.length > 0);
+    let value = "";
+    for (const name2 of names) {
+      const candidate = env[name2];
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        value = candidate.trim();
+        break;
+      }
+    }
+    if (value.length === 0 && typeof resolveGitLabToken === "function") {
+      try {
+        const stored = await resolveGitLabToken();
+        if (typeof stored === "string") value = stored.trim();
+      } catch {
+      }
+    }
+    gitlabTokenCache = { at: Date.now(), value };
+    return value;
+  }
   async function describe({ root, remote, signal }) {
-    const provider = remote?.provider ?? "other";
     if (providerChoice === "none") {
       return { provider: "none", available: false, backend: null, reason: "\u0110\xE3 t\u1EAFt trong c\u1EA5u h\xECnh" };
     }
     if (remote === null || remote === void 0) {
       return { provider: "none", available: false, backend: null, reason: "Kho m\xE3 kh\xF4ng c\xF3 remote" };
     }
+    const provider = providerFor(remote);
+    const host = normalizedHost(remote.host);
     if (provider !== "github" && provider !== "gitlab") {
-      return { provider, available: false, backend: null, reason: `Ch\u01B0a h\u1ED7 tr\u1EE3 m\xE1y ch\u1EE7 ${remote.host ?? ""}`.trim() };
-    }
-    if (providerChoice !== "auto" && providerChoice !== provider) {
-      return { provider: providerChoice, available: false, backend: null, reason: `C\u1EA5u h\xECnh ch\u1EC9 d\xF9ng ${providerChoice}` };
-    }
-    const program = cliFor(provider);
-    if (program !== void 0) {
-      const probeResult = await probe(program, root, signal);
-      if (probeResult.installed && probeResult.signedIn) {
-        return {
-          provider,
-          available: true,
-          backend: "cli",
-          cli: program,
-          login: probeResult.login,
-          slug: remote.slug ?? null,
-          host: remote.host ?? null
-        };
-      }
-      if (provider === "github") {
-        const restToken = await token();
-        return {
-          provider,
-          available: true,
-          backend: "rest",
-          cli: program,
-          login: null,
-          authenticated: restToken.length > 0,
-          slug: remote.slug ?? null,
-          host: remote.host ?? null,
-          note: probeResult.installed ? `${program} ch\u01B0a \u0111\u0103ng nh\u1EADp (${probeResult.reason ?? "gh auth login"})` : `${program} kh\xF4ng c\xF3 tr\xEAn m\xE1y`
-        };
-      }
       return {
         provider,
         available: false,
         backend: null,
-        reason: probeResult.installed ? `${program} ch\u01B0a \u0111\u0103ng nh\u1EADp` : `${program} kh\xF4ng c\xF3 tr\xEAn m\xE1y`
+        reason: host.length > 0 ? `Ch\u01B0a nh\u1EADn ra m\xE1y ch\u1EE7 ${remote.host ?? host}. Th\xEAm host v\xE0o git.gitlabHosts n\u1EBFu \u0111\xF3 l\xE0 GitLab t\u1EF1 host.` : "Remote n\xE0y ch\u01B0a tr\u1ECF t\u1EDBi GitHub ho\u1EB7c GitLab",
+        host: remote.host ?? null,
+        slug: remote.slug ?? null
       };
     }
-    return { provider, available: false, backend: null, reason: `Ch\u01B0a h\u1ED7 tr\u1EE3 ${provider}` };
+    const program = cliFor(provider) ?? (provider === "gitlab" ? "glab" : "gh");
+    const probeResult = await probe(program, root, provider, remote.host, signal);
+    if (probeResult.installed && probeResult.signedIn) {
+      return {
+        provider,
+        available: true,
+        backend: "cli",
+        cli: program,
+        login: probeResult.login,
+        slug: remote.slug ?? null,
+        host: remote.host ?? null,
+        terminology: provider === "gitlab" ? { short: "MR", singular: "merge request", plural: "merge requests" } : { short: "PR", singular: "pull request", plural: "pull requests" }
+      };
+    }
+    const fallback = provider === "github" ? await token() : await gitlabToken();
+    if (fallback.length === 0 && provider === "gitlab") {
+      return {
+        provider,
+        available: false,
+        backend: null,
+        cli: program,
+        reason: probeResult.installed ? `${program} ch\u01B0a \u0111\u0103ng nh\u1EADp cho ${remote.host ?? "GitLab"} (${probeResult.reason ?? `${program} auth login --hostname ${remote.host ?? ""}`})` : `${program} kh\xF4ng c\xF3 tr\xEAn m\xE1y v\xE0 ch\u01B0a c\xF3 GITLAB_TOKEN`,
+        host: remote.host ?? null,
+        slug: remote.slug ?? null
+      };
+    }
+    return {
+      provider,
+      available: true,
+      backend: "rest",
+      cli: program,
+      login: null,
+      authenticated: fallback.length > 0,
+      slug: remote.slug ?? null,
+      host: remote.host ?? null,
+      note: probeResult.installed ? `${program} ch\u01B0a \u0111\u0103ng nh\u1EADp (${probeResult.reason ?? `${program} auth login`})` : `${program} kh\xF4ng c\xF3 tr\xEAn m\xE1y; d\xF9ng ${provider === "github" ? "GITHUB_TOKEN" : "GITLAB_TOKEN"}`,
+      terminology: provider === "gitlab" ? { short: "MR", singular: "merge request", plural: "merge requests" } : { short: "PR", singular: "pull request", plural: "pull requests" }
+    };
   }
   async function remember(key, refresh, produce) {
     if (!refresh) {
@@ -2463,6 +2718,106 @@ ${status.stderr}`;
     }
     return new CommandError("forge/failed", text2.length > 0 ? text2.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text2 });
   }
+  function glabFailure(stderr, program) {
+    const text2 = String(stderr ?? "").trim();
+    if (/not logged in|authentication|authenticate|HTTP 401|invalid token/i.test(text2)) {
+      return new CommandError("forge/not-signed-in", `Ch\u01B0a \u0111\u0103ng nh\u1EADp ${program}. Ch\u1EA1y: ${program} auth login`, { detail: text2 });
+    }
+    if (/404|not found|Project Not Found/i.test(text2)) {
+      return new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn GitLab", { detail: text2 });
+    }
+    if (/no git remotes|not a git repository/i.test(text2)) {
+      return new CommandError("forge/no-remote", "Kho m\xE3 ch\u01B0a c\xF3 remote", { detail: text2 });
+    }
+    if (/rate limit|429/i.test(text2)) {
+      return new CommandError("forge/rate-limited", "GitLab t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt", { detail: text2 });
+    }
+    return new CommandError("forge/failed", text2.length > 0 ? text2.split("\n")[0] : `${program} th\u1EA5t b\u1EA1i`, { detail: text2 });
+  }
+  function gitlabProject(remote) {
+    const slug = String(remote.slug ?? "").trim();
+    if (slug.length === 0) throw new CommandError("forge/no-remote", "Remote n\xE0y kh\xF4ng c\xF3 \u0111\u01B0\u1EDDng d\u1EABn kho m\xE3 GitLab");
+    return encodeURIComponent(slug);
+  }
+  function queryValue(value) {
+    return encodeURIComponent(value);
+  }
+  function gitlabRestBase(remote) {
+    return gitlabApiBase(String(remote.host ?? ""));
+  }
+  async function gitlabRequest(info, remote, endpoint, options = {}) {
+    const method = options.method ?? "GET";
+    if (info.backend === "cli") {
+      const host = normalizedHost(remote.host);
+      const args = ["api", ...host.length > 0 ? ["--hostname", host] : [], "--output", "json"];
+      if (method !== "GET") args.push("--method", method);
+      if (options.body !== void 0) {
+        args.push("--input", "-");
+      }
+      args.push(endpoint);
+      const result = await exec(info.cli, args, {
+        cwd: process.cwd(),
+        signal: options.signal,
+        stdin: options.body === void 0 ? void 0 : JSON.stringify(options.body)
+      });
+      if (result.code !== 0) throw glabFailure(result.stderr, info.cli);
+      return parseJson(result.stdout, info.cli);
+    }
+    const headers = {
+      accept: "application/json",
+      "content-type": "application/json",
+      "user-agent": "dsh-personal-hub"
+    };
+    const value = await gitlabToken();
+    if (value.length > 0) headers["private-token"] = value;
+    let response;
+    try {
+      response = await fetch(`${gitlabRestBase(remote)}/${endpoint}`, {
+        method,
+        headers,
+        ...options.body === void 0 ? {} : { body: JSON.stringify(options.body) },
+        ...options.signal === void 0 ? {} : { signal: options.signal }
+      });
+    } catch (error) {
+      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitLab: ${messageOf(error)}`);
+    }
+    if (response.status === 401) throw new CommandError("forge/not-signed-in", "GitLab token kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c \u0111\xE3 h\u1EBFt h\u1EA1n");
+    if (response.status === 403) {
+      throw new CommandError("forge/not-signed-in", "GitLab t\u1EEB ch\u1ED1i token n\xE0y (thi\u1EBFu quy\u1EC1n api)");
+    }
+    if (response.status === 404) {
+      throw new CommandError("forge/unknown-repository", "Kh\xF4ng th\u1EA5y kho m\xE3 tr\xEAn GitLab");
+    }
+    if (response.status === 429) {
+      throw new CommandError("forge/rate-limited", "GitLab t\u1EA1m gi\u1EDBi h\u1EA1n l\u01B0\u1EE3t g\u1ECDi, th\u1EED l\u1EA1i sau \xEDt ph\xFAt");
+    }
+    if (!response.ok) throw new CommandError("forge/failed", `GitLab tr\u1EA3 v\u1EC1 HTTP ${response.status}`);
+    if (response.status === 204) return void 0;
+    try {
+      return await response.json();
+    } catch {
+      throw new CommandError("forge/failed", "GitLab tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c");
+    }
+  }
+  async function gitlabOptional(info, remote, endpoint, signal) {
+    try {
+      return await gitlabRequest(info, remote, endpoint, { signal });
+    } catch (error) {
+      if (error instanceof CommandError && error.code === "forge/not-signed-in") throw error;
+      logger.warn("git: GitLab sub-resource %s failed: %s", endpoint, messageOf(error));
+      return void 0;
+    }
+  }
+  function parseJson(text2, program) {
+    const trimmed = text2.trim();
+    if (trimmed.length === 0) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      return parsed;
+    } catch {
+      throw new CommandError("forge/failed", `${program} tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c`);
+    }
+  }
   async function rest(path, options = {}) {
     const headers = {
       accept: "application/vnd.github+json",
@@ -2492,8 +2847,16 @@ ${status.stderr}`;
   async function listPulls({ root, remote, state = "open", limit = 20, signal, refresh = false }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return { ...info, pulls: [] };
-    const key = `pulls|${remote.slug}|${state}|${limit}`;
+    const key = `pulls|${info.provider}|${remote.slug}|${state}|${limit}`;
     return await remember(key, refresh, async () => {
+      if (info.provider === "gitlab") {
+        const queryState = state === "draft" ? "opened" : state === "open" ? "opened" : state;
+        const endpoint = `projects/${gitlabProject(remote)}/merge_requests?state=${queryValue(queryState)}&per_page=${limit}&order_by=updated_at&sort=desc`;
+        const raw2 = await gitlabRequest(info, remote, endpoint, { signal });
+        let pulls2 = asArray(raw2).map(normalizeGitLabPull);
+        if (state === "draft") pulls2 = pulls2.filter((pull) => pull.state === "draft" || pull.isDraft);
+        return { ...info, pulls: pulls2 };
+      }
       if (info.backend === "cli") {
         const raw2 = await ghJson(info.cli, [
           "pr",
@@ -2516,11 +2879,51 @@ ${status.stderr}`;
       return { ...info, checksUnavailable: true, pulls };
     });
   }
+  async function gitlabPipelineJobs(info, remote, pipeline, signal) {
+    const id = Number(asRecord3(pipeline).id);
+    if (!Number.isFinite(id) || id <= 0) return [];
+    const project = gitlabProject(remote);
+    return await gitlabOptional(info, remote, `projects/${project}/pipelines/${id}/jobs?per_page=100`, signal);
+  }
   async function pullDetail({ root, remote, number, signal, refresh = false }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return { ...info };
-    const key = `pull|${remote.slug}|${number}`;
+    const key = `pull|${info.provider}|${remote.slug}|${number}`;
     return await remember(key, refresh, async () => {
+      if (info.provider === "gitlab") {
+        const project = gitlabProject(remote);
+        const endpoint = `projects/${project}/merge_requests/${number}`;
+        const node2 = asRecord3(await gitlabRequest(info, remote, endpoint, { signal }));
+        const [notes, changes, approvals] = await Promise.all([
+          gitlabOptional(info, remote, `${endpoint}/notes?per_page=50&sort=asc`, signal),
+          gitlabOptional(info, remote, `${endpoint}/changes`, signal),
+          gitlabOptional(info, remote, `${endpoint}/approvals`, signal)
+        ]);
+        const pull2 = normalizeGitLabPull(node2);
+        const files = asArray(asRecord3(changes).changes).map(gitlabDiffStats);
+        if (files.length > 0) {
+          pull2.changedFiles = files.length;
+          pull2.additions = files.reduce((sum, file) => sum + file.additions, 0);
+          pull2.deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+        }
+        const pipeline = node2.head_pipeline ?? node2.pipeline;
+        const jobs = await gitlabPipelineJobs(info, remote, pipeline, signal);
+        const checks = describeGitLabPipeline(pipeline, jobs);
+        pull2.checks = summarizeCheckDescriptions(checks);
+        const approval = asRecord3(approvals);
+        const reviews2 = asArray(approval.approved_by).map(normalizeGitLabReview);
+        if (reviews2.length > 0) pull2.review = "approved";
+        else if (Number(approval.approvals_required) > 0 && Number(approval.approvals_left) > 0) pull2.review = "review_required";
+        return {
+          ...info,
+          pull: pull2,
+          body: String(node2.description ?? ""),
+          checks,
+          reviews: reviews2,
+          comments: asArray(notes).filter((note) => asRecord3(note).system !== true).map(normalizeComment),
+          files
+        };
+      }
       if (info.backend === "cli") {
         const raw = await ghJson(info.cli, [
           "pr",
@@ -2571,8 +2974,16 @@ ${status.stderr}`;
     if (typeof branch !== "string" || branch.length === 0) return { pull: null };
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return { ...info, pull: null };
-    const key = `branch|${remote.slug}|${branch}`;
+    const key = `branch|${info.provider}|${remote.slug}|${branch}`;
     return await remember(key, refresh, async () => {
+      if (info.provider === "gitlab") {
+        const project = gitlabProject(remote);
+        const endpoint = `projects/${project}/merge_requests?state=all&source_branch=${queryValue(branch)}&per_page=5&order_by=updated_at&sort=desc`;
+        const raw2 = await gitlabRequest(info, remote, endpoint, { signal });
+        const pulls2 = asArray(raw2).map(normalizeGitLabPull);
+        const preferred2 = pulls2.find((pull) => pull.state === "open") ?? pulls2.find((pull) => pull.state === "draft") ?? pulls2[0];
+        return { ...info, pull: preferred2 ?? null };
+      }
       if (info.backend === "cli") {
         const raw2 = await ghJson(info.cli, [
           "pr",
@@ -2601,8 +3012,19 @@ ${status.stderr}`;
   async function listIssues({ root, remote, state = "open", limit = 20, signal, refresh = false }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return { ...info, issues: [] };
-    const key = `issues|${remote.slug}|${state}|${limit}`;
+    const key = `issues|${info.provider}|${remote.slug}|${state}|${limit}`;
     return await remember(key, refresh, async () => {
+      if (info.provider === "gitlab") {
+        const queryState = state === "open" ? "opened" : state;
+        const project = gitlabProject(remote);
+        const raw2 = await gitlabRequest(
+          info,
+          remote,
+          `projects/${project}/issues?state=${queryValue(queryState)}&per_page=${limit}&order_by=updated_at&sort=desc`,
+          { signal }
+        );
+        return { ...info, issues: asArray(raw2).map(normalizeGitLabIssue) };
+      }
       if (info.backend === "cli") {
         const raw2 = await ghJson(info.cli, [
           "issue",
@@ -2625,8 +3047,20 @@ ${status.stderr}`;
   async function issueDetail({ root, remote, number, signal, refresh = false }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return { ...info };
-    const key = `issue|${remote.slug}|${number}`;
+    const key = `issue|${info.provider}|${remote.slug}|${number}`;
     return await remember(key, refresh, async () => {
+      if (info.provider === "gitlab") {
+        const project = gitlabProject(remote);
+        const endpoint = `projects/${project}/issues/${number}`;
+        const node2 = asRecord3(await gitlabRequest(info, remote, endpoint, { signal }));
+        const notes = await gitlabOptional(info, remote, `${endpoint}/notes?per_page=50&sort=asc`, signal);
+        return {
+          ...info,
+          issue: normalizeGitLabIssue(node2),
+          body: String(node2.description ?? ""),
+          comments: asArray(notes).filter((note) => asRecord3(note).system !== true).map(normalizeComment)
+        };
+      }
       if (info.backend === "cli") {
         const raw = await ghJson(info.cli, [
           "issue",
@@ -2692,24 +3126,30 @@ ${status.stderr}`;
     if (info.available !== true) {
       throw new CommandError("pr/forge-unavailable", info.reason ?? "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c");
     }
+    if (info.provider === "gitlab") {
+      const project = gitlabProject(remote);
+      const node2 = asRecord3(await gitlabRequest(info, remote, `projects/${project}/merge_requests`, {
+        method: "POST",
+        body: {
+          source_branch: head,
+          target_branch: base,
+          title,
+          description: body
+        },
+        signal
+      }));
+      return {
+        number: Number(node2.iid) || numberFromUrl(String(node2.web_url ?? "")),
+        url: String(node2.web_url ?? ""),
+        provider: "gitlab",
+        backend: info.backend,
+        head,
+        base
+      };
+    }
     if (info.backend === "cli") {
       const program = info.cli;
-      const args = info.provider === "gitlab" ? [
-        "mr",
-        "create",
-        "--repo",
-        String(remote.slug),
-        "--source-branch",
-        head,
-        "--target-branch",
-        base,
-        "--title",
-        title,
-        "--description",
-        body,
-        "--yes",
-        "--no-editor"
-      ] : [
+      const result = await exec(program, [
         "pr",
         "create",
         "--repo",
@@ -2722,8 +3162,7 @@ ${status.stderr}`;
         title,
         "--body",
         body
-      ];
-      const result = await exec(program, args, { cwd: root, signal });
+      ], { cwd: root, signal });
       if (result.code !== 0) throw ghFailure(result.stderr, program);
       const url = firstUrl(result.stdout) ?? firstUrl(result.stderr) ?? "";
       return {
@@ -2748,20 +3187,17 @@ ${status.stderr}`;
   async function pullState2({ root, remote, number, signal }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return null;
+    if (info.provider === "gitlab") {
+      const project = gitlabProject(remote);
+      const node2 = asRecord3(await gitlabRequest(info, remote, `projects/${project}/merge_requests/${number}`, { signal }));
+      return {
+        number: Number(node2.iid) || number,
+        state: gitlabState(node2.state),
+        url: String(node2.web_url ?? ""),
+        mergedAt: typeof node2.merged_at === "string" ? node2.merged_at : null
+      };
+    }
     if (info.backend === "cli") {
-      if (info.provider === "gitlab") {
-        const raw2 = await ghJson(info.cli, [
-          "api",
-          `projects/${encodeURIComponent(String(remote.slug))}/merge_requests/${number}`
-        ], { cwd: root, signal });
-        const node3 = asRecord3(raw2);
-        return {
-          number,
-          state: gitlabState(node3.state),
-          url: String(node3.web_url ?? ""),
-          mergedAt: typeof node3.merged_at === "string" ? node3.merged_at : null
-        };
-      }
       const raw = await ghJson(info.cli, [
         "pr",
         "view",
@@ -2792,18 +3228,6 @@ ${status.stderr}`;
   return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, pullState: pullState2 };
 }
 var STATE_FIELDS = ["number", "url", "state", "isDraft", "mergedAt", "headRefName", "baseRefName", "mergeable"].join(",");
-function gitlabState(value) {
-  switch (String(value ?? "")) {
-    case "merged":
-      return "merged";
-    case "closed":
-      return "closed";
-    case "locked":
-      return "open";
-    default:
-      return "open";
-  }
-}
 function firstUrl(text2) {
   const match = /https?:\/\/[^\s'"]+/.exec(String(text2 ?? ""));
   return match?.[0] ?? null;
@@ -3784,6 +4208,7 @@ function firstReasoningEffort(model) {
 // src/features/git.ts
 var GIT_PATH_PREFIX = "/api/personal-hub-git";
 var GITHUB_CREDENTIAL_REF = "DSH_GITHUB_TOKEN";
+var GITLAB_CREDENTIAL_REF = "DSH_GITLAB_TOKEN";
 var ACTION_RETENTION_MS = 5 * 60 * 1e3;
 var ACTION_OUTPUT_LINES = 40;
 function mountGit(ctx, config, deps) {
@@ -3833,7 +4258,8 @@ function mountRoutes(ctx, connection, config, deps) {
     runner,
     config,
     logger,
-    resolveToken: () => storedToken(ctx)
+    resolveToken: () => storedToken(ctx, GITHUB_CREDENTIAL_REF),
+    resolveGitLabToken: () => storedToken(ctx, GITLAB_CREDENTIAL_REF)
   });
   logger.info("git: mounted over %s, code host %s", runner.backend, config.forge);
   const store = new JsonStateStore(
@@ -4707,10 +5133,16 @@ function mountRoutes(ctx, connection, config, deps) {
         "repo",
         "create",
         repositoryName,
-        visibility.slice(2),
-        "--remote",
+        visibility,
+        "--remoteName",
         "origin"
-      ], { cwd: root, signal, timeoutMs: config.worktreeTimeoutMs, maxBytes: 256 * 1024 });
+      ], {
+        cwd: root,
+        signal,
+        timeoutMs: config.worktreeTimeoutMs,
+        maxBytes: 256 * 1024,
+        ...config.gitlabHosts.length === 0 ? {} : { env: { GITLAB_HOST: hostOf(config.gitlabHosts[0]) } }
+      });
       if (created.code !== 0) throwWriteFailure2("publish", created);
       const context = await readContext(runner, { root, config, signal });
       if (context.branch !== null) {
@@ -5083,7 +5515,10 @@ ${result.stderr ?? ""}`;
         ...config.merged,
         cleanup: config.worktree.cleanup,
         cleanupLast: value.cleanup ?? null,
-        writable: typeof ctx.get("configEditor")?.edit === "function"
+        writable: typeof ctx.get("configEditor")?.edit === "function",
+        forge: config.forge,
+        gitlabHosts: config.gitlabHosts,
+        cliPath: config.cliPath
       };
     },
     /**
@@ -5117,6 +5552,11 @@ ${result.stderr ?? ""}`;
         ...Number.isFinite(Number(requestedCleanup.inactiveDays)) ? { inactiveDays: Number(requestedCleanup.inactiveDays) } : {},
         ...["tracked", "any", "none"].includes(String(requestedCleanup.keepChanges)) ? { keepChanges: String(requestedCleanup.keepChanges) } : {}
       };
+      const nextForge = {
+        forge: ["auto", "github", "gitlab", "none"].includes(String(payload.forge)) ? payload.forge : config.forge,
+        gitlabHosts: payload.gitlabHosts === void 0 ? config.gitlabHosts : readHostList(payload.gitlabHosts),
+        cliPath: typeof payload.cliPath === "string" ? payload.cliPath.trim() : config.cliPath
+      };
       await editor.edit(entry, (current) => {
         const row = current !== null && typeof current === "object" ? current : {};
         const git = row.git !== null && typeof row.git === "object" ? row.git : {};
@@ -5125,6 +5565,9 @@ ${result.stderr ?? ""}`;
           ...row,
           git: {
             ...git,
+            forge: nextForge.forge,
+            gitlabHosts: nextForge.gitlabHosts,
+            cliPath: nextForge.cliPath,
             merged: {
               ...git.merged !== null && typeof git.merged === "object" ? git.merged : {},
               enabled: next.enabled === true,
@@ -5146,7 +5589,7 @@ ${result.stderr ?? ""}`;
           }
         };
       });
-      return { merged: next, cleanup: nextCleanup };
+      return { merged: next, cleanup: nextCleanup, forge: nextForge };
     },
     /** The worktree cleanup rules and what the last pass did. */
     async cleanupState() {
@@ -5320,10 +5763,10 @@ async function directoryFromPayload(value) {
   }
   return directory;
 }
-async function storedToken(ctx) {
+async function storedToken(ctx, ref) {
   const credentials = ctx.get("credentials");
   if (credentials === void 0 || typeof credentials.resolve !== "function") return void 0;
-  const hit = await credentials.resolve(GITHUB_CREDENTIAL_REF);
+  const hit = await credentials.resolve(ref);
   return typeof hit?.value === "string" ? hit.value : void 0;
 }
 function requiredString(value, name2) {
@@ -5337,6 +5780,29 @@ function stringList(value, name2) {
     throw new CommandError("input/invalid", `The ${name2} argument must be a non-empty list`);
   }
   return value.map((item) => String(item)).filter((item) => item.length > 0);
+}
+function readHostList(value) {
+  const items = typeof value === "string" ? value.split(/[\s,]+/) : Array.isArray(value) ? value.map((item) => String(item)) : [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const item of items) {
+    const host = item.trim().replace(/\/+$/, "");
+    if (host.length === 0) continue;
+    const key = host.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(host);
+  }
+  return result;
+}
+function hostOf(value) {
+  const raw = String(value ?? "").trim();
+  if (raw.length === 0) return "";
+  try {
+    return new URL(raw.includes("://") ? raw : `https://${raw}`).host;
+  } catch {
+    return raw;
+  }
 }
 function requiredNumber(value, name2) {
   const numeric = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);

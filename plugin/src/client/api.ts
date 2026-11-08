@@ -183,6 +183,9 @@ export function createGitApi(call: RawCall): GitApi {
       deleteBranch?: boolean
       archiveSession?: boolean
       cleanup?: Partial<import('../shared/protocol.ts').CleanupSettings>
+      forge?: 'auto' | 'github' | 'gitlab' | 'none'
+      gitlabHosts?: string[] | string
+      cliPath?: string
     }) => Promise<GitResponse<'mergeSettingsSet'>>,
     cleanupState: route('cleanupState') as (payload?: Record<string, never>) => Promise<GitResponse<'cleanupState'>>,
     cleanupRun: route('cleanupRun') as (payload?: Record<string, never>) => Promise<GitResponse<'cleanupRun'>>,
