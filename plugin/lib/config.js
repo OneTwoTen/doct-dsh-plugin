@@ -16,6 +16,27 @@ export const TELEGRAM_DEFAULTS = Object.freeze({
   pushChanges: true,
 })
 
+/** Web Remote bridge: outbound relay connection plus pairing. */
+export const WEB_REMOTE_DEFAULTS = Object.freeze({
+  enabled: false,
+  /** Relay base URL, e.g. `https://chat.example.com` or `wss://host/ws`. */
+  relayUrl: '',
+  /** Machine name shown on the approval screen; empty uses the OS hostname. */
+  deviceName: '',
+  /** Data directory; empty uses `<DSH_HOME>/personal-hub/web-remote`. */
+  dataDir: '',
+  /** Start the device pairing flow automatically when no token is stored. */
+  autoPair: true,
+  /** Scopes requested during pairing. */
+  scopes: ['chat', 'approval'],
+  approvalTimeoutMs: 300000,
+  questionTimeoutMs: 300000,
+  requestTimeoutMs: 60000,
+  heartbeatMs: 25000,
+  reconnectMinMs: 1000,
+  reconnectMaxMs: 30000,
+})
+
 export const GIT_DEFAULTS = Object.freeze({
   enabled: true,
   /** `auto` detects the code host from the remote; `none` disables pull requests and issues. */
@@ -129,6 +150,12 @@ function asString(value, fallback = '') {
   return typeof value === 'string' ? value : fallback
 }
 
+function asStringList(value, fallback) {
+  if (!Array.isArray(value)) return [...fallback]
+  const list = value.map((item) => String(item).trim()).filter((item) => item.length > 0)
+  return list.length > 0 ? list : [...fallback]
+}
+
 function asChoice(value, choices, fallback) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return choices.includes(text) ? text : fallback
@@ -149,6 +176,9 @@ export function normalizeConfig(raw) {
   const worktree = git.worktree && typeof git.worktree === 'object' ? git.worktree : {}
   const cleanup = worktree.cleanup && typeof worktree.cleanup === 'object' ? worktree.cleanup : {}
   const merged = git.merged && typeof git.merged === 'object' ? git.merged : {}
+  const webRemote = root.webRemote && typeof root.webRemote === 'object' ? root.webRemote : {}
+  const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 60000 })
+  const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 300000 })
   return {
     telegram: {
       enabled: asBoolean(telegram.enabled, TELEGRAM_DEFAULTS.enabled),
@@ -218,6 +248,32 @@ export function normalizeConfig(raw) {
         archiveSession: asBoolean(merged.archiveSession, GIT_DEFAULTS.merged.archiveSession),
         checkMs: asPositiveInteger(merged.checkMs, GIT_DEFAULTS.merged.checkMs, { min: 15000, max: 3600000 }),
       },
+    },
+    webRemote: {
+      enabled: asBoolean(webRemote.enabled, WEB_REMOTE_DEFAULTS.enabled),
+      relayUrl: asString(webRemote.relayUrl, WEB_REMOTE_DEFAULTS.relayUrl).trim(),
+      deviceName: asString(webRemote.deviceName, WEB_REMOTE_DEFAULTS.deviceName).trim(),
+      dataDir: asString(webRemote.dataDir, WEB_REMOTE_DEFAULTS.dataDir).trim(),
+      autoPair: asBoolean(webRemote.autoPair, WEB_REMOTE_DEFAULTS.autoPair),
+      scopes: asStringList(webRemote.scopes, WEB_REMOTE_DEFAULTS.scopes),
+      approvalTimeoutMs: asPositiveInteger(
+        webRemote.approvalTimeoutMs,
+        WEB_REMOTE_DEFAULTS.approvalTimeoutMs,
+        { min: 5000, max: 3600000 },
+      ),
+      questionTimeoutMs: asPositiveInteger(
+        webRemote.questionTimeoutMs,
+        WEB_REMOTE_DEFAULTS.questionTimeoutMs,
+        { min: 5000, max: 3600000 },
+      ),
+      requestTimeoutMs: asPositiveInteger(
+        webRemote.requestTimeoutMs,
+        WEB_REMOTE_DEFAULTS.requestTimeoutMs,
+        { min: 1000, max: 600000 },
+      ),
+      heartbeatMs: asPositiveInteger(webRemote.heartbeatMs, WEB_REMOTE_DEFAULTS.heartbeatMs, { min: 1000, max: 120000 }),
+      reconnectMinMs,
+      reconnectMaxMs,
     },
   }
 }

@@ -1,0 +1,16 @@
+{
+  "name": "@local/dsh-remote-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web Remote v1 wire contract: JSON Schema and golden frames shared by the DSH bridge, relay, and web client.",
+  "exports": {
+    "./schema/*.json": "./schema/*.json",
+    "./fixtures/*.json": "./fixtures/*.json"
+  },
+  "files": [
+    "README.md",
+    "schema/*.json",
+    "fixtures/*.json"
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doct.local/dsh-remote/v1/frames.json",
+  "title": "Web Remote v1 frame",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/helloOk" },
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" },
+    { "$ref": "#/$defs/open" },
+    { "$ref": "#/$defs/item" },
+    { "$ref": "#/$defs/end" },
+    { "$ref": "#/$defs/cancel" },
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "version": { "type": "integer", "const": 1 },
+    "op": { "type": "string", "pattern": "^[a-z][a-z0-9]*\\.[a-zA-Z][a-zA-Z0-9]*$" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "hello": {
+      "type": "object",
+      "required": ["t", "v", "deviceId", "ts", "nonce", "sig"],
+      "properties": {
+        "t": { "const": "hello" },
+        "v": { "$ref": "#/$defs/version" },
+        "deviceId": { "type": "string", "minLength": 1 },
+        "ts": { "type": "integer", "minimum": 0 },
+        "nonce": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "sig": { "type": "string", "minLength": 40, "maxLength": 256 }
+      },
+      "additionalProperties": true
+    },
+    "helloOk": {
+      "type": "object",
+      "required": ["t", "v", "serverTime"],
+      "properties": {
+        "t": { "const": "hello.ok" },
+        "v": { "$ref": "#/$defs/version" },
+        "serverTime": { "type": "integer", "minimum": 0 },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxFrameBytes": { "type": "integer", "minimum": 1024 },
+            "maxStreams": { "type": "integer", "minimum": 1 },
+            "maxInflight": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "request": {
+      "type": "object",
+      "required": ["t", "id", "op"],
+      "properties": {
+        "t": { "const": "req" },
+        "id": { "$ref": "#/$defs/id" },
+        "op": { "$ref": "#/$defs/op" },
+        "args": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "response": {
+      "type": "object",
+      "required": ["t", "id", "ok"],
+      "properties": {
+        "t": { "const": "res" },
+        "id": { "$ref": "#/$defs/id" },
+        "ok": { "type": "boolean" },
+        "value": {},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "minLength": 1 },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "ok": { "const": true } } },
+          "then": { "required": ["value"] },
+          "else": { "required": ["error"] }
+        }
+      ]
+    },
+    "open": {
+      "type": "object",
+      "required": ["t", "id", "op"],
+      "properties": {
+        "t": { "const": "open" },
+        "id": { "$ref": "#/$defs/id" },
+        "op": { "$ref": "#/$defs/op" },
+        "args": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "item": {
+      "type": "object",
+      "required": ["t", "id", "item"],
+      "properties": {
+        "t": { "const": "item" },
+        "id": { "$ref": "#/$defs/id" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "item": {}
+      },
+      "additionalProperties": true
+    },
+    "end": {
+      "type": "object",
+      "required": ["t", "id"],
+      "properties": {
+        "t": { "const": "end" },
+        "id": { "$ref": "#/$defs/id" },
+        "reason": {
+          "type": "string",
+          "enum": ["complete", "cancelled", "overflow", "error", "revoked", "shutdown"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "cancel": {
+      "type": "object",
+      "required": ["t", "id"],
+      "properties": {
+        "t": { "const": "cancel" },
+        "id": { "$ref": "#/$defs/id" }
+      },
+      "additionalProperties": true
+    },
+    "ping": {
+      "type": "object",
+      "required": ["t"],
+      "properties": {
+        "t": { "const": "ping" },
+        "nonce": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "pong": {
+      "type": "object",
+      "required": ["t"],
+      "properties": {
+        "t": { "const": "pong" },
+        "nonce": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "object",
+      "required": ["t", "code", "message"],
+      "properties": {
+        "t": { "const": "error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

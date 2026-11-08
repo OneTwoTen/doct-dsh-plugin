@@ -109,8 +109,11 @@ Cơ chế tách: `git filter-repo --path web --path server --path protocol` (gi�
 
 ## 8. Việc cần làm ngay
 
-- [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol`.
-- [ ] Thêm `server/`, `web/`, `protocol/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).
-- [ ] Viết `protocol/schema/hello.json` + fixture đầu tiên, dùng chung cho test plugin và relay.
+- [x] `protocol/` với schema, fixture và đặc tả v1.
+- [x] `plugin/features/web-remote.js` + `plugin/lib/remote-*.js` (Phase 1 bridge).
+- [x] `tools/dev-relay/` — relay Node + WebChat tối giản để thử end-to-end (không phải `server/`).
+- [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol` (khi scaffold web).
+- [ ] Thêm `server/`, `web/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).
+- [ ] Relay Zig (Phase 2), web SvelteKit (Phase 3).
 - [ ] Thêm ba workflow path-filter.
 - [ ] Ghi quy ước tag vào README.
