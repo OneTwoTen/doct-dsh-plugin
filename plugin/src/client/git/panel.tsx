@@ -473,7 +473,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         setSelection(null)
       },
     }),
-    h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto', overflow: isDetail || view === 'changes' ? 'hidden' : 'auto' } },
+    h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto', overflow: isDetail || view === 'changes' || view === 'worktrees' ? 'hidden' : 'auto' } },
       body),
 
     pending === null

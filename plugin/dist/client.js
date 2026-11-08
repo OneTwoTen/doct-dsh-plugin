@@ -4591,7 +4591,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
       }),
       h(
         "div",
-        { style: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto", overflow: isDetail || view === "changes" ? "hidden" : "auto" } },
+        { style: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto", overflow: isDetail || view === "changes" || view === "worktrees" ? "hidden" : "auto" } },
         body2
       ),
       pending === null ? null : h(DefaultBranchDialog, {
