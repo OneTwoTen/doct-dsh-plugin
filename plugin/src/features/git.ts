@@ -88,6 +88,7 @@ import type {
   DraftedMessage,
   DraftMessageRequest,
   FailureInfo,
+  ForgeSettings,
   GitActionPhase,
   GitActionProgress,
   GitActionToast,
@@ -114,6 +115,8 @@ import type { GitConfig, HubConfig } from '../lib/config.ts'
 export const GIT_PATH_PREFIX = '/api/personal-hub-git'
 /** Credential reference that may hold a GitHub token for the REST fallback. */
 const GITHUB_CREDENTIAL_REF = 'DSH_GITHUB_TOKEN'
+/** Credential reference that may hold a GitLab token for the REST fallback. */
+const GITLAB_CREDENTIAL_REF = 'DSH_GITLAB_TOKEN'
 /** Finished actions stay readable this long, so a slow poll still sees the result. */
 const ACTION_RETENTION_MS = 5 * 60 * 1000
 /** The tail of a running action's output the panel receives. */
@@ -220,7 +223,8 @@ function mountRoutes(
     runner,
     config,
     logger,
-    resolveToken: () => storedToken(ctx),
+    resolveToken: () => storedToken(ctx, GITHUB_CREDENTIAL_REF),
+    resolveGitLabToken: () => storedToken(ctx, GITLAB_CREDENTIAL_REF),
   })
 
   logger.info('git: mounted over %s, code host %s', runner.backend, config.forge)
@@ -1268,10 +1272,16 @@ function mountRoutes(
         'repo',
         'create',
         repositoryName,
-        visibility.slice(2),
-        '--remote',
+        visibility,
+        '--remoteName',
         'origin',
-      ], { cwd: root, signal, timeoutMs: config.worktreeTimeoutMs, maxBytes: 256 * 1024 })
+      ], {
+        cwd: root,
+        signal,
+        timeoutMs: config.worktreeTimeoutMs,
+        maxBytes: 256 * 1024,
+        ...(config.gitlabHosts.length === 0 ? {} : { env: { GITLAB_HOST: hostOf(config.gitlabHosts[0]) } }),
+      })
       if (created.code !== 0) throwWriteFailure('publish', created)
       const context = await readContext(runner, { root, config, signal })
       if (context.branch !== null) {
@@ -1675,6 +1685,9 @@ function mountRoutes(
         cleanup: config.worktree.cleanup,
         cleanupLast: value.cleanup ?? null,
         writable: typeof ctx.get<ConfigEditorService>('configEditor')?.edit === 'function',
+        forge: config.forge,
+        gitlabHosts: config.gitlabHosts,
+        cliPath: config.cliPath,
       }
     },
 
@@ -1713,6 +1726,13 @@ function mountRoutes(
           ? { keepChanges: String(requestedCleanup.keepChanges) as 'tracked' | 'any' | 'none' }
           : {}),
       }
+      const nextForge: ForgeSettings = {
+        forge: ['auto', 'github', 'gitlab', 'none'].includes(String(payload.forge))
+          ? payload.forge as ForgeSettings['forge']
+          : config.forge,
+        gitlabHosts: payload.gitlabHosts === undefined ? config.gitlabHosts : readHostList(payload.gitlabHosts),
+        cliPath: typeof payload.cliPath === 'string' ? payload.cliPath.trim() : config.cliPath,
+      }
       await editor.edit(entry, (current) => {
         const row = current !== null && typeof current === 'object' ? current as Record<string, unknown> : {}
         const git = row.git !== null && typeof row.git === 'object' ? row.git as Record<string, unknown> : {}
@@ -1721,6 +1741,9 @@ function mountRoutes(
           ...row,
           git: {
             ...git,
+            forge: nextForge.forge,
+            gitlabHosts: nextForge.gitlabHosts,
+            cliPath: nextForge.cliPath,
             merged: {
               ...(git.merged !== null && typeof git.merged === 'object' ? git.merged : {}),
               enabled: next.enabled === true,
@@ -1742,7 +1765,7 @@ function mountRoutes(
           },
         }
       })
-      return { merged: next, cleanup: nextCleanup }
+      return { merged: next, cleanup: nextCleanup, forge: nextForge }
     },
 
     /** The worktree cleanup rules and what the last pass did. */
@@ -2015,13 +2038,14 @@ async function directoryFromPayload(value: unknown): Promise<string> {
 }
 
 /**
- * Read a GitHub token a user stored in the credential store.
+ * Read a token a user stored in the credential store.
  * @param ctx plugin context.
+ * @param ref credential reference, such as `DSH_GITHUB_TOKEN`.
  */
-async function storedToken(ctx: DshContext): Promise<string | undefined> {
+async function storedToken(ctx: DshContext, ref: string): Promise<string | undefined> {
   const credentials = ctx.get<{ resolve(ref: string): Promise<{ value?: string } | undefined> }>('credentials')
   if (credentials === undefined || typeof credentials.resolve !== 'function') return undefined
-  const hit = await credentials.resolve(GITHUB_CREDENTIAL_REF)
+  const hit = await credentials.resolve(ref)
   return typeof hit?.value === 'string' ? hit.value : undefined
 }
 
@@ -2039,6 +2063,37 @@ function stringList(value: unknown, name: string): string[] {
     throw new CommandError('input/invalid', `The ${name} argument must be a non-empty list`)
   }
   return value.map((item) => String(item)).filter((item) => item.length > 0)
+}
+
+/** Read a host list, accepting an array or one comma/newline-separated string. */
+function readHostList(value: unknown): string[] {
+  const items = typeof value === 'string'
+    ? value.split(/[\s,]+/)
+    : Array.isArray(value)
+      ? value.map((item) => String(item))
+      : []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    const host = item.trim().replace(/\/+$/, '')
+    if (host.length === 0) continue
+    const key = host.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(host)
+  }
+  return result
+}
+
+/** The hostname of a configured GitLab host or base URL. */
+function hostOf(value: string): string {
+  const raw = String(value ?? '').trim()
+  if (raw.length === 0) return ''
+  try {
+    return new URL(raw.includes('://') ? raw : `https://${raw}`).host
+  } catch {
+    return raw
+  }
 }
 
 /** Require one positive integer argument. */

@@ -29,6 +29,8 @@ export interface ChangesViewProps {
   onCommit(request: CommitRequest): void
   onToast(title: string, description: string, tone: 'error' | 'success'): void
   onRefresh(): void
+  /** Report the active diff scope so the header summary can match it. */
+  onScope?(scope: 'working' | 'branch'): void
 }
 
 /** The stored view preferences. */
@@ -85,6 +87,10 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
   useEffect(() => {
     writePreferences({ layout, wrap, hideWhitespace, scope })
   }, [layout, wrap, hideWhitespace, scope])
+
+  useEffect(() => {
+    props.onScope?.(scope)
+  }, [scope, props.onScope])
 
   const signature = files.map((file) => file.path).join('\n')
 
@@ -255,17 +261,21 @@ function EmptyChanges(props: { t: Translate }): ReturnType<typeof h> {
     h('span', { className: 'ph-empty-hint' }, props.t('gitCleanHint')))
 }
 
-/** A compact summary of the working tree, for the header. */
+/** A compact summary of the active change scope, for the header. */
 export function ChangesSummary(props: {
   t: Translate
   stats: GitOverview['stats']
   branchChanges: GitOverview['branchChanges']
+  scope: 'working' | 'branch'
   onClick?(): void
 }): ReturnType<typeof h> {
-  const totals = props.branchChanges !== null && (props.branchChanges.insertions > 0 || props.branchChanges.deletions > 0)
-    ? props.branchChanges
-    : { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions }
-  const base = totals.baseRef === null ? props.t('gitUncommitted') : props.t('gitScopeLabel', { base: totals.baseRef })
+  const branch = props.scope === 'branch' ? props.branchChanges : null
+  const totals = branch ?? { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions }
+  const base = props.scope === 'branch'
+    ? branch !== null && branch.baseRef !== null
+      ? props.t('gitScopeLabel', { base: branch.baseRef })
+      : props.t('gitScopeBranch')
+    : props.t('gitUncommitted')
   return h('button', {
     type: 'button',
     className: 'ph-button',

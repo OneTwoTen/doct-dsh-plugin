@@ -148,8 +148,11 @@ diff xếp chồng, và đổi nhánh ngay trong bảng.
 feature rồi chạy tiếp cùng thao tác. Kho chưa có remote thì nút chính là **Publish repository**.
 
 Git chạy qua `subprocess` của DSH; PR/issue đọc qua **GitHub CLI** (`gh`) — hoặc `glab` cho GitLab —
-nên dùng đúng phiên đăng nhập sẵn có. Không có CLI thì GitHub vẫn đọc được bằng REST công khai
-(không có chi tiết checks). Cấu hình chi tiết ở [`plugin/README.md`](plugin/README.md#6-bảng-git-thanh-bên-phải).
+nên dùng đúng phiên đăng nhập sẵn có. GitLab.com được nhận diện tự động; GitLab tự host chỉ cần thêm
+hostname vào `git.gitlabHosts` (hoặc chọn GitLab trong thẻ cấu hình plugin). Không có `glab` thì GitLab
+vẫn đọc được bằng REST khi có token `GITLAB_TOKEN`/`DSH_GITLAB_TOKEN`. GitHub không có CLI thì vẫn đọc
+được bằng REST công khai (không có chi tiết checks). Cấu hình chi tiết ở
+[`plugin/README.md`](plugin/README.md#6-bảng-git-thanh-bên-phải).
 
 ## Phát triển
 
@@ -201,7 +204,9 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
   Phiên đang chạy phải `/cancel` hoặc đợi xong trước khi lưu trữ.
 - Bảng Git giờ **đọc và ghi**: commit (chọn tệp), push, pull, đổi/tạo nhánh, tạo PR, publish; diff
   dừng sau 4000 dòng mỗi tệp. Chưa có amend, rebase tương tác hay stage từng hunk.
-  PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được nhưng không có chi tiết checks.
+  PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được (không có chi tiết checks), còn
+  GitLab cần `glab` hoặc token `GITLAB_TOKEN`/`DSH_GITLAB_TOKEN` để dùng REST. GitLab tự host phải khai
+  báo host trong `git.gitlabHosts`.
 - Web Remote mới có bridge Host và giao thức: chưa có relay, web client, màn hình nhập mã trong DSH UI;
   chỉ nhận prompt văn bản và chưa có E2E (relay thấy plaintext — cần TLS và relay tự quản).
 

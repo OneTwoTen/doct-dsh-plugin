@@ -11,10 +11,17 @@ import { CommandError } from './git-run.ts'
 import { resolveDefaultBase } from './worktree.ts'
 import {
   describeChecks,
+  describeGitLabPipeline,
+  gitlabDiffStats,
+  gitlabState,
   normalizeComment,
+  normalizeGitLabIssue,
+  normalizeGitLabPull,
+  normalizeGitLabReview,
   normalizeIssue,
   normalizePull,
   normalizeReviewEntry,
+  summarizeCheckDescriptions,
   summarizeChecks,
 } from './forge-core.ts'
 import type {
@@ -41,6 +48,8 @@ export interface ForgeRunOptions {
   cwd?: string
   signal?: AbortSignal
   maxBytes?: number
+  env?: Record<string, string>
+  stdin?: string
 }
 
 /** The command runner this module drives. */
@@ -294,11 +303,12 @@ export interface CreateForgeOptions {
   config: GitConfig
   logger: Logger
   resolveToken?: () => Promise<unknown>
+  resolveGitLabToken?: () => Promise<unknown>
   env?: Record<string, string | undefined>
 }
 
 /** GraphQL-flavoured JSON from `gh` is parsed here; REST answers are mapped into the same shape. */
-export function createForge({ runner, config, logger, resolveToken, env = process.env }: CreateForgeOptions): Forge {
+export function createForge({ runner, config, logger, resolveToken, resolveGitLabToken, env = process.env }: CreateForgeOptions): Forge {
   const cache = new Map<string, { at: number; value: unknown }>()
   const inflight = new Map<string, Promise<unknown>>()
   const probes = new Map<string, { at: number; value: ProbeResult }>()
@@ -306,6 +316,7 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   const ttl = Math.max(0, Number(config.cacheMs) || 0)
   const providerChoice = String(config.forge ?? 'auto')
   let tokenCache: { at: number; value: string } | undefined
+  let gitlabTokenCache: { at: number; value: string } | undefined
 
   /**
    * Run one provider CLI command.
@@ -316,19 +327,73 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   async function exec(
     program: string,
     args: string[],
-    options: { cwd: string; signal?: AbortSignal; maxBytes?: number },
+    options: { cwd: string; signal?: AbortSignal; maxBytes?: number; env?: Record<string, string>; stdin?: string },
   ): Promise<ForgeRunResult> {
     return await runner.run(program, args, {
       cwd: options.cwd,
       signal: options.signal,
       maxBytes: options.maxBytes ?? 4 * 1024 * 1024,
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
     })
   }
 
+  /** Normalize a configured or remote host to the form the APIs compare. */
+  function normalizedHost(value: unknown): string {
+    const raw = String(value ?? '').trim()
+    if (raw.length === 0) return ''
+    const withScheme = raw.includes('://') ? raw : `https://${raw}`
+    try {
+      return new URL(withScheme).host.toLowerCase()
+    } catch {
+      return raw.toLowerCase().replace(/\/+$/, '')
+    }
+  }
+
+  /** Whether a host was named explicitly as a self-hosted GitLab instance. */
+  function isConfiguredGitLabHost(host: string): boolean {
+    if (host.length === 0) return false
+    return config.gitlabHosts.some((item) => normalizedHost(item) === host)
+  }
+
   /**
-   * The CLI this provider should use, or nothing when the provider has none.
-   * @param provider github, gitlab, or other.
+   * The code host this remote points at.
+   *
+   * An explicit `forge` setting wins; otherwise GitHub and GitLab public hosts
+   * are recognized by name, and a configured `gitlabHosts` entry marks a
+   * self-hosted GitLab instance.
    */
+  function providerFor(remote: ForgeRemote | null | undefined): string {
+    if (providerChoice === 'github' || providerChoice === 'gitlab' || providerChoice === 'none') return providerChoice
+    const host = normalizedHost(remote?.host)
+    const hostname = host.replace(/:\d+$/, '')
+    if (hostname === 'github.com' || hostname.endsWith('.github.com')) return 'github'
+    if (hostname === 'gitlab.com' || hostname.endsWith('.gitlab.com')) return 'gitlab'
+    if (hostname.includes('gitlab')) return 'gitlab'
+    if (isConfiguredGitLabHost(host)) return 'gitlab'
+    return 'other'
+  }
+
+  /** The API base URL for one GitLab host, honoring a configured base URL. */
+  function gitlabApiBase(host: string): string {
+    const key = normalizedHost(host)
+    for (const item of config.gitlabHosts) {
+      const raw = String(item ?? '').trim()
+      if (raw.length === 0) continue
+      const withScheme = raw.includes('://') ? raw : `https://${raw}`
+      try {
+        const url = new URL(withScheme)
+        if (url.host.toLowerCase() !== key) continue
+        const prefix = url.pathname.replace(/\/+$/, '')
+        return `${url.origin}${prefix}/api/v4`
+      } catch {
+        // A malformed entry is ignored; the default below still points at the host.
+      }
+    }
+    return `https://${key}/api/v4`
+  }
+
+  /** The CLI this provider should use, or nothing when the provider has none. */
   function cliFor(provider: string): string | undefined {
     const configured = String(config.cliPath ?? '').trim()
     if (configured.length > 0) return configured
@@ -341,10 +406,12 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
    * Probe one CLI once every few seconds: is it installed, and is it signed in?
    * @param program CLI to probe.
    * @param cwd repository root.
+   * @param provider github or gitlab, so a self-hosted GitLab gets `--hostname`.
+   * @param host remote host, for GitLab.
    * @param signal cancellation.
    */
-  async function probe(program: string, cwd: string, signal?: AbortSignal): Promise<ProbeResult> {
-    const key = program
+  async function probe(program: string, cwd: string, provider: string, host: string | null | undefined, signal?: AbortSignal): Promise<ProbeResult> {
+    const key = `${program}|${provider === 'gitlab' ? normalizedHost(host) : ''}`
     const cached = probes.get(key)
     if (cached !== undefined && Date.now() - cached.at < 30000) return cached.value
 
@@ -359,19 +426,23 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
       if (version.code !== 0) {
         return { installed: false, signedIn: false, login: null, reason: 'CLI không chạy được' }
       }
+      const hostName = normalizedHost(host)
+      const authArgs = provider === 'gitlab' && hostName.length > 0
+        ? ['auth', 'status', '--hostname', hostName]
+        : ['auth', 'status']
       let status: ForgeRunResult
       try {
-        status = await exec(program, ['auth', 'status'], { cwd, signal, maxBytes: 16384 })
+        status = await exec(program, authArgs, { cwd, signal, maxBytes: 16384 })
       } catch (error) {
         if (signal?.aborted === true) throw error
         return { installed: true, signedIn: false, login: null, reason: messageOf(error) }
       }
       const text = `${status.stdout}\n${status.stderr}`
-      const login = /account\s+(\S+)|as\s+(\S+)/i.exec(text)
+      const login = /account\s+(\S+)|as\s+([^\s(]+)|Logged in to .*?\bas\s+(\S+)/i.exec(text)
       return {
         installed: true,
         signedIn: status.code === 0,
-        login: login?.[1] ?? login?.[2] ?? null,
+        login: login?.[1] ?? login?.[2] ?? login?.[3] ?? null,
         reason: status.code === 0 ? null : text.trim().split('\n').slice(-1)[0] ?? 'Chưa đăng nhập',
       }
     })()
@@ -407,64 +478,106 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   }
 
   /**
+   * The GitLab token used by the REST fallback, if any.
+   *
+   * `glab` carries its own sign-in, so this is only needed when the CLI is not
+   * installed or its host is not configured.
+   */
+  async function gitlabToken(): Promise<string> {
+    if (gitlabTokenCache !== undefined && Date.now() - gitlabTokenCache.at < 60000) return gitlabTokenCache.value
+    const names = [String(config.gitlabTokenEnv ?? '').trim(), 'GITLAB_TOKEN', 'GLAB_TOKEN'].filter((name) => name.length > 0)
+    let value = ''
+    for (const name of names) {
+      const candidate = env[name]
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        value = candidate.trim()
+        break
+      }
+    }
+    if (value.length === 0 && typeof resolveGitLabToken === 'function') {
+      try {
+        const stored = await resolveGitLabToken()
+        if (typeof stored === 'string') value = stored.trim()
+      } catch {
+        // A missing credential store is not a failure of the panel.
+      }
+    }
+    gitlabTokenCache = { at: Date.now(), value }
+    return value
+  }
+
+  /**
    * Describe what this repository's code host can offer the panel.
    */
   async function describe({ root, remote, signal }: ForgeDescribeOptions): Promise<ForgeDescription> {
-    const provider = remote?.provider ?? 'other'
     if (providerChoice === 'none') {
       return { provider: 'none', available: false, backend: null, reason: 'Đã tắt trong cấu hình' }
     }
     if (remote === null || remote === undefined) {
       return { provider: 'none', available: false, backend: null, reason: 'Kho mã không có remote' }
     }
+    const provider = providerFor(remote)
+    const host = normalizedHost(remote.host)
     if (provider !== 'github' && provider !== 'gitlab') {
-      return { provider, available: false, backend: null, reason: `Chưa hỗ trợ máy chủ ${remote.host ?? ''}`.trim() }
-    }
-    if (providerChoice !== 'auto' && providerChoice !== provider) {
-      return { provider: providerChoice, available: false, backend: null, reason: `Cấu hình chỉ dùng ${providerChoice}` }
-    }
-
-    const program = cliFor(provider)
-    if (program !== undefined) {
-      const probeResult = await probe(program, root, signal)
-      if (probeResult.installed && probeResult.signedIn) {
-        return {
-          provider,
-          available: true,
-          backend: 'cli',
-          cli: program,
-          login: probeResult.login,
-          slug: remote.slug ?? null,
-          host: remote.host ?? null,
-        }
-      }
-      if (provider === 'github') {
-        const restToken = await token()
-        return {
-          provider,
-          available: true,
-          backend: 'rest',
-          cli: program,
-          login: null,
-          authenticated: restToken.length > 0,
-          slug: remote.slug ?? null,
-          host: remote.host ?? null,
-          note: probeResult.installed
-            ? `${program} chưa đăng nhập (${probeResult.reason ?? 'gh auth login'})`
-            : `${program} không có trên máy`,
-        }
-      }
       return {
         provider,
         available: false,
         backend: null,
-        reason: probeResult.installed
-          ? `${program} chưa đăng nhập`
-          : `${program} không có trên máy`,
+        reason: host.length > 0
+          ? `Chưa nhận ra máy chủ ${remote.host ?? host}. Thêm host vào git.gitlabHosts nếu đó là GitLab tự host.`
+          : 'Remote này chưa trỏ tới GitHub hoặc GitLab',
+        host: remote.host ?? null,
+        slug: remote.slug ?? null,
       }
     }
 
-    return { provider, available: false, backend: null, reason: `Chưa hỗ trợ ${provider}` }
+    const program = cliFor(provider) ?? (provider === 'gitlab' ? 'glab' : 'gh')
+    const probeResult = await probe(program, root, provider, remote.host, signal)
+    if (probeResult.installed && probeResult.signedIn) {
+      return {
+        provider,
+        available: true,
+        backend: 'cli',
+        cli: program,
+        login: probeResult.login,
+        slug: remote.slug ?? null,
+        host: remote.host ?? null,
+        terminology: provider === 'gitlab'
+          ? { short: 'MR', singular: 'merge request', plural: 'merge requests' }
+          : { short: 'PR', singular: 'pull request', plural: 'pull requests' },
+      }
+    }
+
+    const fallback = provider === 'github' ? await token() : await gitlabToken()
+    if (fallback.length === 0 && provider === 'gitlab') {
+      return {
+        provider,
+        available: false,
+        backend: null,
+        cli: program,
+        reason: probeResult.installed
+          ? `${program} chưa đăng nhập cho ${remote.host ?? 'GitLab'} (${probeResult.reason ?? `${program} auth login --hostname ${remote.host ?? ''}`})`
+          : `${program} không có trên máy và chưa có GITLAB_TOKEN`,
+        host: remote.host ?? null,
+        slug: remote.slug ?? null,
+      }
+    }
+    return {
+      provider,
+      available: true,
+      backend: 'rest',
+      cli: program,
+      login: null,
+      authenticated: fallback.length > 0,
+      slug: remote.slug ?? null,
+      host: remote.host ?? null,
+      note: probeResult.installed
+        ? `${program} chưa đăng nhập (${probeResult.reason ?? `${program} auth login`})`
+        : `${program} không có trên máy; dùng ${provider === 'github' ? 'GITHUB_TOKEN' : 'GITLAB_TOKEN'}`,
+      terminology: provider === 'gitlab'
+        ? { short: 'MR', singular: 'merge request', plural: 'merge requests' }
+        : { short: 'PR', singular: 'pull request', plural: 'pull requests' },
+    }
   }
 
   /**
@@ -532,6 +645,141 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   }
 
   /**
+   * Turn one `glab` failure into a code the panel can act on.
+   * @param stderr CLI diagnostics.
+   * @param program CLI name.
+   */
+  function glabFailure(stderr: string | null | undefined, program: string): CommandError {
+    const text = String(stderr ?? '').trim()
+    if (/not logged in|authentication|authenticate|HTTP 401|invalid token/i.test(text)) {
+      return new CommandError('forge/not-signed-in', `Chưa đăng nhập ${program}. Chạy: ${program} auth login`, { detail: text })
+    }
+    if (/404|not found|Project Not Found/i.test(text)) {
+      return new CommandError('forge/unknown-repository', 'Không thấy kho mã trên GitLab', { detail: text })
+    }
+    if (/no git remotes|not a git repository/i.test(text)) {
+      return new CommandError('forge/no-remote', 'Kho mã chưa có remote', { detail: text })
+    }
+    if (/rate limit|429/i.test(text)) {
+      return new CommandError('forge/rate-limited', 'GitLab tạm giới hạn lượt gọi, thử lại sau ít phút', { detail: text })
+    }
+    return new CommandError('forge/failed', text.length > 0 ? text.split('\n')[0] : `${program} thất bại`, { detail: text })
+  }
+
+  /** The URL-encoded project path GitLab's API expects. */
+  function gitlabProject(remote: ForgeRemote): string {
+    const slug = String(remote.slug ?? '').trim()
+    if (slug.length === 0) throw new CommandError('forge/no-remote', 'Remote này không có đường dẫn kho mã GitLab')
+    return encodeURIComponent(slug)
+  }
+
+  /** Encode one GitLab query string value. */
+  function queryValue(value: string): string {
+    return encodeURIComponent(value)
+  }
+
+  /** The GitLab API base URL for a remote. */
+  function gitlabRestBase(remote: ForgeRemote): string {
+    return gitlabApiBase(String(remote.host ?? ''))
+  }
+
+  /**
+   * Read one GitLab API resource, through `glab api` or the REST fallback.
+   * @param info code-host availability.
+   * @param remote the remote being queried.
+   * @param endpoint API path below `/api/v4`.
+   * @param options request method, body, cancellation.
+   */
+  async function gitlabRequest(
+    info: ForgeAvailable,
+    remote: ForgeRemote,
+    endpoint: string,
+    options: { method?: 'GET' | 'POST'; body?: Record<string, string>; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const method = options.method ?? 'GET'
+    if (info.backend === 'cli') {
+      const host = normalizedHost(remote.host)
+      const args = ['api', ...(host.length > 0 ? ['--hostname', host] : []), '--output', 'json']
+      if (method !== 'GET') args.push('--method', method)
+      if (options.body !== undefined) {
+        args.push('--input', '-')
+      }
+      args.push(endpoint)
+      const result = await exec(info.cli, args, {
+        cwd: process.cwd(),
+        signal: options.signal,
+        stdin: options.body === undefined ? undefined : JSON.stringify(options.body),
+      })
+      if (result.code !== 0) throw glabFailure(result.stderr, info.cli)
+      return parseJson(result.stdout, info.cli)
+    }
+
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'user-agent': 'dsh-personal-hub',
+    }
+    const value = await gitlabToken()
+    if (value.length > 0) headers['private-token'] = value
+    let response: Response
+    try {
+      response = await fetch(`${gitlabRestBase(remote)}/${endpoint}`, {
+        method,
+        headers,
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (error) {
+      throw new CommandError('forge/offline', `Không gọi được GitLab: ${messageOf(error)}`)
+    }
+    if (response.status === 401) throw new CommandError('forge/not-signed-in', 'GitLab token không hợp lệ hoặc đã hết hạn')
+    if (response.status === 403) {
+      throw new CommandError('forge/not-signed-in', 'GitLab từ chối token này (thiếu quyền api)')
+    }
+    if (response.status === 404) {
+      throw new CommandError('forge/unknown-repository', 'Không thấy kho mã trên GitLab')
+    }
+    if (response.status === 429) {
+      throw new CommandError('forge/rate-limited', 'GitLab tạm giới hạn lượt gọi, thử lại sau ít phút')
+    }
+    if (!response.ok) throw new CommandError('forge/failed', `GitLab trả về HTTP ${response.status}`)
+    if (response.status === 204) return undefined
+    try {
+      return await response.json()
+    } catch {
+      throw new CommandError('forge/failed', 'GitLab trả về dữ liệu không đọc được')
+    }
+  }
+
+  /** Read one GitLab list endpoint without letting a section failure break the page. */
+  async function gitlabOptional(
+    info: ForgeAvailable,
+    remote: ForgeRemote,
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    try {
+      return await gitlabRequest(info, remote, endpoint, { signal })
+    } catch (error) {
+      if (error instanceof CommandError && error.code === 'forge/not-signed-in') throw error
+      logger.warn('git: GitLab sub-resource %s failed: %s', endpoint, messageOf(error))
+      return undefined
+    }
+  }
+
+  /** Read and parse one `glab` JSON answer. */
+  function parseJson(text: string, program: string): unknown {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) return []
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      return parsed
+    } catch {
+      throw new CommandError('forge/failed', `${program} trả về dữ liệu không đọc được`)
+    }
+  }
+
+  /**
    * Read a GitHub REST resource.
    * @param path API path beginning with `/`.
    * @param options request options.
@@ -569,8 +817,16 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   async function listPulls({ root, remote, state = 'open', limit = 20, signal, refresh = false }: ListPullsOptions): Promise<ForgeAnswer<{ pulls: NormalizedPull[]; checksUnavailable?: boolean }>> {
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return { ...info, pulls: [] }
-    const key = `pulls|${remote.slug}|${state}|${limit}`
+    const key = `pulls|${info.provider}|${remote.slug}|${state}|${limit}`
     return await remember(key, refresh, async () => {
+      if (info.provider === 'gitlab') {
+        const queryState = state === 'draft' ? 'opened' : state === 'open' ? 'opened' : state
+        const endpoint = `projects/${gitlabProject(remote)}/merge_requests?state=${queryValue(queryState)}&per_page=${limit}&order_by=updated_at&sort=desc`
+        const raw = await gitlabRequest(info, remote, endpoint, { signal })
+        let pulls = asArray(raw).map(normalizeGitLabPull)
+        if (state === 'draft') pulls = pulls.filter((pull) => pull.state === 'draft' || pull.isDraft)
+        return { ...info, pulls }
+      }
       if (info.backend === 'cli') {
         const raw = await ghJson(info.cli, [
           'pr',
@@ -595,13 +851,66 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   }
 
   /**
+   * Fetch the jobs of one merge-request pipeline, when the pipeline has an id.
+   * @param info code-host availability.
+   * @param remote the repository.
+   * @param pipeline `head_pipeline` node.
+   * @param signal cancellation.
+   */
+  async function gitlabPipelineJobs(
+    info: ForgeAvailable,
+    remote: ForgeRemote,
+    pipeline: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const id = Number(asRecord(pipeline).id)
+    if (!Number.isFinite(id) || id <= 0) return []
+    const project = gitlabProject(remote)
+    return await gitlabOptional(info, remote, `projects/${project}/pipelines/${id}/jobs?per_page=100`, signal)
+  }
+
+  /**
    * Read one change request with its checks, reviews, and comments.
    */
   async function pullDetail({ root, remote, number, signal, refresh = false }: PullNumberOptions): Promise<PullDetailAnswer> {
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return { ...info }
-    const key = `pull|${remote.slug}|${number}`
+    const key = `pull|${info.provider}|${remote.slug}|${number}`
     return await remember(key, refresh, async () => {
+      if (info.provider === 'gitlab') {
+        const project = gitlabProject(remote)
+        const endpoint = `projects/${project}/merge_requests/${number}`
+        const node = asRecord(await gitlabRequest(info, remote, endpoint, { signal }))
+        const [notes, changes, approvals] = await Promise.all([
+          gitlabOptional(info, remote, `${endpoint}/notes?per_page=50&sort=asc`, signal),
+          gitlabOptional(info, remote, `${endpoint}/changes`, signal),
+          gitlabOptional(info, remote, `${endpoint}/approvals`, signal),
+        ])
+        const pull = normalizeGitLabPull(node)
+        const files = asArray(asRecord(changes).changes).map(gitlabDiffStats)
+        if (files.length > 0) {
+          pull.changedFiles = files.length
+          pull.additions = files.reduce((sum, file) => sum + file.additions, 0)
+          pull.deletions = files.reduce((sum, file) => sum + file.deletions, 0)
+        }
+        const pipeline = node.head_pipeline ?? node.pipeline
+        const jobs = await gitlabPipelineJobs(info, remote, pipeline, signal)
+        const checks = describeGitLabPipeline(pipeline, jobs)
+        pull.checks = summarizeCheckDescriptions(checks)
+        const approval = asRecord(approvals)
+        const reviews = asArray(approval.approved_by).map(normalizeGitLabReview)
+        if (reviews.length > 0) pull.review = 'approved'
+        else if (Number(approval.approvals_required) > 0 && Number(approval.approvals_left) > 0) pull.review = 'review_required'
+        return {
+          ...info,
+          pull,
+          body: String(node.description ?? ''),
+          checks,
+          reviews,
+          comments: asArray(notes).filter((note) => asRecord(note).system !== true).map(normalizeComment),
+          files,
+        }
+      }
       if (info.backend === 'cli') {
         const raw = await ghJson(info.cli, [
           'pr',
@@ -656,8 +965,18 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
     if (typeof branch !== 'string' || branch.length === 0) return { pull: null }
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return { ...info, pull: null }
-    const key = `branch|${remote.slug}|${branch}`
+    const key = `branch|${info.provider}|${remote.slug}|${branch}`
     return await remember(key, refresh, async () => {
+      if (info.provider === 'gitlab') {
+        const project = gitlabProject(remote)
+        const endpoint = `projects/${project}/merge_requests?state=all&source_branch=${queryValue(branch)}&per_page=5&order_by=updated_at&sort=desc`
+        const raw = await gitlabRequest(info, remote, endpoint, { signal })
+        const pulls = asArray(raw).map(normalizeGitLabPull)
+        const preferred = pulls.find((pull) => pull.state === 'open')
+          ?? pulls.find((pull) => pull.state === 'draft')
+          ?? pulls[0]
+        return { ...info, pull: preferred ?? null }
+      }
       if (info.backend === 'cli') {
         const raw = await ghJson(info.cli, [
           'pr',
@@ -690,8 +1009,19 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   async function listIssues({ root, remote, state = 'open', limit = 20, signal, refresh = false }: ListIssuesOptions): Promise<ForgeAnswer<{ issues: NormalizedIssue[] }>> {
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return { ...info, issues: [] }
-    const key = `issues|${remote.slug}|${state}|${limit}`
+    const key = `issues|${info.provider}|${remote.slug}|${state}|${limit}`
     return await remember(key, refresh, async () => {
+      if (info.provider === 'gitlab') {
+        const queryState = state === 'open' ? 'opened' : state
+        const project = gitlabProject(remote)
+        const raw = await gitlabRequest(
+          info,
+          remote,
+          `projects/${project}/issues?state=${queryValue(queryState)}&per_page=${limit}&order_by=updated_at&sort=desc`,
+          { signal },
+        )
+        return { ...info, issues: asArray(raw).map(normalizeGitLabIssue) }
+      }
       if (info.backend === 'cli') {
         const raw = await ghJson(info.cli, [
           'issue',
@@ -718,8 +1048,20 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   async function issueDetail({ root, remote, number, signal, refresh = false }: IssueNumberOptions): Promise<IssueDetailAnswer> {
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return { ...info }
-    const key = `issue|${remote.slug}|${number}`
+    const key = `issue|${info.provider}|${remote.slug}|${number}`
     return await remember(key, refresh, async () => {
+      if (info.provider === 'gitlab') {
+        const project = gitlabProject(remote)
+        const endpoint = `projects/${project}/issues/${number}`
+        const node = asRecord(await gitlabRequest(info, remote, endpoint, { signal }))
+        const notes = await gitlabOptional(info, remote, `${endpoint}/notes?per_page=50&sort=asc`, signal)
+        return {
+          ...info,
+          issue: normalizeGitLabIssue(node),
+          body: String(node.description ?? ''),
+          comments: asArray(notes).filter((note) => asRecord(note).system !== true).map(normalizeComment),
+        }
+      }
       if (info.backend === 'cli') {
         const raw = await ghJson(info.cli, [
           'issue',
@@ -803,28 +1145,37 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
     if (info.available !== true) {
       throw new CommandError('pr/forge-unavailable', info.reason ?? 'Máy chủ mã nguồn chưa dùng được')
     }
+    if (info.provider === 'gitlab') {
+      const project = gitlabProject(remote)
+      const node = asRecord(await gitlabRequest(info, remote, `projects/${project}/merge_requests`, {
+        method: 'POST',
+        body: {
+          source_branch: head,
+          target_branch: base,
+          title,
+          description: body,
+        },
+        signal,
+      }))
+      return {
+        number: Number(node.iid) || numberFromUrl(String(node.web_url ?? '')),
+        url: String(node.web_url ?? ''),
+        provider: 'gitlab',
+        backend: info.backend,
+        head,
+        base,
+      }
+    }
     if (info.backend === 'cli') {
       const program = info.cli
-      const args = info.provider === 'gitlab'
-        ? [
-            'mr', 'create',
-            '--repo', String(remote.slug),
-            '--source-branch', head,
-            '--target-branch', base,
-            '--title', title,
-            '--description', body,
-            '--yes',
-            '--no-editor',
-          ]
-        : [
-            'pr', 'create',
-            '--repo', String(remote.slug),
-            '--head', head,
-            '--base', base,
-            '--title', title,
-            '--body', body,
-          ]
-      const result = await exec(program, args, { cwd: root, signal })
+      const result = await exec(program, [
+        'pr', 'create',
+        '--repo', String(remote.slug),
+        '--head', head,
+        '--base', base,
+        '--title', title,
+        '--body', body,
+      ], { cwd: root, signal })
       if (result.code !== 0) throw ghFailure(result.stderr, program)
       const url = firstUrl(result.stdout) ?? firstUrl(result.stderr) ?? ''
       return {
@@ -853,20 +1204,17 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
   async function pullState({ root, remote, number, signal }: PullStateOptions): Promise<PulledState | null> {
     const info = await describe({ root, remote, signal })
     if (info.available !== true) return null
-    if (info.backend === 'cli') {
-      if (info.provider === 'gitlab') {
-        const raw = await ghJson(info.cli, [
-          'api',
-          `projects/${encodeURIComponent(String(remote.slug))}/merge_requests/${number}`,
-        ], { cwd: root, signal })
-        const node = asRecord(raw)
-        return {
-          number,
-          state: gitlabState(node.state),
-          url: String(node.web_url ?? ''),
-          mergedAt: typeof node.merged_at === 'string' ? node.merged_at : null,
-        }
+    if (info.provider === 'gitlab') {
+      const project = gitlabProject(remote)
+      const node = asRecord(await gitlabRequest(info, remote, `projects/${project}/merge_requests/${number}`, { signal }))
+      return {
+        number: Number(node.iid) || number,
+        state: gitlabState(node.state),
+        url: String(node.web_url ?? ''),
+        mergedAt: typeof node.merged_at === 'string' ? node.merged_at : null,
       }
+    }
+    if (info.backend === 'cli') {
       const raw = await ghJson(info.cli, [
         'pr',
         'view',
@@ -900,20 +1248,6 @@ export function createForge({ runner, config, logger, resolveToken, env = proces
 
 /** Fields `pullState` asks `gh` for. */
 const STATE_FIELDS = ['number', 'url', 'state', 'isDraft', 'mergedAt', 'headRefName', 'baseRefName', 'mergeable'].join(',')
-
-/**
- * Map a GitLab merge-request state onto the panel's vocabulary.
- * @param value GitLab `state` field.
- * @returns open, draft, merged, or closed.
- */
-function gitlabState(value: unknown): string {
-  switch (String(value ?? '')) {
-    case 'merged': return 'merged'
-    case 'closed': return 'closed'
-    case 'locked': return 'open'
-    default: return 'open'
-  }
-}
 
 /** First HTTP(S) URL in command output. */
 function firstUrl(text: string | null | undefined): string | null {

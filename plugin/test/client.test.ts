@@ -336,7 +336,7 @@ test('a diff file section renders its header, counts, and hunk lines', async () 
     onSelect: () => {},
     onCopied: () => {},
   })
-  assert.match(textOf(collapsed), /src\/deep\//)
+  assert.match(textOf(collapsed), /src\/deep/)
   assert.match(textOf(collapsed), /app\.ts/)
   assert.match(textOf(collapsed), /\+2/)
   assert.match(textOf(collapsed), /−1/)
@@ -434,12 +434,17 @@ test('the settings form draws every switch it can save', async () => {
       cleanup: { enabled: false, inactiveDays: 7, whenNoCommits: true, noCommitsAfterHours: 6, keepChanges: 'tracked', deleteBranch: false },
       cleanupLast: null,
       writable: true,
+      forge: 'auto',
+      gitlabHosts: ['gitlab.example.com'],
+      cliPath: '',
     },
+    hostsText: 'gitlab.example.com',
     status: 'ready',
     error: '',
     notice: '',
     runningCleanup: false,
     onChange: () => {},
+    onHostsText: () => {},
     onSave: () => {},
     onRunCleanup: () => {},
   })
@@ -447,6 +452,9 @@ test('the settings form draws every switch it can save', async () => {
   assert.ok(boxes.length >= 4)
   assert.match(textOf(form), /gitSettingsMerged/)
   assert.match(textOf(form), /cleanupTitle/)
+  assert.match(textOf(form), /gitCodeHost/)
+  const hostField = findAll(form, (element) => element.type === 'input' && element.props?.value === 'gitlab.example.com')[0]
+  assert.ok(hostField, 'the GitLab host field carries the saved hosts')
 })
 
 test('the worktree manager row shows the checkout, its state, and its actions', async () => {

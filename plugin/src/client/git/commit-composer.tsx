@@ -84,14 +84,18 @@ export function CommitComposer(props: CommitComposerProps): ReturnType<typeof h>
       h('span', { className: 'ph-spacer' }),
       h('span', { className: 'ph-dim ph-tiny' },
         allSelected ? t('gitFilesMany', { count: files.length }) : t('gitCommitSelected', { selected: selectedPaths.length, total: files.length })),
-      h('button', {
-        type: 'button',
-        className: 'ph-icon-button',
+      h('label', {
+        className: 'ph-check-inline',
         title: allSelected ? t('gitClearSelection') : t('gitSelectAll'),
-        'aria-label': allSelected ? t('gitClearSelection') : t('gitSelectAll'),
-        disabled: files.length === 0,
-        onClick: () => props.onSelectAll(!allSelected),
-      }, h(Icon, { name: allSelected ? 'check' : 'plus', size: 12 })),
+      },
+        h('input', {
+          type: 'checkbox',
+          checked: allSelected,
+          disabled: files.length === 0,
+          'aria-label': allSelected ? t('gitClearSelection') : t('gitSelectAll'),
+          onChange: () => props.onSelectAll(!allSelected),
+        }),
+        h('span', null, allSelected ? t('gitClearSelection') : t('gitSelectAll'))),
       h('button', {
         type: 'button',
         className: 'ph-icon-button',

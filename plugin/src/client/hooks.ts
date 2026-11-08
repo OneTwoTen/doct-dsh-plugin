@@ -118,11 +118,18 @@ export function relativeTime(value: string | number | null | undefined): string 
   return formatter.format(seconds, 'second')
 }
 
-/** Split a repository path into the dimmed directory and the file name. */
+/**
+ * Split a repository path into the dimmed directory and the file name.
+ *
+ * The directory deliberately has no trailing slash: the two halves are rendered
+ * as separate spans with an explicit separator. Keeping the slash inside the
+ * bidi-truncated directory span made it jump to the start of the path, which
+ * turned `plugin/src/client/api.ts` into `/plugin/src/clientapi.ts`.
+ */
 export function splitPath(path: string): { dir: string; name: string } {
   const text = String(path ?? '')
   const index = text.lastIndexOf('/')
-  return index < 0 ? { dir: '', name: text } : { dir: text.slice(0, index + 1), name: text.slice(index + 1) }
+  return index < 0 ? { dir: '', name: text } : { dir: text.slice(0, index), name: text.slice(index + 1) }
 }
 
 /**

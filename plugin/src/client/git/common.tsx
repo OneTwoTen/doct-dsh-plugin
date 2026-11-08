@@ -59,7 +59,12 @@ export function DetailBar(props: {
       onClick: props.onBack,
     }, h(Icon, { name: 'back', size: 15 })),
     h('span', { className: 'ph-file-path', title: props.name },
-      props.dir !== undefined && props.dir.length > 0 ? h('span', { className: 'ph-file-dir' }, props.dir) : null,
+      props.dir !== undefined && props.dir.length > 0
+        ? [
+            h('span', { className: 'ph-file-dir', key: 'dir' }, props.dir.replace(/\/+$/, '')),
+            h('span', { className: 'ph-file-sep', key: 'sep' }, '/'),
+          ]
+        : null,
       h('span', { className: 'ph-file-name' }, props.name)),
     h('span', { className: 'ph-spacer' }),
     props.children as never)

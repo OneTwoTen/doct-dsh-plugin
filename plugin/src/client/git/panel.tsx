@@ -74,6 +74,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     : ''
 
   const [view, setView] = useState<ViewId>('changes')
+  const [changesScope, setChangesScope] = useState<'working' | 'branch'>('working')
   const [selection, setSelection] = useState<Selection>(null)
   const [pullFilter, setPullFilter] = useState('open')
   const [issueFilter, setIssueFilter] = useState('open')
@@ -353,6 +354,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     api,
     sessionId,
     cwd,
+    scope: changesScope,
     onToggleMenu: () => setMenuOpen((value) => !value),
     onQuick: runQuick,
     onRun: onMenuRun,
@@ -451,6 +453,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       onCommit,
       onToast: toast,
       onRefresh: reload,
+      onScope: setChangesScope,
     })
   }
 
@@ -543,6 +546,7 @@ interface PanelHeaderProps {
   api: GitApi
   sessionId: string
   cwd: string
+  scope: 'working' | 'branch'
   onToggleMenu(): void
   onQuick(): void
   onRun(action: GitStackedAction): void
@@ -633,6 +637,7 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
       t,
       stats: overview.stats,
       branchChanges: overview.branchChanges,
+      scope: props.scope,
       onClick: props.onOpenChanges,
     }))
 }

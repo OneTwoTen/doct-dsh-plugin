@@ -105,9 +105,16 @@ export interface MergedConfig {
 export interface GitConfig {
   enabled: boolean
   forge: 'auto' | 'github' | 'gitlab' | 'none'
+  /**
+   * Self-hosted GitLab instances. Entries may be hostnames (`gitlab.example.com`)
+   * or base URLs (`https://gitlab.example.com`); matching is by hostname.
+   */
+  gitlabHosts: string[]
   remote: string
   cliPath: string
   tokenEnv: string
+  /** Environment variable holding a GitLab personal access token for the REST fallback. */
+  gitlabTokenEnv: string
   commandTimeoutMs: number
   worktreeTimeoutMs: number
   maxDiffBytes: number
@@ -173,12 +180,16 @@ export const WEB_REMOTE_DEFAULTS = Object.freeze({
 export const GIT_DEFAULTS = Object.freeze({  enabled: true,
   /** `auto` detects the code host from the remote; `none` disables pull requests and issues. */
   forge: 'auto',
+  /** Self-hosted GitLab hosts, beyond gitlab.com. */
+  gitlabHosts: [] as string[],
   /** Remote to prefer; empty means the branch's upstream remote, then `origin`. */
   remote: '',
   /** Code host CLI to run (`gh`, `glab`, or an absolute path); empty picks by provider. */
   cliPath: '',
   /** Environment variable holding a GitHub token for the REST fallback. */
   tokenEnv: 'GITHUB_TOKEN',
+  /** Environment variable holding a GitLab token for the REST fallback. */
+  gitlabTokenEnv: 'GITLAB_TOKEN',
   commandTimeoutMs: 15000,
   /** Longest `git fetch` or worktree command; the default command limit is too short for a network fetch. */
   worktreeTimeoutMs: 180000,
@@ -310,6 +321,29 @@ function asStringList(value: unknown, fallback: readonly string[]): string[] {
   return list.length > 0 ? list : [...fallback]
 }
 
+/**
+ * Read a host list that may be an array or one comma/newline-separated string.
+ * @param value raw configuration value.
+ */
+function asHostList(value: unknown): string[] {
+  const items = typeof value === 'string'
+    ? value.split(/[\s,]+/)
+    : Array.isArray(value)
+      ? value.map((item) => String(item))
+      : []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    const host = item.trim().replace(/\/+$/, '')
+    if (host.length === 0) continue
+    const key = host.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(host)
+  }
+  return result
+}
+
 function asChoice<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return choices.includes(text as T) ? (text as T) : fallback
@@ -379,9 +413,11 @@ export function normalizeConfig(raw: unknown): HubConfig {
     git: {
       enabled: asBoolean(git.enabled, GIT_DEFAULTS.enabled),
       forge: asChoice(git.forge, ['auto', 'github', 'gitlab', 'none'] as const, GIT_DEFAULTS.forge),
+      gitlabHosts: asHostList(git.gitlabHosts),
       remote: asString(git.remote, GIT_DEFAULTS.remote).trim(),
       cliPath: asString(git.cliPath, GIT_DEFAULTS.cliPath).trim(),
       tokenEnv: asString(git.tokenEnv, GIT_DEFAULTS.tokenEnv).trim(),
+      gitlabTokenEnv: asString(git.gitlabTokenEnv, GIT_DEFAULTS.gitlabTokenEnv).trim(),
       commandTimeoutMs: asPositiveInteger(git.commandTimeoutMs, GIT_DEFAULTS.commandTimeoutMs, { min: 1000 }),
       maxDiffBytes: asPositiveInteger(git.maxDiffBytes, GIT_DEFAULTS.maxDiffBytes, { min: 4096 }),
       maxUntrackedBytes: asPositiveInteger(git.maxUntrackedBytes, GIT_DEFAULTS.maxUntrackedBytes, { min: 1024 }),

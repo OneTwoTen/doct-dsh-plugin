@@ -4,13 +4,21 @@ import { test } from 'node:test'
 import {
   checkOutcome,
   describeChecks,
+  describeGitLabPipeline,
+  gitlabCheckOutcome,
+  gitlabDiffStats,
+  gitlabState,
   labelsOf,
   normalizeComment,
+  normalizeGitLabIssue,
+  normalizeGitLabPull,
+  normalizeGitLabReview,
   normalizeIssue,
   normalizePull,
   normalizeReview,
   pullState,
   summarizeChecks,
+  summarizeGitLabPipeline,
 } from '../src/lib/forge-core.ts'
 
 test('checkOutcome reads CheckRun conclusions and StatusContext states', () => {
@@ -133,4 +141,91 @@ test('normalizeIssue, labelsOf, and normalizeComment read plain values', () => {
     createdAt: '2024-01-01T00:00:00Z',
     url: null,
   })
+})
+
+test('GitLab merge requests use iid, source branches, and pipeline checks', () => {
+  const pull = normalizeGitLabPull({
+    iid: 42,
+    title: 'Draft: Add self-hosted GitLab',
+    state: 'opened',
+    draft: false,
+    web_url: 'https://gitlab.example.com/group/repo/-/merge_requests/42',
+    author: { name: 'Ada Lovelace', username: 'ada' },
+    source_branch: 'feat/gitlab',
+    target_branch: 'main',
+    created_at: '2024-01-02T00:00:00Z',
+    updated_at: '2024-01-03T00:00:00Z',
+    changes_count: '3',
+    detailed_merge_status: 'mergeable',
+    user_notes_count: 4,
+    labels: ['git', 'ui'],
+    head_pipeline: { id: 7, status: 'success', name: 'CI', web_url: 'https://gitlab.example.com/p/7' },
+  })
+  assert.equal(pull.number, 42)
+  assert.equal(pull.state, 'draft')
+  assert.equal(pull.title, 'Draft: Add self-hosted GitLab')
+  assert.equal(pull.url, 'https://gitlab.example.com/group/repo/-/merge_requests/42')
+  assert.equal(pull.author, 'Ada Lovelace')
+  assert.equal(pull.branch, 'feat/gitlab')
+  assert.equal(pull.base, 'main')
+  assert.equal(pull.changedFiles, 3)
+  assert.equal(pull.mergeable, true)
+  assert.equal(pull.commentCount, 4)
+  assert.equal(pull.checks.state, 'success')
+  assert.equal(pull.checks.total, 1)
+  assert.deepEqual(pull.labels, [{ name: 'git', color: null }, { name: 'ui', color: null }])
+})
+
+test('GitLab states, issues, comments, reviews, and pipeline rows are normalized', () => {
+  assert.equal(gitlabState('merged'), 'merged')
+  assert.equal(gitlabState('closed'), 'closed')
+  assert.equal(gitlabState('locked'), 'open')
+  assert.equal(gitlabCheckOutcome('success'), 'success')
+  assert.equal(gitlabCheckOutcome('failed'), 'failure')
+  assert.equal(gitlabCheckOutcome('running'), 'pending')
+  assert.equal(gitlabCheckOutcome('canceled'), 'cancelled')
+  assert.equal(gitlabCheckOutcome('skipped'), 'neutral')
+
+  const issue = normalizeGitLabIssue({
+    iid: 9,
+    title: 'Crash on open',
+    state: 'closed',
+    web_url: 'https://gitlab.example.com/group/repo/-/issues/9',
+    author: { name: 'Grace', username: 'grace' },
+    user_notes_count: 2,
+    labels: ['bug'],
+  })
+  assert.equal(issue.number, 9)
+  assert.equal(issue.state, 'closed')
+  assert.equal(issue.author, 'Grace')
+  assert.equal(issue.commentCount, 2)
+
+  assert.deepEqual(normalizeComment({ author: { name: 'Grace', username: 'grace' }, body: 'fixed', created_at: '2024-01-01T00:00:00Z' }), {
+    author: 'Grace',
+    body: 'fixed',
+    createdAt: '2024-01-01T00:00:00Z',
+    url: null,
+  })
+  assert.deepEqual(normalizeGitLabReview({ user: { name: 'Ada', username: 'ada' }, created_at: '2024-01-02T00:00:00Z' }), {
+    author: 'Ada',
+    state: 'approved',
+    body: '',
+    submittedAt: '2024-01-02T00:00:00Z',
+  })
+  assert.deepEqual(gitlabDiffStats({ new_path: 'src/a.ts', diff: '@@ -1 +1 @@\n-old\n+new\n+more' }), {
+    path: 'src/a.ts',
+    additions: 2,
+    deletions: 1,
+  })
+
+  assert.equal(summarizeGitLabPipeline({ status: 'failed' }).state, 'failure')
+  const checks = describeGitLabPipeline({ id: 7, status: 'success' }, [
+    { name: 'build', status: 'success', web_url: 'https://x/1', stage: 'test', started_at: '2024-01-01T00:00:00Z', finished_at: '2024-01-01T00:01:00Z' },
+    { name: 'lint', status: 'failed', web_url: 'https://x/2', stage: 'test' },
+  ])
+  assert.equal(checks.length, 2)
+  assert.equal(checks[0].name, 'build')
+  assert.equal(checks[0].state, 'success')
+  assert.equal(checks[1].state, 'failure')
+  assert.equal(checks[1].url, 'https://x/2')
 })
