@@ -10,3 +10,8 @@ plugin/.plugin-manager/
 plugin/**/status.json
 plugin/**/state.json
 plugin/token
+
+# Relay Zig: thư mục build và dữ liệu chạy thử
+server/.zig-cache/
+server/zig-out/
+server/data/
