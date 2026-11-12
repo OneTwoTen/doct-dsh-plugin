@@ -1,0 +1,31 @@
+[Unit]
+Description=DSH Web Remote relay (protocol v1)
+Documentation=https://github.com/OneTwoTen/doct-dsh-plugin/tree/main/server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dsh-relay
+Group=dsh-relay
+StateDirectory=dsh-relay
+WorkingDirectory=/var/lib/dsh-relay
+# Secret (Clerk secret key, dev token) và pepper nằm trong tệp 0600 này.
+ExecStart=/usr/local/bin/dsh-relay --config /etc/dsh-relay.json
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

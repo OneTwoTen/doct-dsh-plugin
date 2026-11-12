@@ -1,4 +1,4 @@
-﻿//! The relay's runtime state: who is connected, which streams and requests are
+//! The relay's runtime state: who is connected, which streams and requests are
 //! in flight, and how frames are routed between a device and its web client.
 //!
 //! Every method that touches a connection must be called while holding `mutex`.
@@ -142,6 +142,34 @@ pub const Hub = struct {
         self.mutex.unlock(self.io);
     }
 
+    // ------------------------------------------------------- owned keys ----
+    //
+    // Frame ids point into the per-frame arena, so the maps must own their
+    // keys. Entries are removed through the helpers below, which free the key.
+
+    fn dropPending(self: *Hub, id: []const u8) void {
+        if (self.pending.fetchRemove(id)) |kv| self.gpa.free(kv.key);
+    }
+
+    fn dropStream(self: *Hub, id: []const u8) void {
+        if (self.streams.fetchRemove(id)) |kv| {
+            self.gpa.free(kv.value.session_id);
+            self.gpa.free(kv.key);
+        }
+    }
+
+    fn putPending(self: *Hub, id: []const u8, entry: PendingEntry) !void {
+        const key = try self.gpa.dupe(u8, id);
+        errdefer self.gpa.free(key);
+        try self.pending.put(key, entry);
+    }
+
+    fn putStream(self: *Hub, id: []const u8, entry: StreamEntry) !void {
+        const key = try self.gpa.dupe(u8, id);
+        errdefer self.gpa.free(key);
+        try self.streams.put(key, entry);
+    }
+
 
     pub fn registerDevice(self: *Hub, conn: *Conn, device: repo.Device) !void {
         if (self.devices.get(device.id)) |old| {
@@ -186,9 +214,13 @@ pub const Hub = struct {
         }
         if (device_key) |key| {
             const peer = self.devices.get(key).?;
-            self.devices.remove(key);
+            _ = self.devices.remove(key);
             self.gpa.destroy(peer);
-            // Web work for this device cannot finish.
+
+            // Web work for this device cannot finish. Collect first: removing
+            // from a hash map while iterating it is invalid.
+            var pending_keys: std.ArrayList([]const u8) = .empty;
+            defer pending_keys.deinit(self.gpa);
             var pending_it = self.pending.iterator();
             while (pending_it.next()) |entry| {
                 if (entry.value_ptr.*.device_id.len > 0 and
@@ -197,15 +229,20 @@ pub const Hub = struct {
                     if (entry.value_ptr.*.to == .web) {
                         sendError(entry.value_ptr.*.conn, entry.key_ptr.*, "transport/closed", "the device disconnected", true);
                     }
-                    _ = self.pending.remove(entry.key_ptr.*);
+                    pending_keys.append(self.gpa, entry.key_ptr.*) catch break;
                 }
             }
+            for (pending_keys.items) |pending_key| self.dropPending(pending_key);
+
+            var stream_keys: std.ArrayList([]const u8) = .empty;
+            defer stream_keys.deinit(self.gpa);
             var stream_it = self.streams.iterator();
             while (stream_it.next()) |entry| {
                 if (!std.mem.eql(u8, entry.value_ptr.*.device_id, key)) continue;
                 sendEnd(entry.value_ptr.*.web, entry.key_ptr.*, "error");
-                _ = self.streams.remove(entry.key_ptr.*);
+                stream_keys.append(self.gpa, entry.key_ptr.*) catch break;
             }
+            for (stream_keys.items) |stream_key| self.dropStream(stream_key);
             return;
         }
 
@@ -219,28 +256,44 @@ pub const Hub = struct {
         }
         if (web_key) |key| {
             const peer = self.webs.get(key).?;
-            self.webs.remove(key);
-            // Cancel the device-side streams this web client owned.
+            _ = self.webs.remove(key);
+
+            var stream_keys: std.ArrayList([]const u8) = .empty;
+            defer stream_keys.deinit(self.gpa);
             var stream_it = self.streams.iterator();
             while (stream_it.next()) |entry| {
                 if (entry.value_ptr.*.web != conn) continue;
                 if (self.devices.get(entry.value_ptr.*.device_id)) |device| {
                     sendCancel(device.conn, entry.key_ptr.*);
                 }
-                _ = self.streams.remove(entry.key_ptr.*);
+                stream_keys.append(self.gpa, entry.key_ptr.*) catch break;
             }
+            for (stream_keys.items) |stream_key| self.dropStream(stream_key);
+
+            var pending_keys: std.ArrayList([]const u8) = .empty;
+            defer pending_keys.deinit(self.gpa);
             var pending_it = self.pending.iterator();
             while (pending_it.next()) |entry| {
                 if (entry.value_ptr.*.to != .device or entry.value_ptr.*.conn != conn) continue;
                 if (self.devices.get(entry.value_ptr.*.device_id)) |device| {
                     sendError(device.conn, entry.key_ptr.*, "transport/closed", "the web client disconnected", true);
                 }
-                _ = self.pending.remove(entry.key_ptr.*);
+                pending_keys.append(self.gpa, entry.key_ptr.*) catch break;
             }
+            for (pending_keys.items) |pending_key| self.dropPending(pending_key);
+
             self.gpa.free(peer.user_id);
             self.gpa.destroy(peer);
             self.gpa.free(key);
             return;
+        }
+    }
+
+    /// Close the device's socket after a revocation: code 4003 stops reconnects.
+    pub fn disconnectDevice(self: *Hub, device_id: []const u8, code: u16, reason: []const u8) void {
+        if (self.devices.get(device_id)) |peer| {
+            peer.conn.writeClose(code, reason);
+            peer.conn.shutdown(self.io);
         }
     }
 
@@ -285,11 +338,16 @@ pub const Hub = struct {
             peer.last_seen_ms = now;
         }
 
+        self.sendHelloOk(conn);
+    }
+
+    /// Tell a freshly connected peer the protocol limits and the server clock.
+    pub fn sendHelloOk(self: *Hub, conn: *Conn) void {
         var buf: [512]u8 = undefined;
         const body = std.fmt.bufPrint(&buf, "{{\"t\":\"hello.ok\",\"v\":1,\"serverTime\":{d}," ++
             "\"limits\":{{\"maxFrameBytes\":{d},\"maxStreams\":{d},\"maxInflight\":{d}}}}}", .{
-            now, self.max_frame_bytes, self.max_streams, self.max_inflight,
-        }) catch return error.BadFrame;
+            clock.nowMs(self.io), self.max_frame_bytes, self.max_streams, self.max_inflight,
+        }) catch return;
         conn.writeText(body) catch {};
     }
 
@@ -329,7 +387,7 @@ pub const Hub = struct {
             };
             const entry = self.pending.get(id) orelse return;
             if (entry.to != .web) return;
-            _ = self.pending.remove(id);
+            self.dropPending(id);
             entry.conn.writeText(raw) catch {
                 sendError(conn, id, "transport/closed", "the web client is gone", true);
             };
@@ -341,7 +399,7 @@ pub const Hub = struct {
             const stream = self.streams.get(id) orelse return;
             stream.web.writeText(raw) catch {
                 sendEnd(conn, id, "overflow");
-                _ = self.streams.remove(id);
+                self.dropStream(id);
             };
             return;
         }
@@ -350,7 +408,7 @@ pub const Hub = struct {
             const id = env.id orelse return;
             if (self.streams.get(id)) |stream| {
                 stream.web.writeText(raw) catch {};
-                _ = self.streams.remove(id);
+                self.dropStream(id);
             } else {
                 conn.writeText(raw) catch {};
             }
@@ -367,14 +425,14 @@ pub const Hub = struct {
                 sendError(conn, id, "transport/not-ready", "no web client is connected", true);
                 return;
             };
-            try self.pending.put(id, .{
+            try self.putPending(id, .{
                 .to = .device,
                 .conn = conn,
                 .device_id = device_id,
                 .at_ms = now,
             });
             target.writeText(raw) catch {
-                _ = self.pending.remove(id);
+                self.dropPending(id);
                 sendError(conn, id, "transport/closed", "the web client is gone", true);
             };
             return;
@@ -418,14 +476,14 @@ pub const Hub = struct {
                 sendError(conn, id, "rate/limited", "too many pending requests", true);
                 return;
             }
-            try self.pending.put(id, .{
+            try self.putPending(id, .{
                 .to = .web,
                 .conn = conn,
                 .device_id = device.device_id,
                 .at_ms = now,
             });
             device.conn.writeText(raw) catch {
-                _ = self.pending.remove(id);
+                self.dropPending(id);
                 sendError(conn, id, "transport/closed", "the device disconnected", true);
             };
             return;
@@ -442,14 +500,14 @@ pub const Hub = struct {
                 return;
             }
             const session_id = stringArg(env, "sessionId") orelse "";
-            try self.streams.put(id, .{
+            try self.putStream(id, .{
                 .web = conn,
                 .device_id = device.device_id,
                 .session_id = try self.gpa.dupe(u8, session_id),
                 .at_ms = now,
             });
             device.conn.writeText(raw) catch {
-                _ = self.streams.remove(id);
+                self.dropStream(id);
                 sendEnd(conn, id, "error");
             };
             return;
@@ -461,7 +519,7 @@ pub const Hub = struct {
                 if (self.devices.get(stream.device_id)) |device| {
                     device.conn.writeText(raw) catch {};
                 }
-                _ = self.streams.remove(id);
+                self.dropStream(id);
             }
             return;
         }
@@ -470,7 +528,7 @@ pub const Hub = struct {
             const id = env.id orelse return;
             const entry = self.pending.get(id) orelse return;
             if (entry.to != .device) return;
-            _ = self.pending.remove(id);
+            self.dropPending(id);
             if (self.devices.get(entry.device_id)) |device| {
                 device.conn.writeText(raw) catch {};
             }
@@ -545,12 +603,16 @@ pub const Hub = struct {
 
     /// Poll pacing for `/v1/device/token`: one poll every five seconds.
     pub fn allowPoll(self: *Hub, device_code_hash: []const u8, now: i64) bool {
-        if (self.polls.get(device_code_hash)) |last| {
-            if (now - last < 5000) return false;
-            _ = self.polls.put(device_code_hash, now);
+        if (self.polls.getPtr(device_code_hash)) |last| {
+            if (now - last.* < 5000) return false;
+            last.* = now;
             return true;
         }
-        self.polls.put(self.gpa.dupe(u8, device_code_hash) catch return true, now) catch return true;
+        const key = self.gpa.dupe(u8, device_code_hash) catch return true;
+        self.polls.put(key, now) catch {
+            self.gpa.free(key);
+            return true;
+        };
         return true;
     }
 
@@ -558,6 +620,10 @@ pub const Hub = struct {
 
     /// Periodic maintenance: request timeouts, heartbeat, expiry.
     pub fn sweep(self: *Hub, now: i64) void {
+        // Collect before removing: mutating a hash map while iterating it is
+        // not allowed.
+        var expired_pending: std.ArrayList([]const u8) = .empty;
+        defer expired_pending.deinit(self.gpa);
         var pending_it = self.pending.iterator();
         while (pending_it.next()) |entry| {
             if (now - entry.value_ptr.*.at_ms < self.request_timeout_ms) continue;
@@ -566,15 +632,19 @@ pub const Hub = struct {
             } else if (self.devices.get(entry.value_ptr.*.device_id)) |device| {
                 sendError(device.conn, entry.key_ptr.*, "transport/timeout", "no answer from the web client", true);
             }
-            _ = self.pending.remove(entry.key_ptr.*);
+            expired_pending.append(self.gpa, entry.key_ptr.*) catch break;
         }
+        for (expired_pending.items) |key| self.dropPending(key);
 
+        var expired_streams: std.ArrayList([]const u8) = .empty;
+        defer expired_streams.deinit(self.gpa);
         var stream_it = self.streams.iterator();
         while (stream_it.next()) |entry| {
             if (now - entry.value_ptr.*.at_ms < 3_600_000) continue;
             sendEnd(entry.value_ptr.*.web, entry.key_ptr.*, "overflow");
-            _ = self.streams.remove(entry.key_ptr.*);
+            expired_streams.append(self.gpa, entry.key_ptr.*) catch break;
         }
+        for (expired_streams.items) |key| self.dropStream(key);
 
         var device_it = self.devices.iterator();
         while (device_it.next()) |entry| {
@@ -594,22 +664,53 @@ pub const Hub = struct {
         }
 
         // Prune old nonces (kept twice the ±300s window).
+        var stale_nonces: std.ArrayList([]const u8) = .empty;
+        defer stale_nonces.deinit(self.gpa);
         var nonce_it = self.nonces.iterator();
         while (nonce_it.next()) |entry| {
-            if (now - entry.value_ptr.* > 600_000) _ = self.nonces.remove(entry.key_ptr.*);
+            if (now - entry.value_ptr.* > 600_000) {
+                stale_nonces.append(self.gpa, entry.key_ptr.*) catch break;
+            }
         }
+        for (stale_nonces.items) |key| {
+            if (self.nonces.fetchRemove(key)) |kv| self.gpa.free(kv.key);
+        }
+
         // Prune rate-limit counters that have been idle for two windows.
+        var stale_limits: std.ArrayList([]const u8) = .empty;
+        defer stale_limits.deinit(self.gpa);
         var limit_it = self.pairing_limits.iterator();
         while (limit_it.next()) |entry| {
-            if (entry.value_ptr.stale(3_600_000, now)) _ = self.pairing_limits.remove(entry.key_ptr.*);
+            if (entry.value_ptr.stale(3_600_000, now)) {
+                stale_limits.append(self.gpa, entry.key_ptr.*) catch break;
+            }
         }
+        for (stale_limits.items) |key| {
+            if (self.pairing_limits.fetchRemove(key)) |kv| self.gpa.free(kv.key);
+        }
+
+        var stale_polls: std.ArrayList([]const u8) = .empty;
+        defer stale_polls.deinit(self.gpa);
         var poll_it = self.polls.iterator();
         while (poll_it.next()) |entry| {
-            if (now - entry.value_ptr.* > 3_600_000) _ = self.polls.remove(entry.key_ptr.*);
+            if (now - entry.value_ptr.* > 3_600_000) {
+                stale_polls.append(self.gpa, entry.key_ptr.*) catch break;
+            }
         }
+        for (stale_polls.items) |key| {
+            if (self.polls.fetchRemove(key)) |kv| self.gpa.free(kv.key);
+        }
+
+        var stale_prompts: std.ArrayList([]const u8) = .empty;
+        defer stale_prompts.deinit(self.gpa);
         var prompt_it = self.prompt_limits.iterator();
         while (prompt_it.next()) |entry| {
-            if (now - entry.value_ptr.window_start_ms > 600_000) _ = self.prompt_limits.remove(entry.key_ptr.*);
+            if (now - entry.value_ptr.window_start_ms > 600_000) {
+                stale_prompts.append(self.gpa, entry.key_ptr.*) catch break;
+            }
+        }
+        for (stale_prompts.items) |key| {
+            if (self.prompt_limits.fetchRemove(key)) |kv| self.gpa.free(kv.key);
         }
 
         _ = repo.expirePairings(self.store, self.io) catch {};
@@ -726,4 +827,5 @@ test "a web request is routed to the device and the response comes back" {
 
     try std.testing.expect(std.mem.indexOf(u8, web_out_buf[0..web_out.end], "\"ok\":true") != null);
 }
+
 

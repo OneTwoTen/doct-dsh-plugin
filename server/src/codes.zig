@@ -1,4 +1,4 @@
-//! Short human-facing pairing codes (Crockford base32, no I, L, O, U).
+﻿//! Short human-facing pairing codes (Crockford base32, no I, L, O, U).
 //!
 //! The relay only ever stores a hash of the normalized code; the dashed form is
 //! what a person reads off the DSH screen and types into the web page.
@@ -17,7 +17,17 @@ pub fn generate(random: std.Random) [code_len]u8 {
     return out;
 }
 
-/// `ABCDEFGH` -> `ABCD-EFGH`.
+
+/// Eight random characters from the process CSPRNG. `byte >> 3` is uniform over
+/// the 32-character alphabet.
+pub fn generateWithIo(io: std.Io) [code_len]u8 {
+    var raw: [code_len]u8 = undefined;
+    io.random(&raw);
+    var out: [code_len]u8 = undefined;
+    for (raw, 0..) |byte, index| out[index] = alphabet[byte >> 3];
+    return out;
+}
+/// ABCDEFGH -> ABCD-EFGH.
 pub fn formatted(code: [code_len]u8) [formatted_len]u8 {
     var out: [formatted_len]u8 = undefined;
     @memcpy(out[0..4], code[0..4]);
@@ -84,4 +94,5 @@ test "the normalized form validates only on eight alphabet characters" {
     try std.testing.expect(!valid(normalizeInto("ABCD-EFG", &buf)));
     try std.testing.expect(!valid("ABCDEFGU"));
 }
+
 

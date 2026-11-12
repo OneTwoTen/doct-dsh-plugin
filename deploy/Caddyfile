@@ -1,0 +1,38 @@
+# DSH Web Remote — Caddy mẫu
+#
+# Thay `chat.example.com` bằng domain thật, và trỏ ProxyPass về cổng relay.
+# Relay KHÔNG tự mở TLS: Caddy làm TLS và chuyển tiếp.
+
+chat.example.com {
+	encode zstd gzip
+
+	# API pairing + quản lý thiết bị
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# Health check cho giám sát
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# Trang ghép cặp
+	handle /pair* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# WebSocket: giữ kết nối khi Caddy reload
+	handle /ws {
+		reverse_proxy 127.0.0.1:8787 {
+			stream_close_delay 5m
+		}
+	}
+
+	# Web client SvelteKit (Phase 3) — chưa có thì trả 404
+	handle {
+		root * /srv/chat
+		try_files {path} /200.html
+		header /200.html Cache-Control "no-cache"
+		file_server
+	}
+}

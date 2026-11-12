@@ -1,4 +1,4 @@
-﻿//! Repository: every SQL statement the relay runs, behind small typed helpers.
+//! Repository: every SQL statement the relay runs, behind small typed helpers.
 //!
 //! Callers own the lock: take `store.lock(io)` around a logical operation that
 //! must be atomic (approve the pairing *and* read the device, issue the token
@@ -47,6 +47,7 @@ pub const Token = struct {
     kind: TokenKind,
     family_id: []const u8,
     expires_at: i64,
+    revoked_at: ?i64 = null,
 };
 
 pub const WebSession = struct {
@@ -163,8 +164,29 @@ pub fn insertDevice(store: *Store, io: std.Io, new: NewDevice) !void {
     try stmt.done();
 }
 
-pub fn deviceById(store: *Store, alloc: std.mem.Allocator, id: []const u8) !?Device {
-    var stmt = try store.prepare("SELECT " ++ device_columns ++ " FROM devices WHERE id = ?1");
+/// Create a pending device, or reuse the row when it is not active yet (the
+/// plugin derives the same device id from the same key, so a retry must work).
+/// Returns false when the device is already paired.
+pub fn upsertDevice(store: *Store, io: std.Io, new: NewDevice) !bool {
+    var stmt = try store.prepare(
+        "INSERT INTO devices(id, user_id, name, platform, pubkey, scopes, status, created_at) " ++
+            "VALUES(?1, NULL, ?2, ?3, ?4, ?5, 'pending', ?6) " ++
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, platform = excluded.platform, " ++
+            "pubkey = excluded.pubkey, scopes = excluded.scopes, status = 'pending', revoked_at = NULL " ++
+            "WHERE devices.status <> 'active'",
+    );
+    defer stmt.finalize();
+    try stmt.bindText(1, new.id);
+    try stmt.bindText(2, new.name);
+    try stmt.bindText(3, new.platform);
+    try stmt.bindText(4, new.pubkey);
+    try stmt.bindText(5, new.scopes);
+    try stmt.bindInt(6, clock.nowMs(io));
+    try stmt.done();
+    return storeChanged(store) > 0;
+}
+
+pub fn deviceById(store: *Store, alloc: std.mem.Allocator, id: []const u8) !?Device {    var stmt = try store.prepare("SELECT " ++ device_columns ++ " FROM devices WHERE id = ?1");
     defer stmt.finalize();
     try stmt.bindText(1, id);
     if (!try stmt.step()) return null;
@@ -428,6 +450,35 @@ pub fn tokenByHash(
     };
 }
 
+/// Any token row by hash, including revoked ones (used to detect refresh-token
+/// reuse).
+pub fn tokenRowByHash(store: *Store, alloc: std.mem.Allocator, token_hash: []const u8) !?Token {
+    var stmt = try store.prepare(
+        "SELECT id, device_id, kind, family_id, expires_at, revoked_at FROM tokens " ++
+            "WHERE token_hash = ?1 ORDER BY created_at DESC LIMIT 1",
+    );
+    defer stmt.finalize();
+    try stmt.bindText(1, token_hash);
+    if (!try stmt.step()) return null;
+    return .{
+        .id = try dupText(alloc, &stmt, 0),
+        .device_id = try dupText(alloc, &stmt, 1),
+        .kind = try tokenKind(stmt.text(2) orelse ""),
+        .family_id = try dupText(alloc, &stmt, 3),
+        .expires_at = stmt.int(4),
+        .revoked_at = optInt(&stmt, 5),
+    };
+}
+
+pub fn revokeToken(store: *Store, io: std.Io, id: []const u8) !bool {
+    var stmt = try store.prepare("UPDATE tokens SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL");
+    defer stmt.finalize();
+    try stmt.bindInt(1, clock.nowMs(io));
+    try stmt.bindText(2, id);
+    try stmt.done();
+    return storeChanged(store) > 0;
+}
+
 /// Resolve an access token straight to its active device (used by the WS
 /// handshake).
 pub fn deviceForAccessToken(
@@ -642,4 +693,5 @@ test "the repository round-trips a pairing, a device, tokens and a session" {
     _ = try revokeFamily(&store, io, "fam_1");
     try std.testing.expect((try deviceForAccessToken(&store, alloc, access_hash, clock.nowMs(io))) == null);
 }
+
 
