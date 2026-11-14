@@ -687,5 +687,5 @@ thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
   công khai (không có chi tiết kiểm tra), còn GitLab đọc được bằng REST khi có token. GitLab tự host
   phải có host trong `git.gitlabHosts` (hoặc `git.forge: gitlab`) và `glab` đăng nhập đúng host, hoặc
   `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` cho REST.
-- Web Remote có bridge, thẻ cấu hình/ghép cặp trong DSH UI và relay phát triển; chưa có relay
-  production (Zig) và web client SvelteKit, chỉ nhận prompt văn bản. Xem mục 7.
+- Web Remote có bridge, thẻ cấu hình/ghép cặp trong DSH UI, relay phát triển và **relay production
+  bằng Zig** (`server/`); web client SvelteKit chưa có, chỉ nhận prompt văn bản. Xem mục 7.

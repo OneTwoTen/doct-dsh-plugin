@@ -214,9 +214,9 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
   PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được (không có chi tiết checks), còn
   GitLab cần `glab` hoặc token `GITLAB_TOKEN`/`DSH_GITLAB_TOKEN` để dùng REST. GitLab tự host phải khai
   báo host trong `git.gitlabHosts`. GitLab không hỗ trợ rebase-merge nên nút đó không hiện.
-- Web Remote mới có bridge Host, giao thức, và thẻ cấu hình/ghép cặp trong DSH UI: chưa có relay
-  Zig hay web client SvelteKit (dev relay có WebChat tối giản); chỉ nhận prompt văn bản và chưa có
-  E2E (relay thấy plaintext — cần TLS và relay tự quản).
+- Web Remote có bridge Host, giao thức v1, thẻ cấu hình/ghép cặp trong DSH UI và **relay production
+  bằng Zig** (`server/`); web client SvelteKit chưa có (dev relay có WebChat tối giản). Chỉ nhận prompt
+  văn bản; relay thấy plaintext nên production cần TLS và relay tự quản.
 
 ## Giấy phép
 
