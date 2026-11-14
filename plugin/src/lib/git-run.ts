@@ -1200,6 +1200,13 @@ export interface PushOutcome {
 /**
  * Push the current branch, setting its upstream when it has none.
  *
+ * Only an upstream of the same name is pushed over. A branch can otherwise track
+ * a branch of another name — a worktree branch cut from `origin/main` inherits
+ * that upstream, for instance — and publishing `HEAD` under the tracked name
+ * would put the branch's commits straight onto that branch, which is how a
+ * "create pull request" ended up writing to the default branch. Every such
+ * branch is published under its own name instead.
+ *
  * @param runner command runner.
  * @param options repository root, preferred remote, branch, cancellation.
  */
@@ -1221,7 +1228,8 @@ export async function pushCurrentBranch(
     signal,
   })
   const upstream = upstreamRead.code === 0 ? String(upstreamRead.stdout ?? '').trim() : ''
-  if (upstream.length > 0) {
+  const tracked = upstreamRef(upstream)
+  if (tracked !== null && tracked.branch === branch) {
     const divergence = await runner.run('git', ['rev-list', '--left-right', '--count', `HEAD...@{upstream}`], {
       cwd: root,
       signal,
@@ -1230,9 +1238,7 @@ export async function pushCurrentBranch(
     if (counts.ahead === 0 && counts.behind === 0) {
       return { status: 'skipped_up_to_date', branch, upstream, setUpstream: false }
     }
-    const remoteName = upstream.split('/')[0] ?? 'origin'
-    const upstreamBranch = upstream.slice(remoteName.length + 1)
-    const result = await runner.run('git', ['push', remoteName, `HEAD:refs/heads/${upstreamBranch}`], {
+    const result = await runner.run('git', ['push', tracked.remote, `HEAD:refs/heads/${branch}`], {
       cwd: root,
       signal,
       timeoutMs,
@@ -1243,7 +1249,8 @@ export async function pushCurrentBranch(
     return { status: 'pushed', branch, upstream, setUpstream: false }
   }
 
-  const remote = typeof options.remote === 'string' && options.remote.length > 0 ? options.remote : 'origin'
+  const remote = tracked?.remote
+    ?? (typeof options.remote === 'string' && options.remote.length > 0 ? options.remote : 'origin')
   const result = await runner.run('git', ['push', '--set-upstream', remote, `HEAD:refs/heads/${branch}`], {
     cwd: root,
     signal,
@@ -1253,6 +1260,19 @@ export async function pushCurrentBranch(
   })
   if (result.code !== 0) throwWriteFailure('push', result, { branch, remote })
   return { status: 'pushed', branch, upstream: `${remote}/${branch}`, setUpstream: true }
+}
+
+/**
+ * Split one upstream ref name into its remote and branch parts.
+ *
+ * @param upstream `git rev-parse --abbrev-ref @{upstream}` output, such as `origin/main`.
+ * @returns the two parts, or null when the name is not `<remote>/<branch>`.
+ */
+function upstreamRef(upstream: string): { remote: string; branch: string } | null {
+  const name = String(upstream ?? '').trim()
+  const slash = name.indexOf('/')
+  if (slash <= 0 || slash === name.length - 1) return null
+  return { remote: name.slice(0, slash), branch: name.slice(slash + 1) }
 }
 
 /** The outcome of a pull. */

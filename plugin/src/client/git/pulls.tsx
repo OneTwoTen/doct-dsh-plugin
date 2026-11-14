@@ -1,14 +1,15 @@
 /**
  * The change-request list and one change request in full.
  */
-import { h } from '../runtime.ts'
+import { h, useState } from '../runtime.ts'
 import { Icon } from '../icons.tsx'
 import { useLoader, relativeTime } from '../hooks.ts'
 import type { Translate } from '../i18n.ts'
 import type { GitApi } from '../api.ts'
+import { messageOf } from '../api.ts'
 import { Empty, Failure, Loading, DetailBar, Filters, ForgeNotice, PullMeta, CheckRow, reviewLabel, stateLabel } from './common.tsx'
 import { Counts } from './diff-view.tsx'
-import type { ForgeState } from '../../shared/protocol.ts'
+import type { ForgeState, MergeMethod, MergePullResult } from '../../shared/protocol.ts'
 
 /** Props of the change-request list. */
 export interface PullsViewProps {
@@ -77,18 +78,27 @@ export interface PullPaneProps {
   revision: number
   number: number
   onBack(): void
+  /** Refresh the panel after a merge changed the branch. */
+  onChanged?(): void
 }
 
-/** One change request in full: checks, review, body, comments, and its files. */
+/** One change request in full: merge, checks, review, body, comments, and files. */
 export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
   const { t, api } = props
+  const [refresh, setRefresh] = useState(0)
+  const [pending, setPending] = useState<MergeMethod | null>(null)
+  const [deleteBranch, setDeleteBranch] = useState(false)
+  const [merging, setMerging] = useState(false)
+  const [mergeError, setMergeError] = useState('')
+  const [merged, setMerged] = useState<MergePullResult | null>(null)
   const state = useLoader(
     () => api.pullRequest({
       sessionId: props.sessionId,
       cwd: props.cwd || undefined,
       number: props.number,
+      ...(refresh === 0 ? {} : { refresh: true }),
     }),
-    [props.number, props.revision, props.sessionId, props.cwd],
+    [props.number, props.revision, refresh, props.sessionId, props.cwd],
   )
   if (state.status === 'error' && state.value === undefined) {
     return h('div', null,
@@ -107,6 +117,28 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
     return h('div', null, h(DetailBar, { t, name: `#${props.number}`, onBack: props.onBack }), h(Empty, { title: t('gitEmptyPulls') }))
   }
   const reviews = (value.reviews ?? []).filter((review) => review.state !== 'commented' || review.body.length > 0)
+  const canMerge = pull.state === 'open' && merged === null
+  const merge = async (method: MergeMethod): Promise<void> => {
+    setMerging(true)
+    setMergeError('')
+    try {
+      const result = await api.mergePull({
+        sessionId: props.sessionId,
+        cwd: props.cwd || undefined,
+        number: pull.number,
+        method,
+        deleteBranch,
+      })
+      setMerged(result)
+      setPending(null)
+      setRefresh((value) => value + 1)
+      props.onChanged?.()
+    } catch (failure) {
+      setMergeError(messageOf(failure))
+    } finally {
+      setMerging(false)
+    }
+  }
   return h('div', null,
     h(DetailBar, { t, name: `#${pull.number}`, onBack: props.onBack },
       pull.url.length > 0
@@ -127,6 +159,44 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
           stateLabel(t, pull.state)),
         pull.branch.length > 0 ? h('span', { className: 'ph-chip ph-mono' }, t('gitFrom', { branch: pull.branch })) : null,
         pull.base.length > 0 ? h('span', { className: 'ph-chip ph-mono' }, `→ ${pull.base}`) : null),
+
+      merged === null
+        ? null
+        : h('div', { className: merged.merged ? 'ph-success' : 'ph-notice' },
+            h(Icon, { name: merged.merged ? 'check' : 'clock', size: 13 }),
+            h('span', { className: 'ph-success-text' },
+              merged.merged ? t('gitMergeDone', { number: pull.number }) : t('gitMergeQueued', { number: pull.number })),
+            merged.branchDeleted === true ? h('span', { className: 'ph-dim ph-tiny' }, t('gitMergeDeletedBranch')) : null,
+            merged.branchDeleted === false ? h('span', { className: 'ph-dim ph-tiny' }, t('gitMergeDeleteFailed')) : null),
+
+      canMerge
+        ? h('div', { className: 'ph-card ph-merge' },
+            h('div', { className: 'ph-card-title' }, h(Icon, { name: 'merge', size: 12 }), t('gitMergeTitle', { number: pull.number })),
+            h('p', { className: 'ph-hint' }, t('gitMergeBody', { branch: pull.branch, base: pull.base })),
+            h('div', { className: 'ph-merge-actions' },
+              h('button', {
+                type: 'button',
+                className: 'ph-primary',
+                disabled: merging,
+                onClick: () => { setPending('merge'); setMergeError('') },
+              }, h(Icon, { name: 'merge', size: 12 }), t('gitMerge')),
+              h('button', {
+                type: 'button',
+                className: 'ph-button',
+                disabled: merging,
+                onClick: () => { setPending('squash'); setMergeError('') },
+              }, h(Icon, { name: 'commit', size: 12 }), t('gitMergeSquash')),
+              value.provider === 'gitlab'
+                ? null
+                : h('button', {
+                    type: 'button',
+                    className: 'ph-button',
+                    disabled: merging,
+                    onClick: () => { setPending('rebase'); setMergeError('') },
+                  }, h(Icon, { name: 'branch', size: 12 }), t('gitMergeRebase'))))
+        : null,
+      mergeError.length > 0 ? h('p', { className: 'ph-error-text' }, `${t('gitMergeFailed')}: ${mergeError}`) : null,
+
       h('div', { className: 'ph-detail-meta' },
         h('div', { className: 'ph-detail-row' },
           h('span', { className: 'ph-detail-label' }, t('gitAuthor')),
@@ -177,5 +247,51 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
           h('div', { className: 'ph-comment-head' },
             h('span', { className: 'ph-comment-author' }, comment.author.length > 0 ? comment.author : '—'),
             h('span', null, relativeTime(comment.createdAt))),
-          h('p', { className: 'ph-prose' }, comment.body))))))
+          h('p', { className: 'ph-prose' }, comment.body))))),
+
+    pending === null
+      ? null
+      : h('div', { className: 'ph-overlay', role: 'presentation' },
+          h('div', { className: 'ph-dialog', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': t('gitMergeTitle', { number: pull.number }) },
+            h('div', { className: 'ph-dialog-title' }, t('gitMergeTitle', { number: pull.number })),
+            h('p', { className: 'ph-dialog-body' }, t('gitMergeBody', { branch: pull.branch, base: pull.base })),
+            h('p', { className: 'ph-hint' }, t('gitMergeHint')),
+            h('label', { className: 'ph-check-row' },
+              h('input', {
+                type: 'checkbox',
+                checked: deleteBranch,
+                disabled: merging,
+                onChange: (event: { target: { checked: boolean } }) => setDeleteBranch(event.target.checked),
+              }),
+              h('span', null, t('gitMergeDeleteBranch'))),
+            mergeError.length > 0 ? h('p', { className: 'ph-error-text' }, mergeError) : null,
+            h('div', { className: 'ph-merge-methods' },
+              (['merge', 'squash', ...(value.provider === 'gitlab' ? [] : ['rebase'])] as MergeMethod[]).map((method) => h('button', {
+                key: method,
+                type: 'button',
+                className: pending === method ? 'ph-filter' : 'ph-button',
+                'aria-pressed': pending === method ? 'true' : 'false',
+                disabled: merging,
+                onClick: () => setPending(method),
+              }, methodLabel(t, method)))),
+            h('div', { className: 'ph-dialog-actions' },
+              h('button', {
+                type: 'button',
+                className: 'ph-button',
+                disabled: merging,
+                onClick: () => { setPending(null); setMergeError('') },
+              }, t('gitMergeCancel')),
+              h('button', {
+                type: 'button',
+                className: 'ph-primary',
+                disabled: merging,
+                onClick: () => void merge(pending),
+              }, merging ? t('gitMergeBusy') : t('gitMergeConfirm'))))))
+}
+
+/** The label one merge strategy carries. */
+function methodLabel(t: Translate, method: MergeMethod): string {
+  if (method === 'squash') return t('gitMergeSquash')
+  if (method === 'rebase') return t('gitMergeRebase')
+  return t('gitMerge')
 }

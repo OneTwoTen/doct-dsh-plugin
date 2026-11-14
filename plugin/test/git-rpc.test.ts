@@ -17,10 +17,11 @@ process.once('exit', () => rmSync(testHome, { recursive: true, force: true }))
 /** The routes the feature registers, so a removed or renamed one fails the suite. */
 const EXPECTED_ROUTES = [
   'actionState', 'branchPull', 'branches', 'cleanupRun', 'cleanupState', 'commit', 'commitChanges', 'commits',
-  'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'forge', 'issue', 'issues',
-  'mergeSettings', 'mergeSettingsSet', 'overview', 'publish', 'pull', 'pullRequest', 'pulls', 'push', 'stage',
-  'startAction', 'switchBranch', 'unstage', 'worktreeAdd', 'worktreeCreate', 'worktreePrune', 'worktreeRemove',
-  'worktreeRemovePath', 'worktreeState', 'worktreeSwitch', 'worktrees',
+  'counts', 'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'draftPull', 'forge',
+  'issue', 'issues', 'mergePull', 'mergeSettings', 'mergeSettingsSet', 'overview', 'publish', 'pull',
+  'pullRequest', 'pulls', 'push', 'stage', 'startAction', 'switchBranch', 'unstage', 'worktreeAdd',
+  'worktreeCreate', 'worktreePrune', 'worktreeRemove', 'worktreeRemovePath', 'worktreeState', 'worktreeSwitch',
+  'worktrees',
 ].sort()
 
 /** Initialize a repository with a committed file, a modified file, a staged file, and an untracked file. */
@@ -361,6 +362,48 @@ test('a stacked action commits and pushes through its progress record', async ()
   }
 })
 
+test('a push-only action can publish a feature branch instead of the default branch', async () => {
+  const root = await makeRepository()
+  const remoteRoot = await mkdtemp(join(tmpdir(), 'personal-hub-remote-'))
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: remoteRoot, encoding: 'utf8' })
+  git('remote', 'add', 'origin', remoteRoot)
+  git('add', '-A')
+  git('commit', '-qm', 'panel work')
+  git('push', '-q', '-u', 'origin', 'main')
+  const feature = mountFeature()
+  try {
+    const started = await feature.call('startAction', {
+      cwd: root,
+      action: 'push',
+      featureBranch: true,
+    })
+    const { actionId } = started.value as unknown as { actionId: string }
+    const state = await settle(feature, actionId)
+    assert.equal(state.status, 'done', JSON.stringify(state))
+    const result = state.result as unknown as Record<string, unknown>
+    const branch = result.branch as Record<string, unknown>
+    assert.equal(branch.status, 'created')
+    assert.match(String(branch.name), /^feature\//)
+    const push = result.push as Record<string, unknown>
+    assert.equal(push.status, 'pushed')
+    assert.equal(push.branch, branch.name)
+    assert.equal(push.setUpstream, true)
+
+    // The commit landed on the feature branch on the remote, not on main again.
+    const remoteRefs = execFileSync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+      cwd: remoteRoot,
+      encoding: 'utf8',
+    })
+    assert.match(remoteRefs, new RegExp(String(branch.name).replace('/', '\\/')))
+    assert.match(remoteRefs, /main/)
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+    await rm(remoteRoot, { recursive: true, force: true })
+  }
+})
+
 test('a stacked action refuses to push from a detached HEAD', async () => {
   const root = await makeRepository()
   const feature = mountFeature()
@@ -375,6 +418,88 @@ test('a stacked action refuses to push from a detached HEAD', async () => {
   } finally {
     feature.dispose()
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the tab counters report local commits and checkouts without a code host', async () => {
+  const root = await makeRepository()
+  const feature = mountFeature()
+  try {
+    const answer = await feature.call('counts', { cwd: root })
+    assert.equal(answer.ok, true, JSON.stringify(answer))
+    const value = answer.value as unknown as Record<string, unknown>
+    assert.equal(value.commits, 1)
+    assert.equal(value.worktrees, 1)
+    assert.equal(value.pulls, null, 'no remote means no code-host counters')
+    assert.equal(value.issues, null)
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a merge without a remote is refused with a code the pane can explain', async () => {
+  const root = await makeRepository()
+  const feature = mountFeature()
+  try {
+    const answer = await feature.call('mergePull', { cwd: root, number: 1, method: 'squash' })
+    assert.equal(answer.ok, false)
+    assert.equal(answer.error?.code, 'pr/no-remote')
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('drafting a pull request without a remote refuses early', async () => {
+  const root = await makeRepository()
+  const feature = mountFeature()
+  try {
+    const answer = await feature.call('draftPull', { cwd: root })
+    assert.equal(answer.ok, false)
+    assert.equal(answer.error?.code, 'pr/no-remote')
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('drafting a pull request returns a commit-backed draft without pushing', async () => {
+  const root = await makeRepository()
+  const remoteRoot = await mkdtemp(join(tmpdir(), 'personal-hub-remote-'))
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: remoteRoot, encoding: 'utf8' })
+  git('remote', 'add', 'origin', remoteRoot)
+  git('add', '-A')
+  git('commit', '-qm', 'panel work')
+  git('push', '-q', '-u', 'origin', 'main')
+  git('checkout', '-q', '-b', 'feature/draft')
+  await writeFile(join(root, 'b.txt'), 'draft route\n', 'utf8')
+  git('add', '-A')
+  git('commit', '-qm', 'add the draft route')
+  const feature = mountFeature()
+  try {
+    const answer = await feature.call('draftPull', { cwd: root, locale: 'en' })
+    assert.equal(answer.ok, true, JSON.stringify(answer))
+    const value = answer.value as unknown as Record<string, unknown>
+    assert.equal(value.title, 'add the draft route')
+    assert.equal(value.base, 'main')
+    assert.equal(value.head, 'feature/draft')
+    assert.equal(value.ahead, 1)
+    assert.equal(value.source, 'commits')
+    assert.match(String(value.body), /## Changes/)
+    assert.equal(typeof value.error, 'string')
+
+    // Drafting never publishes anything: the remote still only has main.
+    const remoteRefs = execFileSync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+      cwd: remoteRoot,
+      encoding: 'utf8',
+    })
+    assert.doesNotMatch(remoteRefs, /feature\/draft/)
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+    await rm(remoteRoot, { recursive: true, force: true })
   }
 })
 

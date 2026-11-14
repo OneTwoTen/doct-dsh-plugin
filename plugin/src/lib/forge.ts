@@ -169,6 +169,29 @@ export interface CreatedPull {
   base: string
 }
 
+/** What one merge call needs. */
+export interface MergePullOptions {
+  root: string
+  remote: ForgeRemote
+  number: number
+  method: 'merge' | 'squash' | 'rebase'
+  /** Delete the source branch on the code host once the merge succeeded. */
+  deleteBranch?: boolean
+  signal?: AbortSignal
+}
+
+/** What one merge did. */
+export interface MergedPull {
+  merged: boolean
+  state: string
+  sha: string | null
+  message: string
+  url: string
+  provider: string
+  backend: 'cli' | 'rest' | null
+  branchDeleted: boolean | null
+}
+
 /** One CLI probe's answer: is it installed, and is it signed in? */
 export interface ProbeResult {
   installed: boolean
@@ -260,6 +283,7 @@ export interface Forge {
   issueDetail(options: IssueNumberOptions): Promise<IssueDetailAnswer>
   defaultBase(options: ForgeDescribeOptions): Promise<string | null>
   createPull(options: CreatePullOptions): Promise<CreatedPull>
+  mergePull(options: MergePullOptions): Promise<MergedPull>
   pullState(options: PullStateOptions): Promise<PulledState | null>
 }
 
@@ -694,7 +718,7 @@ export function createForge({ runner, config, logger, resolveToken, resolveGitLa
     info: ForgeAvailable,
     remote: ForgeRemote,
     endpoint: string,
-    options: { method?: 'GET' | 'POST'; body?: Record<string, string>; signal?: AbortSignal } = {},
+    options: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: Record<string, unknown>; signal?: AbortSignal } = {},
   ): Promise<unknown> {
     const method = options.method ?? 'GET'
     if (info.backend === 'cli') {
@@ -1094,10 +1118,14 @@ export function createForge({ runner, config, logger, resolveToken, resolveGitLa
   /**
    * Write one GitHub REST resource.
    * @param path API path beginning with `/`.
-   * @param body JSON request body.
+   * @param body JSON request body, when the method takes one.
    * @param options request options.
    */
-  async function restWrite(path: string, body: Record<string, unknown>, options: { signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
+  async function restWrite(
+    path: string,
+    body: Record<string, unknown> | undefined,
+    options: { signal?: AbortSignal; method?: 'POST' | 'PUT' | 'DELETE' } = {},
+  ): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = {
       accept: 'application/vnd.github+json',
       'content-type': 'application/json',
@@ -1109,22 +1137,40 @@ export function createForge({ runner, config, logger, resolveToken, resolveGitLa
     let response: Response
     try {
       response = await fetch(`https://api.github.com${path}`, {
-        method: 'POST',
+        method: options.method ?? 'POST',
         headers,
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       })
     } catch (error) {
       throw new CommandError('forge/offline', `Không gọi được GitHub: ${messageOf(error)}`)
     }
     if (response.status === 401) throw new CommandError('forge/not-signed-in', 'Token GitHub không hợp lệ')
+    if (response.status === 405) {
+      throw new CommandError('merge/blocked', 'GitHub không cho merge pull request này (điều kiện merge, review hoặc CI chưa đạt)')
+    }
+    if (response.status === 409) {
+      throw new CommandError('merge/conflict', 'Nhánh đã đổi hoặc đang xung đột, hãy cập nhật rồi thử lại')
+    }
     if (response.status === 422) {
       const detail = await response.text().catch(() => '')
-      throw new CommandError('pr/rejected', 'GitHub từ chối yêu cầu tạo pull request', { detail: detail.slice(0, 2000) })
+      throw new CommandError('pr/rejected', 'GitHub từ chối yêu cầu', { detail: detail.slice(0, 2000) })
     }
     if (!response.ok) throw new CommandError('forge/failed', `GitHub trả về HTTP ${response.status}`)
-    const payload: unknown = await response.json()
-    return payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    if (response.status === 204) return {}
+    const text = await response.text().catch(() => '')
+    if (text.trim().length === 0) return {}
+    try {
+      const payload: unknown = JSON.parse(text)
+      return payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /** Delete one GitHub REST resource. */
+  async function restDelete(path: string, options: { signal?: AbortSignal } = {}): Promise<void> {
+    await restWrite(path, undefined, { ...options, method: 'DELETE' })
   }
 
   /**
@@ -1199,6 +1245,161 @@ export function createForge({ runner, config, logger, resolveToken, resolveGitLa
   }
 
   /**
+   * Merge one change request with the chosen strategy.
+   *
+   * The code host still owns its rules — required reviews, checks, and branch
+   * protection — so a refusal is reported as a merge failure, never retried.
+   * Deleting the source branch is a separate best-effort call so a failed
+   * cleanup cannot make a successful merge look failed.
+   */
+  async function mergePull({ root, remote, number, method, deleteBranch, signal }: MergePullOptions): Promise<MergedPull> {
+    const info = await describe({ root, remote, signal })
+    if (info.available !== true) {
+      throw new CommandError('pr/forge-unavailable', info.reason ?? 'Máy chủ mã nguồn chưa dùng được')
+    }
+    if (info.provider === 'gitlab') {
+      if (method === 'rebase') {
+        throw new CommandError('merge/unsupported', 'GitLab không merge theo kiểu rebase; hãy chọn Merge hoặc Squash')
+      }
+      const project = gitlabProject(remote)
+      const node = asRecord(await gitlabRequest(info, remote, `projects/${project}/merge_requests/${number}/merge`, {
+        method: 'PUT',
+        body: { squash: method === 'squash', should_remove_source_branch: deleteBranch === true },
+        signal,
+      }))
+      const state = gitlabState(node.state)
+      const merged = state === 'merged'
+      let branchDeleted: boolean | null = deleteBranch === true ? false : null
+      if (merged && deleteBranch === true && typeof node.source_branch === 'string') {
+        branchDeleted = await deleteSourceBranch(info, remote, node.source_branch, signal)
+      }
+      return {
+        merged,
+        state,
+        sha: firstString(node.squash_commit_sha, node.merge_commit_sha),
+        message: merged ? 'Đã merge' : '',
+        url: String(node.web_url ?? ''),
+        provider: 'gitlab',
+        backend: info.backend,
+        branchDeleted,
+      }
+    }
+
+    if (info.backend === 'cli') {
+      const program = info.cli
+      const flag = method === 'merge' ? '--merge' : method === 'squash' ? '--squash' : '--rebase'
+      const result = await exec(program, [
+        'pr', 'merge', String(number),
+        '--repo', String(remote.slug),
+        flag,
+      ], { cwd: root, signal })
+      if (result.code !== 0) throw ghMergeFailure(result.stderr, program)
+      // A merge queue or an auto-merge can accept the request without merging
+      // yet, so the state is read back instead of assumed.
+      const view = asRecord(await ghJson(program, [
+        'pr', 'view', String(number),
+        '--repo', String(remote.slug),
+        '--json', 'state,mergedAt,url,mergeCommit,headRefName',
+      ], { cwd: root, signal }))
+      const state = normalizePull(view).state
+      const merged = typeof view.mergedAt === 'string' && view.mergedAt.length > 0
+      let branchDeleted: boolean | null = deleteBranch === true ? false : null
+      if (merged && deleteBranch === true && typeof view.headRefName === 'string') {
+        branchDeleted = await deleteSourceBranch(info, remote, view.headRefName, signal)
+      }
+      return {
+        merged,
+        state,
+        sha: firstString(asRecord(view.mergeCommit).oid),
+        message: firstString(result.stdout, result.stderr) || (merged ? 'Merged' : 'Merge requested'),
+        url: String(view.url ?? ''),
+        provider: info.provider,
+        backend: 'cli',
+        branchDeleted,
+      }
+    }
+
+    // The REST fallback needs the head branch before merging, to delete it after.
+    let url = `https://github.com/${String(remote.slug ?? '')}/pull/${number}`
+    let head = ''
+    if (deleteBranch === true) {
+      const pull = asRecord(await rest(`/repos/${remote.slug}/pulls/${number}`, { signal }))
+      url = String(pull.html_url ?? url)
+      const ref = asRecord(pull.head).ref
+      if (typeof ref === 'string') head = ref
+    }
+    const node = await restWrite(`/repos/${remote.slug}/pulls/${number}/merge`, { merge_method: method }, { signal, method: 'PUT' })
+    const merged = node.merged === true
+    let branchDeleted: boolean | null = deleteBranch === true ? false : null
+    if (merged && head.length > 0) branchDeleted = await deleteSourceBranch(info, remote, head, signal)
+    return {
+      merged,
+      state: merged ? 'merged' : 'open',
+      sha: firstString(node.sha),
+      message: String(node.message ?? ''),
+      url,
+      provider: info.provider,
+      backend: 'rest',
+      branchDeleted,
+    }
+  }
+
+  /**
+   * Delete one branch on the code host, best effort.
+   *
+   * The merge already succeeded when this runs, so a cleanup refusal is logged
+   * and reported as `false` rather than thrown.
+   */
+  async function deleteSourceBranch(
+    info: ForgeAvailable,
+    remote: ForgeRemote,
+    branch: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const name = String(branch ?? '').trim()
+    if (name.length === 0) return false
+    try {
+      if (info.provider === 'gitlab') {
+        const project = gitlabProject(remote)
+        await gitlabRequest(info, remote, `projects/${project}/repository/branches/${encodeURIComponent(name)}`, {
+          method: 'DELETE',
+          signal,
+        })
+        return true
+      }
+      if (info.backend === 'cli') {
+        const result = await exec(info.cli, ['api', '--method', 'DELETE', `repos/${remote.slug}/git/refs/heads/${name}`], {
+          cwd: process.cwd(),
+          signal,
+        })
+        if (result.code !== 0) {
+          logger.warn('git: could not delete the source branch %s: %s', name, firstLine(result.stderr))
+          return false
+        }
+        return true
+      }
+      await restDelete(`/repos/${remote.slug}/git/refs/heads/${name}`, { signal })
+      return true
+    } catch (error) {
+      logger.warn('git: could not delete the source branch %s: %s', name, messageOf(error))
+      return false
+    }
+  }
+
+  /**
+   * Turn one `gh pr merge` refusal into a code the panel can explain.
+   * @param stderr CLI diagnostics.
+   * @param program CLI name.
+   */
+  function ghMergeFailure(stderr: string | null | undefined, program: string): CommandError {
+    const text = String(stderr ?? '').trim()
+    if (/not mergeable|merge conflict|conflict|required status check|review required|protected branch|blocked/i.test(text)) {
+      return new CommandError('merge/blocked', firstLine(text) || 'Mã nguồn không cho merge pull request này', { detail: text })
+    }
+    return ghFailure(stderr, program)
+  }
+
+  /**
    * Read one change request's current state, which merge tracking polls.
    */
   async function pullState({ root, remote, number, signal }: PullStateOptions): Promise<PulledState | null> {
@@ -1243,7 +1444,7 @@ export function createForge({ runner, config, logger, resolveToken, resolveGitLa
     }
   }
 
-  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, pullState }
+  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, mergePull, pullState }
 }
 
 /** Fields `pullState` asks `gh` for. */
@@ -1253,6 +1454,19 @@ const STATE_FIELDS = ['number', 'url', 'state', 'isDraft', 'mergedAt', 'headRefN
 function firstUrl(text: string | null | undefined): string | null {
   const match = /https?:\/\/[^\s'"]+/.exec(String(text ?? ''))
   return match?.[0] ?? null
+}
+
+/** The first argument that is a non-empty string, or null. */
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim()
+  }
+  return null
+}
+
+/** First non-empty line of a command's stderr. */
+function firstLine(text: unknown): string {
+  return String(text ?? '').split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? ''
 }
 
 /** Pull or merge-request number from one change-request URL. */

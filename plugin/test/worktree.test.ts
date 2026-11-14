@@ -15,6 +15,7 @@ import {
   poolDirectory,
   readBases,
   removeWorktree,
+  renameWorktreeBranch,
   resolveDefaultBase,
   worktreePath,
 } from '../src/lib/worktree.ts'
@@ -163,8 +164,40 @@ test('a checkout starts from a branch the code host has, after fetching it', asy
     assert.equal(created.source, 'remote')
     assert.equal(created.start, 'refs/remotes/origin/feature/remote-only')
     assert.equal((await runner.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: created.path })).stdout.trim(), 'dsh-test-0002')
+    // Starting from a remote-tracking ref must not make the checkout track it:
+    // a later push would publish this branch over the base branch.
+    const upstream = await runner.run('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: created.path })
+    assert.notEqual(upstream.code, 0, 'the new checkout has no upstream')
 
     await removeWorktree(runner, { repoRoot: root, path: created.path, branch: created.branch, deleteBranch: true })
+  } finally {
+    await rm(root.slice(0, root.lastIndexOf('\\project')), { recursive: true, force: true }).catch(() => {})
+  }
+})
+
+test('renaming a checkout branch drops an upstream that names another branch', async () => {
+  const { root, git } = await makeRepositoryWithRemote()
+  const runner = gitRunner()
+  try {
+    const created = await createWorktree(runner, {
+      repoRoot: root,
+      name: 'dsh-test-0005',
+      base: 'feature/remote-only',
+      source: 'remote',
+      remote: 'origin',
+      config,
+    })
+    // Checkouts created before the tracking fix inherited the base as upstream.
+    const tracked = await runner.run('git', ['branch', '--set-upstream-to=origin/main', created.branch], { cwd: created.path })
+    assert.equal(tracked.code, 0)
+
+    const renamed = await renameWorktreeBranch(runner, { path: created.path, branch: 'feat/named' })
+    assert.equal(renamed, 'feat/named')
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], created.path).trim(), 'feat/named')
+    const upstream = await runner.run('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: created.path })
+    assert.notEqual(upstream.code, 0, 'the inherited upstream is gone')
+
+    await removeWorktree(runner, { repoRoot: root, path: created.path, branch: renamed, deleteBranch: true })
   } finally {
     await rm(root.slice(0, root.lastIndexOf('\\project')), { recursive: true, force: true }).catch(() => {})
   }

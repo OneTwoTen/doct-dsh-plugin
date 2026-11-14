@@ -144,6 +144,7 @@ export function createGitApi(call: RawCall): GitApi {
 
   return {
     overview: route('overview') as (payload: GitTarget) => Promise<GitResponse<'overview'>>,
+    counts: route('counts') as (payload: GitTarget & { refresh?: boolean }) => Promise<GitResponse<'counts'>>,
     diff: route('diff') as (payload: DiffRequest) => Promise<GitResponse<'diff'>>,
     diffAll: route('diffAll') as (payload: DiffAllRequest) => Promise<GitResponse<'diffAll'>>,
     commits: route('commits') as (payload: GitTarget & { limit?: number }) => Promise<GitResponse<'commits'>>,
@@ -167,6 +168,8 @@ export function createGitApi(call: RawCall): GitApi {
     issues: route('issues') as (payload: GitTarget & { state?: string; limit?: number; refresh?: boolean }) => Promise<GitResponse<'issues'>>,
     issue: route('issue') as (payload: GitTarget & { number: number; refresh?: boolean }) => Promise<GitResponse<'issue'>>,
     createPull: route('createPull') as (payload: CreatePullRequest) => Promise<GitResponse<'createPull'>>,
+    draftPull: route('draftPull') as (payload: import('../shared/protocol.ts').DraftPullRequest) => Promise<GitResponse<'draftPull'>>,
+    mergePull: route('mergePull') as (payload: import('../shared/protocol.ts').MergePullRequest) => Promise<GitResponse<'mergePull'>>,
     publish: route('publish') as (payload: PublishRequest) => Promise<GitResponse<'publish'>>,
     worktreeState: route('worktreeState') as (payload: GitTarget & { probe?: boolean }) => Promise<GitResponse<'worktreeState'>>,
     worktrees: route('worktrees') as (payload: GitTarget) => Promise<GitResponse<'worktrees'>>,

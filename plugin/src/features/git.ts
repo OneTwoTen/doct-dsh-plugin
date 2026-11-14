@@ -88,12 +88,14 @@ import type {
   DiffRequest,
   DraftedMessage,
   DraftMessageRequest,
+  DraftPullRequest,
   FailureInfo,
   ForgeSettings,
   GitActionPhase,
   GitActionProgress,
   GitActionToast,
   GitApi,
+  GitCounts,
   GitEndpoint,
   GitOverview,
   GitRequest,
@@ -101,7 +103,10 @@ import type {
   GitRunStackedActionResult,
   GitStackedAction,
   GitTarget,
+  MergeMethod,
+  MergePullRequest,
   PublishRequest,
+  PullDraftResult,
   PullRequest,
   PushRequest,
   StackedActionRequest,
@@ -122,6 +127,8 @@ const GITLAB_CREDENTIAL_REF = 'DSH_GITLAB_TOKEN'
 const ACTION_RETENTION_MS = 5 * 60 * 1000
 /** The tail of a running action's output the panel receives. */
 const ACTION_OUTPUT_LINES = 40
+/** The page size the tab counters read from the code host. */
+const COUNT_PAGE = 50
 
 /** The durable state this feature keeps between restarts. */
 type GitState = MergeStoreState & {
@@ -592,10 +599,10 @@ function mountRoutes(
     ]
 
     try {
-      if (payload.featureBranch === true && !wantsCommit) {
+      if (payload.featureBranch === true && !wantsCommit && !wantsPush) {
         throw new CommandError(
           'action/feature-branch',
-          'A feature branch is only supported for actions that commit.',
+          'A feature branch needs an action that commits or pushes.',
         )
       }
       const { root } = await repository(payload, signal)
@@ -615,7 +622,8 @@ function mountRoutes(
 
       if (payload.featureBranch === true) {
         enterPhase(progress, 'branch', 'Preparing feature branchâ€¦')
-        if (message.length === 0) {
+        let subject = message.split(/\r?\n/)[0] ?? ''
+        if (wantsCommit && message.length === 0) {
           progress.label = 'Generating commit messageâ€¦'
           const facts = await readCommitMessageFacts(runner, {
             root,
@@ -638,8 +646,13 @@ function mountRoutes(
             logger,
           })
           message = draft.message
+          subject = message.split(/\r?\n/)[0] ?? ''
+        } else if (!wantsCommit && subject.length === 0) {
+          // A push-only action creates the branch so the commits already on the
+          // base branch can be published for review; the newest subject names it.
+          const head = await runner.run('git', ['log', '-1', '--format=%s'], { cwd: root, signal })
+          subject = head.code === 0 ? String(head.stdout ?? '').trim() : ''
         }
-        const subject = message.split(/\r?\n/)[0] ?? ''
         const refs = await readBranchRefs(runner, { root, limit: 200, signal })
         const localNames = refs.branches.filter((item) => !item.isRemote).map((item) => item.name)
         const name = resolveAutoFeatureBranchName(localNames, sanitizeFeatureBranchName(subject))
@@ -805,23 +818,36 @@ function mountRoutes(
     if (facts.ahead === 0) {
       throw new CommandError('pr/no-commits', `Branch ${branch} has no commits over ${base}.`, { base })
     }
-    onPhase?.('Generating pull request contentâ€¦')
-    const draft = await draftChangeRequest({
-      sessionId,
-      payload,
-      facts: { ...facts, branch, base },
-      branch,
-      base,
-      signal,
-    })
+    // A title the caller already wrote wins: the dialog generated and let the
+    // user edit it, and re-drafting would silently replace those edits.
+    const providedTitle = typeof payload.title === 'string' ? payload.title.trim() : ''
+    let title = providedTitle
+    let body = typeof payload.body === 'string' ? payload.body : ''
+    let draftInfo: { source: string; model: string | null; error: string | null }
+    if (providedTitle.length > 0) {
+      draftInfo = { source: 'manual', model: null, error: null }
+    } else {
+      onPhase?.('Generating pull request contentâ€¦')
+      const draft = await draftChangeRequest({
+        sessionId,
+        payload,
+        facts: { ...facts, branch, base },
+        branch,
+        base,
+        signal,
+      })
+      title = draft.title
+      body = draft.body
+      draftInfo = { source: draft.source, model: draft.model, error: draft.error ?? null }
+    }
     onPhase?.('Creating pull requestâ€¦')
     const created = await forge.createPull({
       root,
       remote,
       head: branch,
       base,
-      title: draft.title,
-      body: draft.body,
+      title,
+      body,
       signal,
     })
     if (sessionId.length > 0 && created.number !== null) {
@@ -840,7 +866,9 @@ function mountRoutes(
       url: created.url,
       base,
       head: branch,
-      title: draft.title,
+      title,
+      body,
+      draft: draftInfo,
     }
   }
 
@@ -884,6 +912,61 @@ function mountRoutes(
         } catch (error) {
           value.branchPullError = failureOf(error)
         }
+      }
+      return value
+    },
+
+    /**
+     * The counters the tab strip shows.
+     *
+     * Commits and checkouts are local and cheap; change requests and issues come
+     * from one page of the code host, so an answer larger than the page says so
+     * instead of pretending to be exact.
+     */
+    async counts(payload, signal): Promise<GitCounts> {
+      const { root } = await repository(payload, signal)
+      const context = await readContext(runner, { root, config, signal })
+      const [revisionCount, worktrees] = await Promise.all([
+        runner.run('git', ['rev-list', '--count', 'HEAD'], { cwd: root, signal }),
+        readWorktrees(runner, { root, signal }).catch(() => []),
+      ])
+      const commits = revisionCount.code === 0 ? Number.parseInt(String(revisionCount.stdout ?? '').trim(), 10) || 0 : 0
+      const value: GitCounts = {
+        commits,
+        worktrees: worktrees.length,
+        pulls: null,
+        issues: null,
+        pullsCapped: false,
+        issuesCapped: false,
+      }
+      if (context.remote === null) return value
+      try {
+        const [pulls, issues] = await Promise.all([
+          forge.listPulls({
+            root,
+            remote: context.remote,
+            state: 'open',
+            limit: COUNT_PAGE,
+            signal,
+            refresh: payload.refresh === true,
+          }),
+          forge.listIssues({
+            root,
+            remote: context.remote,
+            state: 'open',
+            limit: COUNT_PAGE,
+            signal,
+            refresh: payload.refresh === true,
+          }),
+        ])
+        value.pulls = pulls.pulls?.length ?? 0
+        value.pullsCapped = value.pulls >= COUNT_PAGE
+        value.issues = issues.issues?.length ?? 0
+        value.issuesCapped = value.issues >= COUNT_PAGE
+      } catch (error) {
+        // A code host that cannot answer leaves the counters out; the tabs
+        // themselves still work and show the reason.
+        logger.info('git: the tab counters could not read the code host: %s', messageOf(error))
       }
       return value
     },
@@ -1201,6 +1284,75 @@ function mountRoutes(
     },
 
     /**
+     * Draft a pull request's title and description without pushing or opening.
+     *
+     * The create dialog shows this draft for review; a title or body the caller
+     * already wrote is returned untouched so regenerating never replaces edits.
+     */
+    async draftPull(payload: DraftPullRequest, signal): Promise<PullDraftResult> {
+      const { root } = await repository(payload, signal)
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      const context = await readContext(runner, { root, config, signal })
+      if (context.branch === null) {
+        throw new CommandError('pr/detached', 'A detached HEAD cannot draft a pull request.')
+      }
+      if (context.remote === null) {
+        throw new CommandError('pr/no-remote', 'The repository has no remote, so it cannot draft a pull request.')
+      }
+      const requested = typeof payload.base === 'string' ? payload.base.trim() : ''
+      const base = requested.length > 0
+        ? requested
+        : config.pull.base.length > 0
+          ? config.pull.base
+          : await forge.defaultBase({ root, remote: context.remote, signal })
+      if (base === null || base.length === 0) {
+        throw new CommandError('pr/no-base', 'Cannot determine the base branch for the change request.')
+      }
+      if (base === context.branch) {
+        throw new CommandError('pr/same-branch', `Branch ${base} cannot be its own base branch.`)
+      }
+      const facts = await readChangeRequestFacts(runner, { root, base, config, signal })
+      if (facts.ahead === 0) {
+        throw new CommandError('pr/no-commits', `Branch ${context.branch} has no commits over ${base}.`, { base })
+      }
+      const providedTitle = typeof payload.title === 'string' ? payload.title.trim() : ''
+      if (providedTitle.length > 0) {
+        return {
+          title: providedTitle,
+          body: typeof payload.body === 'string' ? payload.body : '',
+          source: 'manual' as const,
+          model: null,
+          error: null,
+          base,
+          head: context.branch,
+          ahead: facts.ahead,
+          commits: facts.commits.length,
+          files: facts.files.length,
+        }
+      }
+      const draft = await draftChangeRequest({
+        sessionId,
+        payload: payload as unknown as Record<string, unknown>,
+        facts: { ...facts, branch: context.branch, base },
+        branch: context.branch,
+        base,
+        signal,
+      })
+      return {
+        title: draft.title,
+        body: draft.body,
+        source: draft.source === 'model' ? 'model' : 'commits',
+        model: draft.model,
+        error: draft.error ?? null,
+        base,
+        head: context.branch,
+        ahead: facts.ahead,
+        commits: facts.commits.length,
+        files: facts.files.length,
+      }
+    },
+
+    /**
      * Create a change request for the checked-out branch: push it, draft the
      * title and description with the Session's model, then open it on the code
      * host and bind it to the Session for merge tracking.
@@ -1241,15 +1393,42 @@ function mountRoutes(
           head: pr.head ?? context.branch,
         },
         title: pr.title ?? '',
-        body: '',
-        draft: { source: 'model', model: null, error: null },
+        body: pr.body ?? '',
+        draft: pr.draft
+          ?? (pr.status === 'opened_existing'
+            ? { source: 'existing', model: null, error: null }
+            : { source: 'model', model: null, error: null }),
         watched: sessionId.length > 0 && typeof pr.number === 'number',
       }
     },
 
-    /** Publish the repository to a code host, so it gains its first remote. */
-    async publish(payload: PublishRequest, signal) {
+    /**
+     * Merge one change request with the strategy the detail pane asked for.
+     *
+     * The code host enforces its own rules; this route never forces a merge, so
+     * a refusal surfaces as a `merge/*` code the pane can explain.
+     */
+    async mergePull(payload: MergePullRequest, signal) {
       const { root } = await repository(payload, signal)
+      const context = await readContext(runner, { root, config, signal })
+      if (context.remote === null) {
+        throw new CommandError('pr/no-remote', 'The repository has no remote, so it cannot merge a pull request.')
+      }
+      const method: MergeMethod = payload.method === 'squash' || payload.method === 'rebase'
+        ? payload.method
+        : 'merge'
+      return await forge.mergePull({
+        root,
+        remote: context.remote,
+        number: requiredNumber(payload.number, 'number'),
+        method,
+        deleteBranch: payload.deleteBranch === true,
+        signal,
+      })
+    },
+
+    /** Publish the repository to a code host, so it gains its first remote. */
+    async publish(payload: PublishRequest, signal) {      const { root } = await repository(payload, signal)
       const provider = payload.provider === 'gitlab' ? 'gitlab' : 'github'
       const repositoryName = requiredString(payload.repository, 'repository')
       const visibility = payload.visibility === 'public' ? '--public' : '--private'

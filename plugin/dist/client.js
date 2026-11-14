@@ -34,6 +34,13 @@
 
   // src/client/i18n.ts
   var NS = "personalHub";
+  function currentLocale(t) {
+    const marker = t("gitActions");
+    if (marker === en.gitActions) return "en";
+    if (marker === vi.gitActions) return "vi";
+    const language = typeof navigator === "undefined" ? "" : String(navigator.language ?? "");
+    return language.length > 0 ? language : "en";
+  }
   var en = {
     cardTitle: "Personal hub",
     title: "Telegram remote control",
@@ -134,7 +141,7 @@
     gitChecksSuccess: "{count} passed",
     gitPrAction: "Create pull request",
     gitPrConfirm: "Create a pull request from {branch} into {base}?",
-    gitPrConfirmHint: "The branch is pushed, then this chat\u2019s model drafts the title and description before the request opens.",
+    gitPrConfirmHint: "The model drafts the title and description; the branch is pushed only when you create the request.",
     gitPrCreate: "Create",
     gitPrCancel: "Cancel",
     gitPrBusy: "Drafting the pull request\u2026",
@@ -144,6 +151,47 @@
     gitPrBase: "Base branch",
     gitPrNoForge: "Pull requests need a signed-in code host CLI",
     gitPrNoBranch: "This checkout has no named branch",
+    gitPrTitleLabel: "Title",
+    gitPrBodyLabel: "Description",
+    gitPrTitlePlaceholder: "Write the title, or let the model draft one",
+    gitPrBodyPlaceholder: "Describe what changed and how it was tested, or let the model draft it",
+    gitPrDrafting: "Drafting the pull request\u2026",
+    gitPrRegenerate: "Draft again",
+    gitPrDraftModel: "Drafted by {model}",
+    gitPrDraftFallback: "Drafted from the commits",
+    gitPrDraftFallbackReason: "Drafted from the commits ({reason})",
+    gitPrNoCommitsHint: "The branch has no commit over its base yet.",
+    gitPrDefaultBranchHint: "This checkout is on {branch}; create a feature branch before opening a pull request.",
+    gitPrCreating: "Creating pull request\u2026",
+    /* Merging a change request */
+    gitMerge: "Merge",
+    gitMergeSquash: "Squash & merge",
+    gitMergeRebase: "Rebase & merge",
+    gitMergeTitle: "Merge pull request #{number}",
+    gitMergeBody: "Merge {branch} into {base}?",
+    gitMergeHint: "The code host still applies its checks, reviews, and branch protection rules.",
+    gitMergeDeleteBranch: "Delete the source branch after merging",
+    gitMergeCancel: "Cancel",
+    gitMergeConfirm: "Merge",
+    gitMergeBusy: "Merging\u2026",
+    gitMergeDone: "Merged #{number}",
+    gitMergeQueued: "Merge requested for #{number}",
+    gitMergeFailed: "Could not merge the pull request",
+    gitMergeBlocked: "The code host did not accept the merge",
+    gitMergeUnsupported: "This code host does not support that merge method",
+    gitMergeDeletedBranch: "The source branch was deleted.",
+    gitMergeDeleteFailed: "The merge succeeded, but the source branch could not be deleted.",
+    /* Staging one file */
+    gitStage: "Stage",
+    gitUnstage: "Unstage",
+    gitDiscard: "Discard",
+    gitDiscardBusy: "Discarding\u2026",
+    gitDiscardConfirm: "Discard changes in {path}?",
+    gitDiscardUntracked: "Delete the untracked file {path}?",
+    gitFileActions: "File actions",
+    gitStageDone: "Staged {path}",
+    gitUnstageDone: "Unstaged {path}",
+    gitDiscardDone: "Discarded {path}",
     wtOption: "New worktree",
     wtSource: "Start from",
     wtLocal: "Local branch",
@@ -534,7 +582,7 @@
     gitChecksSuccess: "{count} \u0111\u1EA1t",
     gitPrAction: "T\u1EA1o pull request",
     gitPrConfirm: "T\u1EA1o pull request t\u1EEB {branch} v\xE0o {base}?",
-    gitPrConfirmHint: "Nh\xE1nh \u0111\u01B0\u1EE3c \u0111\u1EA9y l\xEAn tr\u01B0\u1EDBc, sau \u0111\xF3 model c\u1EE7a phi\xEAn n\xE0y vi\u1EBFt ti\xEAu \u0111\u1EC1 v\xE0 m\xF4 t\u1EA3 r\u1ED3i pull request m\u1EDBi \u0111\u01B0\u1EE3c m\u1EDF.",
+    gitPrConfirmHint: "Model vi\u1EBFt ti\xEAu \u0111\u1EC1 v\xE0 m\xF4 t\u1EA3; nh\xE1nh ch\u1EC9 \u0111\u01B0\u1EE3c \u0111\u1EA9y l\xEAn khi b\u1EA1n b\u1EA5m t\u1EA1o.",
     gitPrCreate: "T\u1EA1o",
     gitPrCancel: "Hu\u1EF7",
     gitPrBusy: "\u0110ang so\u1EA1n pull request\u2026",
@@ -544,6 +592,47 @@
     gitPrBase: "Nh\xE1nh n\u1EC1n",
     gitPrNoForge: "C\u1EA7n CLI c\u1EE7a m\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n \u0111\xE3 \u0111\u0103ng nh\u1EADp \u0111\u1EC3 t\u1EA1o pull request",
     gitPrNoBranch: "B\u1EA3n checkout n\xE0y kh\xF4ng \u1EDF tr\xEAn nh\xE1nh n\xE0o",
+    gitPrTitleLabel: "Ti\xEAu \u0111\u1EC1",
+    gitPrBodyLabel: "M\xF4 t\u1EA3",
+    gitPrTitlePlaceholder: "Vi\u1EBFt ti\xEAu \u0111\u1EC1, ho\u1EB7c \u0111\u1EC3 model vi\u1EBFt",
+    gitPrBodyPlaceholder: "M\xF4 t\u1EA3 thay \u0111\u1ED5i v\xE0 c\xE1ch ki\u1EC3m th\u1EED, ho\u1EB7c \u0111\u1EC3 model vi\u1EBFt",
+    gitPrDrafting: "\u0110ang so\u1EA1n pull request\u2026",
+    gitPrRegenerate: "Vi\u1EBFt l\u1EA1i",
+    gitPrDraftModel: "Do {model} vi\u1EBFt",
+    gitPrDraftFallback: "D\u1EF1ng t\u1EEB commit",
+    gitPrDraftFallbackReason: "D\u1EF1ng t\u1EEB commit ({reason})",
+    gitPrNoCommitsHint: "Nh\xE1nh ch\u01B0a c\xF3 commit n\xE0o h\u01A1n nh\xE1nh n\u1EC1n.",
+    gitPrDefaultBranchHint: "Checkout \u0111ang \u1EDF {branch}; h\xE3y t\u1EA1o nh\xE1nh feature tr\u01B0\u1EDBc khi m\u1EDF pull request.",
+    gitPrCreating: "\u0110ang t\u1EA1o pull request\u2026",
+    /* Gộp pull request */
+    gitMerge: "G\u1ED9p",
+    gitMergeSquash: "Squash & g\u1ED9p",
+    gitMergeRebase: "Rebase & g\u1ED9p",
+    gitMergeTitle: "G\u1ED9p pull request #{number}",
+    gitMergeBody: "G\u1ED9p {branch} v\xE0o {base}?",
+    gitMergeHint: "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n v\u1EABn \xE1p d\u1EE5ng ki\u1EC3m tra, review v\xE0 quy t\u1EAFc b\u1EA3o v\u1EC7 nh\xE1nh.",
+    gitMergeDeleteBranch: "Xo\xE1 nh\xE1nh ngu\u1ED3n sau khi g\u1ED9p",
+    gitMergeCancel: "Hu\u1EF7",
+    gitMergeConfirm: "G\u1ED9p",
+    gitMergeBusy: "\u0110ang g\u1ED9p\u2026",
+    gitMergeDone: "\u0110\xE3 g\u1ED9p #{number}",
+    gitMergeQueued: "\u0110\xE3 g\u1EEDi y\xEAu c\u1EA7u g\u1ED9p #{number}",
+    gitMergeFailed: "Kh\xF4ng g\u1ED9p \u0111\u01B0\u1EE3c pull request",
+    gitMergeBlocked: "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n kh\xF4ng ch\u1EA5p nh\u1EADn g\u1ED9p",
+    gitMergeUnsupported: "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n kh\xF4ng h\u1ED7 tr\u1EE3 ki\u1EC3u g\u1ED9p n\xE0y",
+    gitMergeDeletedBranch: "\u0110\xE3 xo\xE1 nh\xE1nh ngu\u1ED3n.",
+    gitMergeDeleteFailed: "G\u1ED9p th\xE0nh c\xF4ng nh\u01B0ng ch\u01B0a xo\xE1 \u0111\u01B0\u1EE3c nh\xE1nh ngu\u1ED3n.",
+    /* Stage từng tệp */
+    gitStage: "Stage",
+    gitUnstage: "B\u1ECF stage",
+    gitDiscard: "Hu\u1EF7 thay \u0111\u1ED5i",
+    gitDiscardBusy: "\u0110ang hu\u1EF7\u2026",
+    gitDiscardConfirm: "Hu\u1EF7 thay \u0111\u1ED5i trong {path}?",
+    gitDiscardUntracked: "Xo\xE1 t\u1EC7p ch\u01B0a theo d\xF5i {path}?",
+    gitFileActions: "Thao t\xE1c t\u1EC7p",
+    gitStageDone: "\u0110\xE3 stage {path}",
+    gitUnstageDone: "\u0110\xE3 b\u1ECF stage {path}",
+    gitDiscardDone: "\u0110\xE3 hu\u1EF7 thay \u0111\u1ED5i {path}",
     wtOption: "Worktree m\u1EDBi",
     wtSource: "B\u1EAFt \u0111\u1EA7u t\u1EEB",
     wtLocal: "Nh\xE1nh local",
@@ -896,6 +985,7 @@
     const route = (name) => (payload) => call(name, payload);
     return {
       overview: route("overview"),
+      counts: route("counts"),
       diff: route("diff"),
       diffAll: route("diffAll"),
       commits: route("commits"),
@@ -919,6 +1009,8 @@
       issues: route("issues"),
       issue: route("issue"),
       createPull: route("createPull"),
+      draftPull: route("draftPull"),
+      mergePull: route("mergePull"),
       publish: route("publish"),
       worktreeState: route("worktreeState"),
       worktrees: route("worktrees"),
@@ -948,7 +1040,7 @@
 
   // src/client/styles.ts
   var GIT_CSS = `
-.ph-git{display:flex;flex-direction:column;min-height:0;height:100%;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:12.5px}
+.ph-git{display:flex;flex-direction:column;min-height:0;height:100%;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px}
 .ph-git *{box-sizing:border-box}
 .ph-git button{font:inherit;color:inherit}
 .ph-git .ph-spacer{flex:1 1 auto;min-width:0}
@@ -956,21 +1048,22 @@
 .ph-git .ph-tiny{font-size:11px}
 .ph-git .ph-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .ph-git .ph-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.ph-git .ph-row{display:flex;align-items:center;gap:6px;min-width:0}
+.ph-git .ph-row{display:flex;align-items:center;gap:7px;min-width:0}
 
 /* Header */
-.ph-head{display:flex;flex-direction:column;gap:6px;padding:8px 10px 6px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none}
-.ph-repo-row{display:flex;align-items:center;gap:6px;min-width:0}
-.ph-repo{font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ph-head{display:flex;flex-direction:column;gap:8px;padding:10px 12px 9px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none}
+.ph-repo-row{display:flex;align-items:center;gap:7px;min-width:0}
+.ph-repo{font-weight:650;font-size:13.5px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ph-branch-row{display:flex;align-items:center;gap:6px;min-width:0}
-.ph-branch-button{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);cursor:pointer;min-width:0}
+.ph-branch-button{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);cursor:pointer;min-width:0;font-size:12.5px}
 .ph-branch-button:hover{background:var(--dsw-alias-bg-layer-2)}
-.ph-pill{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ph-pill{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ph-pill[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}
 .ph-pill[data-tone=success]{color:var(--dsw-alias-state-success-primary)}
-.ph-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:1px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 button.ph-chip{cursor:pointer}
 button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
+.ph-worktree-chip{border-style:dashed;color:var(--dsw-alias-label-tertiary)}
 .ph-chip[data-tone=success]{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent)}
 .ph-chip[data-tone=warn]{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 40%,transparent)}
 .ph-chip[data-tone=error]{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent)}
@@ -986,21 +1079,21 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-dot[data-state=draft]{background:var(--dsw-alias-label-secondary)}
 
 /* Actions: one split control, as the reference implementation has */
-.ph-actions{display:flex;align-items:stretch;gap:0;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);overflow:hidden;position:relative}
+.ph-actions{display:flex;align-items:stretch;gap:0;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);overflow:hidden;position:relative}
 .ph-actions[data-running=true]{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,var(--dsw-alias-border-l1))}
-.ph-action-primary{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;padding:6px 9px;border:0;background:transparent;cursor:pointer;font-weight:600;font-size:12.5px;text-align:left}
+.ph-action-primary{display:flex;align-items:center;gap:7px;flex:1 1 auto;min-width:0;padding:8px 10px;border:0;background:transparent;cursor:pointer;font-weight:600;font-size:13px;text-align:left}
 .ph-action-primary:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}
 .ph-action-primary:disabled{cursor:default;color:var(--dsw-alias-label-tertiary)}
-.ph-action-caret{display:flex;align-items:center;justify-content:center;width:28px;border:0;border-left:1px solid var(--dsw-alias-border-l3);background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary)}
+.ph-action-caret{display:flex;align-items:center;justify-content:center;width:30px;border:0;border-left:1px solid var(--dsw-alias-border-l3);background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary)}
 .ph-action-caret:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}
 .ph-action-caret:disabled{cursor:default;opacity:.55}
-.ph-action-hint{font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4;margin:0}
-.ph-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:50;display:flex;flex-direction:column;min-width:220px;padding:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.24)}
-.ph-menu-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border:0;border-radius:6px;background:transparent;cursor:pointer;text-align:left;font-size:12px}
+.ph-action-hint{font-size:11.5px;color:var(--dsw-alias-label-tertiary);line-height:1.45;margin:0}
+.ph-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:50;display:flex;flex-direction:column;min-width:230px;padding:5px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.24)}
+.ph-menu-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border:0;border-radius:7px;background:transparent;cursor:pointer;text-align:left;font-size:12.5px}
 .ph-menu-item:hover:not(:disabled){background:var(--dsw-alias-bg-layer-1)}
 .ph-menu-item:disabled{cursor:default;color:var(--dsw-alias-label-tertiary)}
-.ph-menu-hint{padding:4px 8px 6px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.4}
-.ph-menu-sep{height:1px;margin:4px 2px;background:var(--dsw-alias-border-l3)}
+.ph-menu-hint{padding:4px 9px 6px;color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:1.45}
+.ph-menu-sep{height:1px;margin:5px 3px;background:var(--dsw-alias-border-l3)}
 
 /* Progress and inline success replace the control */
 .ph-progress{display:flex;flex-direction:column;gap:2px;padding:6px 9px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l1));border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
@@ -1015,12 +1108,12 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-success-desc{font-size:11px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Tabs */
-.ph-tabs{display:flex;align-items:center;gap:2px;padding:0 6px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none;overflow-x:auto;scrollbar-width:none}
+.ph-tabs{display:flex;align-items:center;gap:2px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none;overflow-x:auto;scrollbar-width:none}
 .ph-tabs::-webkit-scrollbar{display:none}
-.ph-tab{display:inline-flex;align-items:center;gap:5px;padding:7px 8px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:12px;white-space:nowrap}
+.ph-tab{display:inline-flex;align-items:center;gap:6px;padding:9px 9px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:12.5px;white-space:nowrap}
 .ph-tab:hover{color:var(--dsw-alias-label-primary)}
-.ph-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-brand-primary)}
-.ph-tab-count{padding:0 5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:10px;font-variant-numeric:tabular-nums}
+.ph-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:550}
+.ph-tab-count{padding:0 5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:10.5px;font-variant-numeric:tabular-nums}
 
 /* Body */
 .ph-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
@@ -1029,13 +1122,15 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-toolbar-title{font-weight:600;font-size:12px}
 
 /* Buttons */
-.ph-button{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:11.5px;white-space:nowrap}
+.ph-button{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:12px;white-space:nowrap}
 .ph-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ph-button:disabled{opacity:.55;cursor:default}
 .ph-button[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
-.ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:5px 12px;border:1px solid transparent;border-radius:7px;background:var(--dsw-alias-brand-primary);color:#fff;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}
+.ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 13px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap}
 .ph-primary:disabled{opacity:.55;cursor:default}
-.ph-icon-button{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
+.ph-primary:hover:not(:disabled){filter:brightness(1.06)}
+.ph-primary.ph-danger{background:var(--dsw-alias-state-error-primary)}
+.ph-icon-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
 .ph-icon-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ph-icon-button:disabled{opacity:.5;cursor:default}
 .ph-icon-button[data-busy=true] svg{animation:ph-spin .9s linear infinite}
@@ -1043,35 +1138,38 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-link:hover{text-decoration:underline}
 
 /* Commit box */
-.ph-commit{border-top:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);padding:8px 10px;display:flex;flex-direction:column;gap:6px;flex:none}
-.ph-commit-head{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
-.ph-check-inline{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:10.5px;white-space:nowrap}
+.ph-commit{border-top:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);padding:10px 12px;display:flex;flex-direction:column;gap:7px;flex:none}
+.ph-commit-head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.ph-check-inline{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:11px;white-space:nowrap}
 .ph-check-inline input{flex:none;margin:0;cursor:pointer}
-.ph-commit-files{max-height:132px;overflow:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:var(--dsw-alias-bg-base)}
-.ph-commit-file{display:flex;align-items:center;gap:6px;width:100%;padding:3px 7px;border:0;background:transparent;cursor:pointer;font-size:11.5px;text-align:left;min-width:0}
+.ph-commit-files{max-height:140px;overflow:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:8px;background:var(--dsw-alias-bg-base)}
+.ph-commit-file{display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:0;background:transparent;cursor:pointer;font-size:12px;text-align:left;min-width:0}
 .ph-commit-file:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-commit-file[data-excluded=true]{color:var(--dsw-alias-label-tertiary)}
-.ph-textarea{width:100%;min-height:52px;max-height:160px;resize:vertical;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:1.45}
+.ph-textarea{width:100%;min-height:60px;max-height:170px;resize:vertical;padding:7px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:1.5}
 .ph-textarea:focus{outline:1px solid var(--dsw-alias-brand-primary);outline-offset:-1px}
 .ph-commit-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ph-commit-actions .ph-spacer{flex:1 1 auto}
-.ph-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.45}
-.ph-error-text{margin:0;color:var(--dsw-alias-state-error-primary);font-size:11.5px;line-height:1.45}
+.ph-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:1.5}
+.ph-error-text{margin:0;color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.45}
 
 /* Changes / diff stack */
 .ph-stack{display:flex;flex-direction:column}
-.ph-stack-toolbar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l3);position:sticky;top:0;z-index:6;background:var(--dsw-alias-bg-base);flex-wrap:wrap}
+.ph-stack-toolbar{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--dsw-alias-border-l3);position:sticky;top:0;z-index:6;background:var(--dsw-alias-bg-base);flex-wrap:wrap}
 .ph-file{border-bottom:1px solid var(--dsw-alias-border-l3)}
-.ph-file-head{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:6px;width:100%;padding:5px 8px;border:0;background:var(--dsw-alias-bg-layer-1);cursor:pointer;text-align:left;min-width:0;min-height:32px}
+.ph-file-head{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:6px;width:100%;padding:6px 9px;border:0;background:var(--dsw-alias-bg-layer-1);cursor:pointer;text-align:left;min-width:0;min-height:34px}
 .ph-file-head:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-file-head[data-expanded=true]{border-bottom:1px solid var(--dsw-alias-border-l3)}
 .ph-file-check{flex:none;margin:0;cursor:pointer}
-.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
-.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;direction:rtl;text-align:left}
+.ph-file-path{display:flex;align-items:baseline;gap:0;min-width:0;flex:1 1 auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.ph-file-dir{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto;max-width:52%;direction:rtl;text-align:left}
 .ph-file-sep{color:var(--dsw-alias-label-tertiary);flex:none}
-.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;max-width:78%}
-.ph-file-copy{opacity:0}
-.ph-file-head:hover .ph-file-copy,.ph-file-head:focus-within .ph-file-copy{opacity:1}
+.ph-file-name{color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 0 auto;max-width:100%}
+.ph-file-actions{display:inline-flex;align-items:center;gap:0;flex:none;padding-left:1px;border-left:1px solid var(--dsw-alias-border-l3);margin-left:1px}
+.ph-file-actions .ph-icon-button{width:22px;height:22px}
+.ph-file-discard:hover:not(:disabled){color:var(--dsw-alias-state-error-primary)}
+.ph-file-copy{width:0;min-width:0;padding:0;overflow:hidden;opacity:0;transition:width .1s ease,opacity .1s ease}
+.ph-file-head:hover .ph-file-copy,.ph-file-head:focus-within .ph-file-copy{width:26px;opacity:1}
 .ph-badge{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;font-family:ui-monospace,monospace;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
 .ph-badge[data-tone=success]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 18%,transparent);color:var(--dsw-alias-state-success-primary)}
 .ph-badge[data-tone=warn]{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 18%,transparent);color:var(--dsw-alias-state-warn-primary)}
@@ -1087,16 +1185,16 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-del{color:var(--dsw-alias-state-error-primary)}
 .ph-file-body{background:var(--dsw-alias-bg-base)}
 .ph-notice{margin:6px 10px;padding:6px 8px;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:1.45}
-.ph-diff{display:flex;flex-direction:column;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.5}
+.ph-diff{display:flex;flex-direction:column;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55}
 .ph-diff[data-wrap=true]{overflow-x:hidden}
-.ph-hunk-head{padding:2px 10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:10.5px;white-space:pre;position:sticky;left:0}
+.ph-hunk-head{padding:3px 11px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:11px;white-space:pre;position:sticky;left:0}
 .ph-line{display:flex;align-items:flex-start;min-width:0;white-space:pre}
 .ph-diff[data-wrap=true] .ph-line{white-space:pre-wrap;word-break:break-word}
 .ph-line[data-kind=add]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent)}
 .ph-line[data-kind=del]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}
 .ph-line[data-kind=meta]{color:var(--dsw-alias-label-tertiary);font-style:italic}
-.ph-num{flex:none;width:34px;padding:0 6px;text-align:right;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;user-select:none}
-.ph-sign{flex:none;width:14px;text-align:center;color:var(--dsw-alias-label-tertiary);user-select:none}
+.ph-num{flex:none;width:38px;padding:0 7px;text-align:right;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;user-select:none}
+.ph-sign{flex:none;width:15px;text-align:center;color:var(--dsw-alias-label-tertiary);user-select:none}
 .ph-code{flex:1 1 auto;min-width:0;padding-right:10px}
 .ph-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0}
 .ph-split .ph-side{display:flex;align-items:flex-start;min-width:0;border-right:1px solid var(--dsw-alias-border-l3);white-space:pre}
@@ -1124,6 +1222,13 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-dialog-title{font-size:13px;font-weight:600}
 .ph-dialog-body{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}
 .ph-dialog-actions{display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.ph-create{max-width:560px;gap:9px}
+.ph-create-head{display:flex;align-items:center;gap:6px;min-width:0}
+.ph-create-title{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;font-size:13px;font-weight:600}
+.ph-create-fields{display:flex;flex-direction:column;gap:8px;min-height:0}
+.ph-create-body{min-height:170px;max-height:42vh}
+.ph-create-source{display:flex;align-items:center;gap:5px}
+.ph-create-source .ph-spinner{width:10px;height:10px}
 .ph-field{display:flex;flex-direction:column;gap:4px}
 .ph-field-label{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .ph-input,.ph-select{width:100%;padding:5px 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
@@ -1157,8 +1262,11 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-detail-row{display:flex;align-items:baseline;gap:8px;font-size:11.5px}
 .ph-detail-label{flex:none;width:76px;color:var(--dsw-alias-label-tertiary)}
 .ph-detail-value{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.ph-card{display:flex;flex-direction:column;gap:6px;padding:8px 9px;border:1px solid var(--dsw-alias-border-l3);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
-.ph-card-title{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.ph-card{display:flex;flex-direction:column;gap:6px;padding:9px 10px;border:1px solid var(--dsw-alias-border-l3);border-radius:9px;background:var(--dsw-alias-bg-layer-1)}
+.ph-card-title{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.ph-card.ph-merge{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,var(--dsw-alias-border-l3));background:color-mix(in srgb,var(--dsw-alias-brand-primary) 6%,var(--dsw-alias-bg-layer-1))}
+.ph-merge-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ph-merge-methods{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
 .ph-prose{margin:0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}
 .ph-comment{display:flex;flex-direction:column;gap:3px;padding:6px 0;border-top:1px solid var(--dsw-alias-border-l3)}
 .ph-comment:first-of-type{border-top:0}
@@ -3092,6 +3200,185 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     );
   }
 
+  // src/client/git/create-pull.tsx
+  function CreatePullDialog(props) {
+    const { t, api } = props;
+    const [base, setBase] = useState(props.base ?? "");
+    const [title, setTitle] = useState("");
+    const [body2, setBody] = useState("");
+    const [drafting, setDrafting] = useState(true);
+    const [creating, setCreating] = useState(false);
+    const [error, setError] = useState("");
+    const [draftSource, setDraftSource] = useState(null);
+    const [ahead, setAhead] = useState(0);
+    const [branchHint, setBranchHint] = useState("");
+    const draft = async (nextBase) => {
+      setDrafting(true);
+      setError("");
+      setDraftSource(null);
+      try {
+        const value = await api.draftPull({
+          sessionId: props.sessionId,
+          cwd: props.cwd || void 0,
+          base: nextBase ?? (base.trim().length > 0 ? base.trim() : void 0),
+          locale: currentLocale(t)
+        });
+        setBase(value.base);
+        setTitle(value.title);
+        setBody(value.body);
+        setAhead(value.ahead);
+        setDraftSource({ source: value.source, model: value.model, error: value.error });
+      } catch (failure) {
+        setError(messageOf(failure));
+        if (codeOf(failure) === "pr/same-branch") {
+          setBranchHint(t("gitPrDefaultBranchHint", { branch: base || "main" }));
+        }
+      } finally {
+        setDrafting(false);
+      }
+    };
+    useEffect(() => {
+      void draft();
+    }, []);
+    const create = async () => {
+      if (creating || drafting || title.trim().length === 0) return;
+      setCreating(true);
+      setError("");
+      try {
+        const answer = await api.createPull({
+          sessionId: props.sessionId,
+          cwd: props.cwd || void 0,
+          base: base.trim().length > 0 ? base.trim() : void 0,
+          title: title.trim(),
+          body: body2,
+          push: true,
+          locale: currentLocale(t)
+        });
+        props.onCreated({
+          number: answer.pull.number,
+          url: answer.pull.url,
+          title: answer.pull.title
+        });
+      } catch (failure) {
+        setError(messageOf(failure));
+      } finally {
+        setCreating(false);
+      }
+    };
+    const sourceLine = () => {
+      if (drafting) return t("gitPrDrafting");
+      if (draftSource === null) return "";
+      if (draftSource.source === "model") {
+        return draftSource.model === null ? t("gitPrDraftModel") : t("gitPrDraftModel", { model: draftSource.model });
+      }
+      if (draftSource.source === "manual") return "";
+      return draftSource.error === null ? t("gitPrDraftFallback") : t("gitPrDraftFallbackReason", { reason: draftSource.error });
+    };
+    const canCreate = !drafting && !creating && ahead > 0 && title.trim().length > 0;
+    return h(
+      "div",
+      { className: "ph-overlay", role: "presentation" },
+      h(
+        "div",
+        {
+          className: "ph-dialog ph-create",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": t("gitPrAction")
+        },
+        h(
+          "div",
+          { className: "ph-create-head" },
+          h("span", { className: "ph-create-title" }, h(Icon, { name: "branchPlus", size: 14 }), t("gitPrAction")),
+          h("button", {
+            type: "button",
+            className: "ph-icon-button",
+            title: t("gitPrCancel"),
+            "aria-label": t("gitPrCancel"),
+            onClick: props.onClose
+          }, h(Icon, { name: "cross", size: 13 }))
+        ),
+        h("p", { className: "ph-hint" }, t("gitPrConfirmHint")),
+        h(
+          "div",
+          { className: "ph-create-fields" },
+          h(
+            "label",
+            { className: "ph-field" },
+            h("span", { className: "ph-field-label" }, t("gitPrBase")),
+            h("input", {
+              className: "ph-input",
+              value: base,
+              spellcheck: false,
+              disabled: creating || drafting,
+              onChange: (event) => setBase(event.target.value)
+            })
+          ),
+          h(
+            "label",
+            { className: "ph-field" },
+            h("span", { className: "ph-field-label" }, t("gitPrTitleLabel")),
+            h("input", {
+              className: "ph-input",
+              value: title,
+              spellcheck: false,
+              disabled: creating || drafting,
+              placeholder: t("gitPrTitlePlaceholder"),
+              onInput: (event) => setTitle(event.target.value),
+              onChange: (event) => setTitle(event.target.value)
+            })
+          ),
+          h(
+            "label",
+            { className: "ph-field" },
+            h("span", { className: "ph-field-label" }, t("gitPrBodyLabel")),
+            h("textarea", {
+              className: "ph-textarea ph-create-body",
+              value: body2,
+              spellcheck: false,
+              disabled: creating || drafting,
+              placeholder: t("gitPrBodyPlaceholder"),
+              onInput: (event) => setBody(event.target.value),
+              onChange: (event) => setBody(event.target.value)
+            })
+          ),
+          sourceLine().length > 0 ? h(
+            "p",
+            { className: "ph-dim ph-tiny ph-create-source" },
+            drafting ? h("span", { className: "ph-spinner" }) : null,
+            sourceLine()
+          ) : null,
+          ahead === 0 && !drafting ? h("p", { className: "ph-hint" }, t("gitPrNoCommitsHint")) : null
+        ),
+        branchHint.length > 0 ? h("p", { className: "ph-hint" }, branchHint) : null,
+        error.length > 0 ? h("p", { className: "ph-error-text" }, `${t("gitPrFailed")}: ${error}`) : null,
+        h(
+          "div",
+          { className: "ph-dialog-actions" },
+          h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: drafting || creating,
+            onClick: () => void draft()
+          }, h(Icon, { name: "sparkles", size: 11 }), drafting ? t("gitPrDrafting") : t("gitPrRegenerate")),
+          h("span", { className: "ph-spacer" }),
+          h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: creating,
+            onClick: props.onClose
+          }, t("gitPrCancel")),
+          h("button", {
+            type: "button",
+            className: "ph-primary",
+            disabled: !canCreate,
+            onClick: () => void create()
+          }, creating ? t("gitPrCreating") : t("gitPrCreate"))
+        )
+      )
+    );
+  }
+
   // src/client/git/diff-model.ts
   function isWhitespaceOnlyHunk(hunk) {
     const removed = hunk.lines.filter((line) => line.type === "del").map((line) => normalizeWhitespace(line.text));
@@ -3257,6 +3544,42 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         h("span", { className: "ph-file-name" }, parts.name)
       ),
       h(Counts, { additions: file.additions, deletions: file.deletions }),
+      props.onStage === void 0 && props.onUnstage === void 0 && props.onDiscard === void 0 ? null : h(
+        "div",
+        { className: "ph-file-actions" },
+        props.staged === true ? h("button", {
+          type: "button",
+          className: "ph-icon-button",
+          title: t("gitUnstage"),
+          "aria-label": t("gitUnstage"),
+          disabled: props.actionBusy === true || props.onUnstage === void 0,
+          onClick: (event) => {
+            event.stopPropagation();
+            props.onUnstage?.();
+          }
+        }, h(Icon, { name: "cross", size: 12 })) : h("button", {
+          type: "button",
+          className: "ph-icon-button",
+          title: t("gitStage"),
+          "aria-label": t("gitStage"),
+          disabled: props.actionBusy === true || props.onStage === void 0,
+          onClick: (event) => {
+            event.stopPropagation();
+            props.onStage?.();
+          }
+        }, h(Icon, { name: "plus", size: 12 })),
+        props.onDiscard === void 0 ? null : h("button", {
+          type: "button",
+          className: "ph-icon-button ph-file-discard",
+          title: t("gitDiscard"),
+          "aria-label": t("gitDiscard"),
+          disabled: props.actionBusy === true,
+          onClick: (event) => {
+            event.stopPropagation();
+            props.onDiscard?.();
+          }
+        }, h(Icon, { name: file.untracked ? "trash" : "back", size: 12 }))
+      ),
       h("button", {
         type: "button",
         className: "ph-icon-button ph-file-copy",
@@ -3462,7 +3785,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           sessionId: props.sessionId,
           cwd: props.cwd || void 0,
           paths: selectedPaths.length > 0 ? selectedPaths : void 0,
-          locale: typeof navigator === "undefined" ? "" : navigator.language
+          locale: currentLocale(t)
         });
         setMessage(draft.message);
         if (draft.error !== void 0 && draft.source !== "model") {
@@ -3637,15 +3960,18 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const [scope, setScope] = useState(initial.scope);
     const [expanded, setExpanded] = useState(() => /* @__PURE__ */ new Set());
     const [selection, setSelection] = useState(() => /* @__PURE__ */ new Set());
+    const [working, setWorking] = useState(null);
+    const [confirmDiscard, setConfirmDiscard] = useState(null);
     const known = useRef(/* @__PURE__ */ new Set());
     const initialized = useRef(false);
     useEffect(() => {
       writePreferences({ layout, wrap, hideWhitespace, scope });
     }, [layout, wrap, hideWhitespace, scope]);
-    useEffect(() => {
-      props.onScope?.(scope);
-    }, [scope, props.onScope]);
     const signature = files.map((file) => file.path).join("\n");
+    const stagedPaths = useMemo(
+      () => new Map(files.map((file) => [file.path, file.staged === true])),
+      [files]
+    );
     useEffect(() => {
       const paths = files.map((file) => file.path);
       setSelection((previous) => {
@@ -3697,9 +4023,31 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const selectAll = (next) => {
       setSelection(next ? new Set(files.map((file) => file.path)) : /* @__PURE__ */ new Set());
     };
+    const runFileAction = async (kind, path, untracked) => {
+      if (working !== null) return;
+      setWorking(path);
+      try {
+        const target = { sessionId: props.sessionId, cwd: props.cwd || void 0 };
+        if (kind === "stage") await api.stage({ ...target, paths: [path] });
+        else if (kind === "unstage") await api.unstage({ ...target, paths: [path] });
+        else {
+          if (!untracked) await api.unstage({ ...target, paths: [path] });
+          await api.discard({ ...target, paths: [path], includeUntracked: untracked });
+        }
+        const key = kind === "stage" ? "gitStageDone" : kind === "unstage" ? "gitUnstageDone" : "gitDiscardDone";
+        props.onToast(t(key, { path }), "", "success");
+        setConfirmDiscard(null);
+        props.onRefresh();
+      } catch (failure) {
+        props.onToast(t("gitActionFailed"), messageOf(failure), "error");
+      } finally {
+        setWorking(null);
+      }
+    };
     const expandAll = () => setExpanded(new Set(stack.map((file) => stackKey(file))));
     const collapseAll = () => setExpanded(/* @__PURE__ */ new Set());
     const baseLabel = overview.branchChanges?.baseRef ?? overview.repo.defaultBranch ?? "";
+    const totals = scope === "branch" ? { insertions: overview.branchChanges?.insertions ?? 0, deletions: overview.branchChanges?.deletions ?? 0 } : { insertions: overview.stats.additions, deletions: overview.stats.deletions };
     const toolbar = h(
       "div",
       { className: "ph-stack-toolbar" },
@@ -3722,6 +4070,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         }, t("gitScopeBranch"))
       ),
       baseLabel.length > 0 && scope === "branch" ? h("span", { className: "ph-dim ph-tiny" }, t("gitScopeLabel", { base: baseLabel })) : null,
+      h("span", { className: "ph-dim ph-tiny" }, t("gitFilesMany", { count: files.length })),
+      h(Counts, { additions: totals.insertions, deletions: totals.deletions }),
       h("span", { className: "ph-spacer" }),
       h("button", {
         type: "button",
@@ -3771,9 +4121,14 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
             wrap,
             expanded: expanded.has(key),
             selected: selection.has(file.path),
+            staged: stagedPaths.get(file.path) === true,
+            actionBusy: working === file.path,
             onToggle: () => toggleExpanded(key),
             onSelect: (next) => toggleSelected(file.path, next),
-            onCopied: (path) => props.onToast(t("gitCopied"), path, "success")
+            onCopied: (path) => props.onToast(t("gitCopied"), path, "success"),
+            onStage: scope === "working" ? () => void runFileAction("stage", file.path, file.untracked) : void 0,
+            onUnstage: scope === "working" ? () => void runFileAction("unstage", file.path, file.untracked) : void 0,
+            onDiscard: scope === "working" ? () => setConfirmDiscard({ path: file.path, untracked: file.untracked }) : void 0
           });
         })
       ];
@@ -3799,6 +4154,39 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           onCommit: props.onCommit,
           onToast: props.onToast
         })
+      ),
+      confirmDiscard === null ? null : h(
+        "div",
+        { className: "ph-overlay", role: "presentation" },
+        h(
+          "div",
+          { className: "ph-dialog", role: "alertdialog", "aria-modal": "true", "aria-label": t("gitDiscard") },
+          h("div", { className: "ph-dialog-title" }, t("gitDiscard")),
+          h(
+            "p",
+            { className: "ph-dialog-body" },
+            t(confirmDiscard.untracked ? "gitDiscardUntracked" : "gitDiscardConfirm", { path: confirmDiscard.path })
+          ),
+          h(
+            "div",
+            { className: "ph-dialog-actions" },
+            h("button", {
+              type: "button",
+              className: "ph-button",
+              disabled: working !== null,
+              onClick: () => setConfirmDiscard(null)
+            }, t("gitDefaultAbort")),
+            h("button", {
+              type: "button",
+              className: "ph-primary ph-danger",
+              disabled: working !== null,
+              onClick: () => {
+                const target = confirmDiscard;
+                void runFileAction("discard", target.path, target.untracked);
+              }
+            }, working === confirmDiscard.path ? t("gitDiscardBusy") : t("gitDiscard"))
+          )
+        )
       )
     );
   }
@@ -3809,25 +4197,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       h("span", { className: "ph-empty-icon" }, h(Icon, { name: "check", size: 26 })),
       h("span", { className: "ph-empty-title" }, props.t("gitClean")),
       h("span", { className: "ph-empty-hint" }, props.t("gitCleanHint"))
-    );
-  }
-  function ChangesSummary(props) {
-    const branch = props.scope === "branch" ? props.branchChanges : null;
-    const totals = branch ?? { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions };
-    const base = props.scope === "branch" ? branch !== null && branch.baseRef !== null ? props.t("gitScopeLabel", { base: branch.baseRef }) : props.t("gitScopeBranch") : props.t("gitUncommitted");
-    return h(
-      "button",
-      {
-        type: "button",
-        className: "ph-button",
-        style: { width: "100%", justifyContent: "flex-start", padding: "5px 8px" },
-        onClick: props.onClick
-      },
-      h(Icon, { name: "fileDiff", size: 12 }),
-      h("span", null, props.t("gitChanges")),
-      h("span", { className: "ph-dim ph-tiny" }, base),
-      h("span", { className: "ph-spacer" }),
-      h(Counts, { additions: totals.insertions, deletions: totals.deletions })
     );
   }
 
@@ -4165,13 +4534,20 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
   }
   function PullPane(props) {
     const { t, api } = props;
+    const [refresh, setRefresh] = useState(0);
+    const [pending, setPending] = useState(null);
+    const [deleteBranch, setDeleteBranch] = useState(false);
+    const [merging, setMerging] = useState(false);
+    const [mergeError, setMergeError] = useState("");
+    const [merged, setMerged] = useState(null);
     const state = useLoader(
       () => api.pullRequest({
         sessionId: props.sessionId,
         cwd: props.cwd || void 0,
-        number: props.number
+        number: props.number,
+        ...refresh === 0 ? {} : { refresh: true }
       }),
-      [props.number, props.revision, props.sessionId, props.cwd]
+      [props.number, props.revision, refresh, props.sessionId, props.cwd]
     );
     if (state.status === "error" && state.value === void 0) {
       return h(
@@ -4193,6 +4569,28 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       return h("div", null, h(DetailBar, { t, name: `#${props.number}`, onBack: props.onBack }), h(Empty, { title: t("gitEmptyPulls") }));
     }
     const reviews = (value.reviews ?? []).filter((review) => review.state !== "commented" || review.body.length > 0);
+    const canMerge = pull.state === "open" && merged === null;
+    const merge = async (method) => {
+      setMerging(true);
+      setMergeError("");
+      try {
+        const result = await api.mergePull({
+          sessionId: props.sessionId,
+          cwd: props.cwd || void 0,
+          number: pull.number,
+          method,
+          deleteBranch
+        });
+        setMerged(result);
+        setPending(null);
+        setRefresh((value2) => value2 + 1);
+        props.onChanged?.();
+      } catch (failure) {
+        setMergeError(messageOf(failure));
+      } finally {
+        setMerging(false);
+      }
+    };
     return h(
       "div",
       null,
@@ -4224,6 +4622,56 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           pull.branch.length > 0 ? h("span", { className: "ph-chip ph-mono" }, t("gitFrom", { branch: pull.branch })) : null,
           pull.base.length > 0 ? h("span", { className: "ph-chip ph-mono" }, `\u2192 ${pull.base}`) : null
         ),
+        merged === null ? null : h(
+          "div",
+          { className: merged.merged ? "ph-success" : "ph-notice" },
+          h(Icon, { name: merged.merged ? "check" : "clock", size: 13 }),
+          h(
+            "span",
+            { className: "ph-success-text" },
+            merged.merged ? t("gitMergeDone", { number: pull.number }) : t("gitMergeQueued", { number: pull.number })
+          ),
+          merged.branchDeleted === true ? h("span", { className: "ph-dim ph-tiny" }, t("gitMergeDeletedBranch")) : null,
+          merged.branchDeleted === false ? h("span", { className: "ph-dim ph-tiny" }, t("gitMergeDeleteFailed")) : null
+        ),
+        canMerge ? h(
+          "div",
+          { className: "ph-card ph-merge" },
+          h("div", { className: "ph-card-title" }, h(Icon, { name: "merge", size: 12 }), t("gitMergeTitle", { number: pull.number })),
+          h("p", { className: "ph-hint" }, t("gitMergeBody", { branch: pull.branch, base: pull.base })),
+          h(
+            "div",
+            { className: "ph-merge-actions" },
+            h("button", {
+              type: "button",
+              className: "ph-primary",
+              disabled: merging,
+              onClick: () => {
+                setPending("merge");
+                setMergeError("");
+              }
+            }, h(Icon, { name: "merge", size: 12 }), t("gitMerge")),
+            h("button", {
+              type: "button",
+              className: "ph-button",
+              disabled: merging,
+              onClick: () => {
+                setPending("squash");
+                setMergeError("");
+              }
+            }, h(Icon, { name: "commit", size: 12 }), t("gitMergeSquash")),
+            value.provider === "gitlab" ? null : h("button", {
+              type: "button",
+              className: "ph-button",
+              disabled: merging,
+              onClick: () => {
+                setPending("rebase");
+                setMergeError("");
+              }
+            }, h(Icon, { name: "branch", size: 12 }), t("gitMergeRebase"))
+          )
+        ) : null,
+        mergeError.length > 0 ? h("p", { className: "ph-error-text" }, `${t("gitMergeFailed")}: ${mergeError}`) : null,
         h(
           "div",
           { className: "ph-detail-meta" },
@@ -4323,8 +4771,67 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
             h("p", { className: "ph-prose" }, comment.body)
           ))
         )
+      ),
+      pending === null ? null : h(
+        "div",
+        { className: "ph-overlay", role: "presentation" },
+        h(
+          "div",
+          { className: "ph-dialog", role: "alertdialog", "aria-modal": "true", "aria-label": t("gitMergeTitle", { number: pull.number }) },
+          h("div", { className: "ph-dialog-title" }, t("gitMergeTitle", { number: pull.number })),
+          h("p", { className: "ph-dialog-body" }, t("gitMergeBody", { branch: pull.branch, base: pull.base })),
+          h("p", { className: "ph-hint" }, t("gitMergeHint")),
+          h(
+            "label",
+            { className: "ph-check-row" },
+            h("input", {
+              type: "checkbox",
+              checked: deleteBranch,
+              disabled: merging,
+              onChange: (event) => setDeleteBranch(event.target.checked)
+            }),
+            h("span", null, t("gitMergeDeleteBranch"))
+          ),
+          mergeError.length > 0 ? h("p", { className: "ph-error-text" }, mergeError) : null,
+          h(
+            "div",
+            { className: "ph-merge-methods" },
+            ["merge", "squash", ...value.provider === "gitlab" ? [] : ["rebase"]].map((method) => h("button", {
+              key: method,
+              type: "button",
+              className: pending === method ? "ph-filter" : "ph-button",
+              "aria-pressed": pending === method ? "true" : "false",
+              disabled: merging,
+              onClick: () => setPending(method)
+            }, methodLabel(t, method)))
+          ),
+          h(
+            "div",
+            { className: "ph-dialog-actions" },
+            h("button", {
+              type: "button",
+              className: "ph-button",
+              disabled: merging,
+              onClick: () => {
+                setPending(null);
+                setMergeError("");
+              }
+            }, t("gitMergeCancel")),
+            h("button", {
+              type: "button",
+              className: "ph-primary",
+              disabled: merging,
+              onClick: () => void merge(pending)
+            }, merging ? t("gitMergeBusy") : t("gitMergeConfirm"))
+          )
+        )
       )
     );
+  }
+  function methodLabel(t, method) {
+    if (method === "squash") return t("gitMergeSquash");
+    if (method === "rebase") return t("gitMergeRebase");
+    return t("gitMerge");
   }
 
   // src/client/git/issues.tsx
@@ -4913,7 +5420,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const documentVisible = useDocumentVisible();
     const cwd = typeof props.useSessions === "function" ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? "") : "";
     const [view, setView] = useState("changes");
-    const [changesScope, setChangesScope] = useState("working");
     const [selection, setSelection] = useState(null);
     const [pullFilter, setPullFilter] = useState("open");
     const [issueFilter, setIssueFilter] = useState("open");
@@ -4925,6 +5431,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const [menuOpen, setMenuOpen] = useState(false);
     const [pending, setPending] = useState(null);
     const [publishOpen, setPublishOpen] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
     const [publishBusy, setPublishBusy] = useState(false);
     const [publishError, setPublishError] = useState("");
     const mounted = useRef(true);
@@ -4941,6 +5448,11 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     );
     const overview = overviewState.value;
     const status = actionStatusOf(overview);
+    const countsState = useLoader(
+      () => api.counts({ sessionId, cwd: cwd || void 0 }),
+      [sessionId, cwd, revision]
+    );
+    const counts = countsState.value;
     useEffect(() => {
       if (!visible || !documentVisible) return void 0;
       const interval = Math.max(8e3, Number(overview?.refreshMs) || 3e4);
@@ -4967,6 +5479,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         setMenuOpen(false);
         setPending(null);
         setPublishOpen(false);
+        setCreateOpen(false);
       };
       document.addEventListener("keydown", onKey);
       return () => document.removeEventListener("keydown", onKey);
@@ -4988,7 +5501,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         if (mounted.current) setSuccess(null);
       }, 1e4);
     };
-    const pollAction = async (actionId) => {
+    const pollAction = async (actionId, after) => {
       for (; ; ) {
         let state;
         try {
@@ -5013,6 +5526,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         }
         const result = state.result;
         if (result === null) return;
+        if (after === "create_pull") setCreateOpen(true);
         const toastInfo = result.toast;
         showSuccess({
           title: toastInfo.title,
@@ -5022,7 +5536,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         return;
       }
     };
-    const startAction = async (action, options, confirmed = false) => {
+    const startAction = async (action, options, confirmed = false, after) => {
       if (running) return;
       if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
         setPending({ action, options });
@@ -5054,9 +5568,9 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           paths: options.paths !== void 0 && options.paths.length > 0 ? options.paths : void 0,
           featureBranch: options.featureBranch === true,
           base: options.base,
-          locale: typeof navigator === "undefined" ? "" : navigator.language
+          locale: currentLocale(t)
         });
-        await pollAction(started.actionId);
+        await pollAction(started.actionId, after);
       } catch (failure) {
         if (!mounted.current) return;
         setRunning(false);
@@ -5116,6 +5630,13 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     };
     const quick = resolveQuickAction(status, running);
     const menuItems = buildActionMenuItems(status, running);
+    const openCreatePull = () => {
+      if (status?.isDefaultRef === true) {
+        toast(t("gitPrAction"), t("gitPrDefaultBranchHint", { branch: status.branch ?? "" }), "info");
+        return;
+      }
+      setCreateOpen(true);
+    };
     const runQuick = () => {
       if (quick.kind === "run_pull") {
         void runPull();
@@ -5126,6 +5647,14 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         return;
       }
       if (quick.kind === "run_action" && quick.action !== void 0) {
+        if (quick.action === "create_pr") {
+          openCreatePull();
+          return;
+        }
+        if (quick.action === "commit_push_pr") {
+          void startAction("commit_push", {}, false, "create_pull");
+          return;
+        }
         void startAction(quick.action, {});
       }
     };
@@ -5143,6 +5672,11 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       if (action === "commit") {
         setMenuOpen(false);
         focusComposer();
+        return;
+      }
+      if (action === "create_pr") {
+        setMenuOpen(false);
+        openCreatePull();
         return;
       }
       void startAction(action, {});
@@ -5167,7 +5701,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       api,
       sessionId,
       cwd,
-      scope: changesScope,
       onToggleMenu: () => setMenuOpen((value) => !value),
       onQuick: runQuick,
       onRun: onMenuRun,
@@ -5189,10 +5722,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       onBranchChanged: (branch) => {
         reload();
         toast(t("gitBranchSelect"), branch ?? t("gitDetachedHead"), "success");
-      },
-      onOpenChanges: () => {
-        setView("changes");
-        setSelection(null);
       }
     });
     let body2;
@@ -5226,7 +5755,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         cwd,
         revision,
         number: selection.number,
-        onBack: () => setSelection(null)
+        onBack: () => setSelection(null),
+        onChanged: reload
       });
     } else if (selection !== null && view === "issues" && selection.type === "issue") {
       body2 = h(IssuePane, {
@@ -5293,8 +5823,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         busy: running,
         onCommit,
         onToast: toast,
-        onRefresh: reload,
-        onScope: setChangesScope
+        onRefresh: reload
       });
     }
     const isDetail = selection !== null;
@@ -5306,11 +5835,11 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         t,
         value: view,
         counts: {
-          changes: overview?.stats.files ?? 0,
-          worktrees: 0,
-          pulls: 0,
-          issues: 0,
-          commits: 0
+          changes: overview === void 0 ? null : { value: overview.stats.files },
+          worktrees: counts === void 0 ? null : { value: counts.worktrees },
+          pulls: counts === void 0 || counts.pulls === null ? null : { value: counts.pulls, capped: counts.pullsCapped },
+          issues: counts === void 0 || counts.issues === null ? null : { value: counts.issues, capped: counts.issuesCapped },
+          commits: counts === void 0 ? null : { value: counts.commits }
         },
         onChange: (next) => {
           setView(next);
@@ -5348,6 +5877,27 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         onCancel: () => setPublishOpen(false),
         onPublish: (provider, repository, visibility) => void publish(provider, repository, visibility)
       }) : null,
+      createOpen ? h(CreatePullDialog, {
+        api,
+        t,
+        sessionId,
+        cwd: cwd || void 0,
+        base: overview?.repo.defaultBranch ?? "",
+        onClose: () => setCreateOpen(false),
+        onCreated: (pull) => {
+          setCreateOpen(false);
+          reload();
+          toast(
+            t("gitPrCreated", { number: pull.number ?? "?" }),
+            pull.title,
+            "success"
+          );
+          if (pull.number !== null) {
+            setView("pulls");
+            setSelection({ type: "pull", number: pull.number });
+          }
+        }
+      }) : null,
       toasts.length === 0 ? null : h("div", { className: "ph-toasts" }, toasts.map((item) => h(
         "div",
         {
@@ -5378,6 +5928,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const pull = overview.branchPull;
     const inWorktree = props.cwd.length > 0 && props.cwd.toLowerCase() !== repo.root.toLowerCase();
     const worktreeName = inWorktree ? splitPath(props.cwd).name : "";
+    const remoteLabel = repo.remote?.slug ?? null;
     return h(
       "div",
       { className: "ph-head" },
@@ -5385,7 +5936,14 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         "div",
         { className: "ph-repo-row" },
         h("span", { style: { display: "flex", color: "var(--dsw-alias-label-tertiary)" } }, h(Icon, { name: "git", size: 14 })),
-        h("span", { className: "ph-repo", title: repo.root }, repo.name),
+        h("span", { className: "ph-repo", title: remoteLabel === null ? repo.root : `${remoteLabel}
+${repo.root}` }, repo.name),
+        inWorktree ? h("button", {
+          type: "button",
+          className: "ph-chip ph-worktree-chip",
+          title: props.cwd,
+          onClick: props.onOpenWorktrees
+        }, h(Icon, { name: "folder", size: 10 }), h("span", { className: "ph-ellipsis" }, worktreeName)) : null,
         h("span", { className: "ph-spacer" }),
         h("button", {
           type: "button",
@@ -5410,6 +5968,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         }),
         repo.ahead > 0 ? h("span", { className: "ph-pill", title: t("gitAhead", { count: repo.ahead }) }, `\u2191${repo.ahead}`) : null,
         repo.behind > 0 ? h("span", { className: "ph-pill", "data-tone": "warn", title: t("gitBehind", { count: repo.behind }) }, `\u2193${repo.behind}`) : null,
+        h("span", { className: "ph-spacer" }),
         pull === null ? null : h(
           "button",
           {
@@ -5422,14 +5981,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           h("span", { className: "ph-dot", "data-state": pull.state }),
           `#${pull.number}`,
           stateLabel2(t, pull.state)
-        ),
-        repo.remote?.slug !== null && repo.remote?.slug !== void 0 ? h("span", { className: "ph-dim ph-tiny ph-ellipsis", title: repo.remote.slug }, repo.remote.slug) : null,
-        inWorktree ? h("button", {
-          type: "button",
-          className: "ph-chip",
-          title: props.cwd,
-          onClick: props.onOpenWorktrees
-        }, h(Icon, { name: "folder", size: 10 }), h("span", { className: "ph-ellipsis" }, worktreeName)) : null
+        )
       ),
       h(GitActions, {
         t,
@@ -5445,40 +5997,36 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         onOpenPublish: props.onOpenPublish,
         onPull: props.onPull,
         onHint: props.onHint
-      }),
-      h(ChangesSummary, {
-        t,
-        stats: overview.stats,
-        branchChanges: overview.branchChanges,
-        scope: props.scope,
-        onClick: props.onOpenChanges
       })
     );
   }
   function PanelTabs(props) {
     const items = [
-      { id: "changes", label: props.t("gitChanges"), count: props.counts.changes },
-      { id: "worktrees", label: props.t("gitWorktrees"), count: props.counts.worktrees },
-      { id: "pulls", label: props.t("gitPulls"), count: props.counts.pulls },
-      { id: "issues", label: props.t("gitIssues"), count: props.counts.issues },
-      { id: "commits", label: props.t("gitCommits"), count: props.counts.commits }
+      { id: "changes", label: props.t("gitChanges") },
+      { id: "worktrees", label: props.t("gitWorktrees") },
+      { id: "pulls", label: props.t("gitPulls") },
+      { id: "issues", label: props.t("gitIssues") },
+      { id: "commits", label: props.t("gitCommits") }
     ];
     return h(
       "div",
       { className: "ph-tabs", role: "tablist" },
-      items.map((item) => h(
-        "button",
-        {
-          key: item.id,
-          type: "button",
-          role: "tab",
-          className: "ph-tab",
-          "aria-selected": props.value === item.id ? "true" : "false",
-          onClick: () => props.onChange(item.id)
-        },
-        h("span", null, item.label),
-        item.count > 0 ? h("span", { className: "ph-tab-count" }, String(item.count)) : null
-      ))
+      items.map((item) => {
+        const count = props.counts[item.id];
+        return h(
+          "button",
+          {
+            key: item.id,
+            type: "button",
+            role: "tab",
+            className: "ph-tab",
+            "aria-selected": props.value === item.id ? "true" : "false",
+            onClick: () => props.onChange(item.id)
+          },
+          h("span", null, item.label),
+          count === null || count.value === 0 ? null : h("span", { className: "ph-tab-count" }, count.capped === true ? `${count.value}+` : String(count.value))
+        );
+      })
     );
   }
   function publishProviders(forge) {
@@ -5528,6 +6076,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         GitPanel,
         GitHeaderButton,
         GitActions,
+        CreatePullDialog,
         DiffFileSection,
         CommitComposer,
         WorktreesView,

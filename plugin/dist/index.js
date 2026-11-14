@@ -1494,7 +1494,8 @@ async function pushCurrentBranch(runner, options) {
     signal
   });
   const upstream = upstreamRead.code === 0 ? String(upstreamRead.stdout ?? "").trim() : "";
-  if (upstream.length > 0) {
+  const tracked = upstreamRef(upstream);
+  if (tracked !== null && tracked.branch === branch) {
     const divergence = await runner.run("git", ["rev-list", "--left-right", "--count", `HEAD...@{upstream}`], {
       cwd: root,
       signal
@@ -1503,9 +1504,7 @@ async function pushCurrentBranch(runner, options) {
     if (counts.ahead === 0 && counts.behind === 0) {
       return { status: "skipped_up_to_date", branch, upstream, setUpstream: false };
     }
-    const remoteName = upstream.split("/")[0] ?? "origin";
-    const upstreamBranch = upstream.slice(remoteName.length + 1);
-    const result2 = await runner.run("git", ["push", remoteName, `HEAD:refs/heads/${upstreamBranch}`], {
+    const result2 = await runner.run("git", ["push", tracked.remote, `HEAD:refs/heads/${branch}`], {
       cwd: root,
       signal,
       timeoutMs,
@@ -1515,7 +1514,7 @@ async function pushCurrentBranch(runner, options) {
     if (result2.code !== 0) throwWriteFailure("push", result2, { branch, upstream });
     return { status: "pushed", branch, upstream, setUpstream: false };
   }
-  const remote = typeof options.remote === "string" && options.remote.length > 0 ? options.remote : "origin";
+  const remote = tracked?.remote ?? (typeof options.remote === "string" && options.remote.length > 0 ? options.remote : "origin");
   const result = await runner.run("git", ["push", "--set-upstream", remote, `HEAD:refs/heads/${branch}`], {
     cwd: root,
     signal,
@@ -1525,6 +1524,12 @@ async function pushCurrentBranch(runner, options) {
   });
   if (result.code !== 0) throwWriteFailure("push", result, { branch, remote });
   return { status: "pushed", branch, upstream: `${remote}/${branch}`, setUpstream: true };
+}
+function upstreamRef(upstream) {
+  const name2 = String(upstream ?? "").trim();
+  const slash = name2.indexOf("/");
+  if (slash <= 0 || slash === name2.length - 1) return null;
+  return { remote: name2.slice(0, slash), branch: name2.slice(slash + 1) };
 }
 async function pullCurrentBranch(runner, options) {
   const { root, branch, signal, timeoutMs, onLine } = options;
@@ -1983,7 +1988,20 @@ async function renameWorktreeBranch(runner, { path, branch, signal }) {
       { branch, detail: String(result.stderr ?? "").slice(0, 2e3) }
     );
   }
+  await dropMismatchedUpstream(runner, { path, branch, signal });
   return branch;
+}
+async function dropMismatchedUpstream(runner, { path, branch, signal }) {
+  const read = await runner.run("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], {
+    cwd: path,
+    signal
+  });
+  if (read.code !== 0) return;
+  const upstream = String(read.stdout ?? "").trim();
+  const slash = upstream.indexOf("/");
+  const tracked = slash > 0 && slash < upstream.length - 1 ? upstream.slice(slash + 1) : "";
+  if (tracked === branch) return;
+  await runner.run("git", ["branch", "--unset-upstream"], { cwd: path, signal }).catch(() => void 0);
 }
 async function uniqueBranchName(runner, { root, branch, signal }) {
   if (!await branchIsTaken(runner, { root, branch, signal })) return branch;
@@ -2017,7 +2035,7 @@ async function createWorktree(runner, { repoRoot, name: name2, base, source = "l
     start = `refs/heads/${base}`;
   }
   await ensurePool(repoRoot, config);
-  const result = await runner.run("git", ["worktree", "add", "-b", branch, path, start], {
+  const result = await runner.run("git", ["worktree", "add", "--no-track", "-b", branch, path, start], {
     cwd: repoRoot,
     signal,
     timeoutMs,
@@ -3101,22 +3119,38 @@ ${status.stderr}`;
     let response;
     try {
       response = await fetch(`https://api.github.com${path}`, {
-        method: "POST",
+        method: options.method ?? "POST",
         headers,
-        body: JSON.stringify(body),
+        ...body === void 0 ? {} : { body: JSON.stringify(body) },
         ...options.signal === void 0 ? {} : { signal: options.signal }
       });
     } catch (error) {
       throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitHub: ${messageOf(error)}`);
     }
     if (response.status === 401) throw new CommandError("forge/not-signed-in", "Token GitHub kh\xF4ng h\u1EE3p l\u1EC7");
+    if (response.status === 405) {
+      throw new CommandError("merge/blocked", "GitHub kh\xF4ng cho merge pull request n\xE0y (\u0111i\u1EC1u ki\u1EC7n merge, review ho\u1EB7c CI ch\u01B0a \u0111\u1EA1t)");
+    }
+    if (response.status === 409) {
+      throw new CommandError("merge/conflict", "Nh\xE1nh \u0111\xE3 \u0111\u1ED5i ho\u1EB7c \u0111ang xung \u0111\u1ED9t, h\xE3y c\u1EADp nh\u1EADt r\u1ED3i th\u1EED l\u1EA1i");
+    }
     if (response.status === 422) {
       const detail = await response.text().catch(() => "");
-      throw new CommandError("pr/rejected", "GitHub t\u1EEB ch\u1ED1i y\xEAu c\u1EA7u t\u1EA1o pull request", { detail: detail.slice(0, 2e3) });
+      throw new CommandError("pr/rejected", "GitHub t\u1EEB ch\u1ED1i y\xEAu c\u1EA7u", { detail: detail.slice(0, 2e3) });
     }
     if (!response.ok) throw new CommandError("forge/failed", `GitHub tr\u1EA3 v\u1EC1 HTTP ${response.status}`);
-    const payload = await response.json();
-    return payload !== null && typeof payload === "object" ? payload : {};
+    if (response.status === 204) return {};
+    const text2 = await response.text().catch(() => "");
+    if (text2.trim().length === 0) return {};
+    try {
+      const payload = JSON.parse(text2);
+      return payload !== null && typeof payload === "object" ? payload : {};
+    } catch {
+      return {};
+    }
+  }
+  async function restDelete(path, options = {}) {
+    await restWrite(path, void 0, { ...options, method: "DELETE" });
   }
   async function defaultBase({ root, remote, signal }) {
     return await resolveDefaultBase(runner, { root, remote: String(remote?.name ?? ""), signal });
@@ -3184,6 +3218,136 @@ ${status.stderr}`;
       base
     };
   }
+  async function mergePull({ root, remote, number, method, deleteBranch, signal }) {
+    const info = await describe({ root, remote, signal });
+    if (info.available !== true) {
+      throw new CommandError("pr/forge-unavailable", info.reason ?? "M\xE1y ch\u1EE7 m\xE3 ngu\u1ED3n ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c");
+    }
+    if (info.provider === "gitlab") {
+      if (method === "rebase") {
+        throw new CommandError("merge/unsupported", "GitLab kh\xF4ng merge theo ki\u1EC3u rebase; h\xE3y ch\u1ECDn Merge ho\u1EB7c Squash");
+      }
+      const project = gitlabProject(remote);
+      const node2 = asRecord3(await gitlabRequest(info, remote, `projects/${project}/merge_requests/${number}/merge`, {
+        method: "PUT",
+        body: { squash: method === "squash", should_remove_source_branch: deleteBranch === true },
+        signal
+      }));
+      const state = gitlabState(node2.state);
+      const merged2 = state === "merged";
+      let branchDeleted2 = deleteBranch === true ? false : null;
+      if (merged2 && deleteBranch === true && typeof node2.source_branch === "string") {
+        branchDeleted2 = await deleteSourceBranch(info, remote, node2.source_branch, signal);
+      }
+      return {
+        merged: merged2,
+        state,
+        sha: firstString(node2.squash_commit_sha, node2.merge_commit_sha),
+        message: merged2 ? "\u0110\xE3 merge" : "",
+        url: String(node2.web_url ?? ""),
+        provider: "gitlab",
+        backend: info.backend,
+        branchDeleted: branchDeleted2
+      };
+    }
+    if (info.backend === "cli") {
+      const program = info.cli;
+      const flag = method === "merge" ? "--merge" : method === "squash" ? "--squash" : "--rebase";
+      const result = await exec(program, [
+        "pr",
+        "merge",
+        String(number),
+        "--repo",
+        String(remote.slug),
+        flag
+      ], { cwd: root, signal });
+      if (result.code !== 0) throw ghMergeFailure(result.stderr, program);
+      const view = asRecord3(await ghJson(program, [
+        "pr",
+        "view",
+        String(number),
+        "--repo",
+        String(remote.slug),
+        "--json",
+        "state,mergedAt,url,mergeCommit,headRefName"
+      ], { cwd: root, signal }));
+      const state = normalizePull(view).state;
+      const merged2 = typeof view.mergedAt === "string" && view.mergedAt.length > 0;
+      let branchDeleted2 = deleteBranch === true ? false : null;
+      if (merged2 && deleteBranch === true && typeof view.headRefName === "string") {
+        branchDeleted2 = await deleteSourceBranch(info, remote, view.headRefName, signal);
+      }
+      return {
+        merged: merged2,
+        state,
+        sha: firstString(asRecord3(view.mergeCommit).oid),
+        message: firstString(result.stdout, result.stderr) || (merged2 ? "Merged" : "Merge requested"),
+        url: String(view.url ?? ""),
+        provider: info.provider,
+        backend: "cli",
+        branchDeleted: branchDeleted2
+      };
+    }
+    let url = `https://github.com/${String(remote.slug ?? "")}/pull/${number}`;
+    let head = "";
+    if (deleteBranch === true) {
+      const pull = asRecord3(await rest(`/repos/${remote.slug}/pulls/${number}`, { signal }));
+      url = String(pull.html_url ?? url);
+      const ref = asRecord3(pull.head).ref;
+      if (typeof ref === "string") head = ref;
+    }
+    const node = await restWrite(`/repos/${remote.slug}/pulls/${number}/merge`, { merge_method: method }, { signal, method: "PUT" });
+    const merged = node.merged === true;
+    let branchDeleted = deleteBranch === true ? false : null;
+    if (merged && head.length > 0) branchDeleted = await deleteSourceBranch(info, remote, head, signal);
+    return {
+      merged,
+      state: merged ? "merged" : "open",
+      sha: firstString(node.sha),
+      message: String(node.message ?? ""),
+      url,
+      provider: info.provider,
+      backend: "rest",
+      branchDeleted
+    };
+  }
+  async function deleteSourceBranch(info, remote, branch, signal) {
+    const name2 = String(branch ?? "").trim();
+    if (name2.length === 0) return false;
+    try {
+      if (info.provider === "gitlab") {
+        const project = gitlabProject(remote);
+        await gitlabRequest(info, remote, `projects/${project}/repository/branches/${encodeURIComponent(name2)}`, {
+          method: "DELETE",
+          signal
+        });
+        return true;
+      }
+      if (info.backend === "cli") {
+        const result = await exec(info.cli, ["api", "--method", "DELETE", `repos/${remote.slug}/git/refs/heads/${name2}`], {
+          cwd: process.cwd(),
+          signal
+        });
+        if (result.code !== 0) {
+          logger.warn("git: could not delete the source branch %s: %s", name2, firstLine3(result.stderr));
+          return false;
+        }
+        return true;
+      }
+      await restDelete(`/repos/${remote.slug}/git/refs/heads/${name2}`, { signal });
+      return true;
+    } catch (error) {
+      logger.warn("git: could not delete the source branch %s: %s", name2, messageOf(error));
+      return false;
+    }
+  }
+  function ghMergeFailure(stderr, program) {
+    const text2 = String(stderr ?? "").trim();
+    if (/not mergeable|merge conflict|conflict|required status check|review required|protected branch|blocked/i.test(text2)) {
+      return new CommandError("merge/blocked", firstLine3(text2) || "M\xE3 ngu\u1ED3n kh\xF4ng cho merge pull request n\xE0y", { detail: text2 });
+    }
+    return ghFailure(stderr, program);
+  }
   async function pullState2({ root, remote, number, signal }) {
     const info = await describe({ root, remote, signal });
     if (info.available !== true) return null;
@@ -3225,12 +3389,21 @@ ${status.stderr}`;
       mergedAt: typeof node.merged_at === "string" ? node.merged_at : null
     };
   }
-  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, pullState: pullState2 };
+  return { describe, listPulls, pullDetail, pullForBranch, listIssues, issueDetail, defaultBase, createPull, mergePull, pullState: pullState2 };
 }
 var STATE_FIELDS = ["number", "url", "state", "isDraft", "mergedAt", "headRefName", "baseRefName", "mergeable"].join(",");
 function firstUrl(text2) {
   const match = /https?:\/\/[^\s'"]+/.exec(String(text2 ?? ""));
   return match?.[0] ?? null;
+}
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+function firstLine3(text2) {
+  return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
 function numberFromUrl(url) {
   const match = /\/(?:pull|pulls|merge_requests)\/(\d+)/.exec(String(url ?? ""));
@@ -3304,22 +3477,29 @@ var LANGUAGES = /* @__PURE__ */ new Map([
   ["pt", "Portuguese"]
 ]);
 function changeRequestSystemPrompt(locale = "en") {
-  const language = LANGUAGES.get(String(locale ?? "").slice(0, 2).toLowerCase()) ?? "English";
+  const language = languageName(locale);
   return [
-    "You write pull request titles and descriptions for a Git branch that is about to be opened against its base branch.",
-    "You receive JSON describing the branch, its commits, its changed files, and a diff excerpt.",
+    "You are a senior engineer writing the title and description of a pull request that is about to be opened against its base branch.",
+    "You receive JSON: the branch, its base, how many commits it adds, the commit subjects, the changed files with line counts, and a unified diff. The diff is the source of truth; commit subjects may be terse or written in another language.",
     'Answer with one JSON object and nothing else: {"title": string, "body": string}.',
-    'The title is one line under 90 characters, concrete, and names the change \u2014 never "Update files" or "Changes".',
-    `The body is Markdown in ${language}: a short paragraph on what the change does and why, then a "## Changes" list of at most six bullets, and a "## Testing" section that says how it was verified or that it was not run.`,
-    `Write the title in ${language} as well unless the commit subjects are clearly written in another language, in which case follow the commit subjects.`,
-    "Describe only what the supplied diff and commits show. Never invent a file, a test, or a reason.",
-    'Do not add a checklist, badges, or a "Generated by" line.'
+    `The title is one line of at most 90 characters in ${language}, without a trailing period. Name the concrete user-visible change. Never use a generic title such as "Update files", "Changes", "Fix bug", "WIP", or the branch name.`,
+    `The body is Markdown written in ${language}. It has exactly three sections, in this order, with their headings translated into ${language}:`,
+    "1. a short summary paragraph (two to four sentences) that says what changes and why, supported by the diff;",
+    '2. a "Changes" section with three to six bullets, each naming the affected file, module, or behavior and what changed;',
+    '3. a "Testing" section with bullets describing how the change was verified according to the input; when the input shows no tests or verification, say plainly that tests were not run.',
+    "Keep paths, identifiers, commands, and commit hashes verbatim. Do not repeat the title as the first line of the body.",
+    "Describe only what the diff and commits show. Never invent a file, a test, a reason, a reviewer, an issue number, or a benchmark result.",
+    'Do not quote the raw diff, add checklists, emojis, badges, or a "Generated by" line, and do not mention that an AI wrote this.'
   ].join("\n");
+}
+function languageName(locale) {
+  return LANGUAGES.get(String(locale ?? "").slice(0, 2).toLowerCase()) ?? "English";
 }
 function buildChangeRequestInput(facts) {
   const payload = {
     branch: facts.branch,
     base: facts.base,
+    ahead: Number(facts.ahead) || (facts.commits?.length ?? 0),
     commits: (facts.commits ?? []).map((commit) => ({
       subject: commit.subject,
       ...commit.author === void 0 ? {} : { author: commit.author }
@@ -3329,11 +3509,12 @@ function buildChangeRequestInput(facts) {
       additions: file.additions,
       deletions: file.deletions
     })),
+    fileCount: (facts.files ?? []).length,
     diffTruncated: facts.truncated === true,
     diff: facts.diff ?? ""
   };
   return [
-    `Draft the change request for this branch against ${facts.base}:`,
+    `Draft the pull request that opens ${facts.branch} against ${facts.base}. Read the diff before writing.`,
     "```json",
     JSON.stringify(payload),
     "```",
@@ -3404,23 +3585,43 @@ function normalizeBody(text2) {
   if (body.length <= MAX_BODY_LENGTH) return body;
   return `${body.slice(0, MAX_BODY_LENGTH - 1).trimEnd()}\u2026`;
 }
+var GENERIC_TITLE = /^(update|updates|change|changes|fix|fixes|bug ?fix|wip|tmp|temp|test|tests|patch|misc|miscellaneous|edit|edits|refactor)(\s+(files?|code|stuff|things?|bugs?|changes?|repo|project|branch|panel))?$/i;
+function draftIsUsable(title, body) {
+  const cleanTitle = normalizeTitle(title);
+  const cleanBody = normalizeBody(body);
+  if (cleanTitle.length < 12) return false;
+  if (GENERIC_TITLE.test(cleanTitle)) return false;
+  if (cleanBody.length < 80) return false;
+  if (!cleanBody.includes("\n")) return false;
+  if (!(/^#{1,3}\s+\S/m.test(cleanBody) || /^\s*[-*+]\s+\S/m.test(cleanBody))) return false;
+  return cleanBody !== cleanTitle;
+}
 function stripMarkdown(text2) {
   return String(text2 ?? "").replace(/^[-*+]\s+/, "").replace(/^\*\*(.*)\*\*$/, "$1").trim();
 }
-function offlineDraft(facts) {
+function offlineDraft(facts, locale = "en") {
+  const vietnamese = languageName(locale) === "Vietnamese";
   const commits = facts.commits ?? [];
   const files = facts.files ?? [];
-  const title = normalizeTitle(commits[0]?.subject ?? `Merge ${facts.branch} into ${facts.base}`);
-  const lines = [
+  const title = normalizeTitle(
+    commits[0]?.subject ?? (vietnamese ? `G\u1ED9p ${facts.branch} v\xE0o ${facts.base}` : `Merge ${facts.branch} into ${facts.base}`)
+  );
+  const lines = vietnamese ? [
     commits.length === 0 ? `M\u1EDF thay \u0111\u1ED5i t\u1EEB \`${facts.branch}\` v\xE0o \`${facts.base}\`.` : `Nh\xE1nh \`${facts.branch}\` g\u1ED9p ${commits.length} commit v\xE0o \`${facts.base}\`.`,
+    "",
+    "## Thay \u0111\u1ED5i",
+    ...files.slice(0, 20).map((file) => `- \`${file.path}\` (+${file.additions} \u2212${file.deletions})`)
+  ] : [
+    commits.length === 0 ? `Open the change from \`${facts.branch}\` into \`${facts.base}\`.` : `Branch \`${facts.branch}\` adds ${commits.length} commit${commits.length === 1 ? "" : "s"} over \`${facts.base}\`.`,
     "",
     "## Changes",
     ...files.slice(0, 20).map((file) => `- \`${file.path}\` (+${file.additions} \u2212${file.deletions})`)
   ];
-  if (files.length > 20) lines.push(`- \u2026 v\xE0 ${files.length - 20} t\u1EC7p kh\xE1c`);
+  if (files.length > 20) lines.push(vietnamese ? `- \u2026 v\xE0 ${files.length - 20} t\u1EC7p kh\xE1c` : `- \u2026 and ${files.length - 20} more files`);
   if (commits.length > 1) {
-    lines.push("", "## Commits", ...commits.slice(0, 20).map((commit) => `- ${commit.subject}`));
+    lines.push("", vietnamese ? "## Commit" : "## Commits", ...commits.slice(0, 20).map((commit) => `- ${commit.subject}`));
   }
+  lines.push("", vietnamese ? "## Ki\u1EC3m th\u1EED" : "## Testing", vietnamese ? "- Ch\u01B0a ch\u1EA1y ki\u1EC3m th\u1EED cho thay \u0111\u1ED5i n\xE0y." : "- Tests were not run for this change.");
   return { title, body: normalizeBody(lines.join("\n")) };
 }
 async function draftChangeRequest({
@@ -3436,7 +3637,7 @@ async function draftChangeRequest({
   logger
 }) {
   const fallback = {
-    ...offlineDraft({ branch, base, commits: facts.commits ?? [], files: facts.files ?? [] }),
+    ...offlineDraft({ branch, base, commits: facts.commits ?? [], files: facts.files ?? [] }, locale ?? "en"),
     source: "commits",
     model: null
   };
@@ -3458,33 +3659,48 @@ async function draftChangeRequest({
       }
     );
     const system = changeRequestSystemPrompt(locale);
-    const input = buildChangeRequestInput({
+    const baseInput = buildChangeRequestInput({
       branch,
       base,
+      ahead: facts.ahead,
       commits: facts.commits ?? [],
       files: facts.files ?? [],
       diff: facts.diff ?? "",
       truncated: facts.truncated === true
     });
-    let streamed = "";
-    const blocks = [];
-    for await (const chunk of call.stream({
-      ...call.config,
-      messages: [{ role: "user", content: [{ type: "text", text: input }] }],
-      system,
-      ...sessionId.length === 0 ? {} : { sessionId },
-      signal: combined
-    })) {
-      if (chunk?.type === "text-delta" && typeof chunk.text === "string") streamed += chunk.text;
-      else if (chunk?.type === "block-end" && chunk.block?.type === "text" && typeof chunk.block.text === "string") {
-        blocks.push(chunk.block.text);
+    const ask = async (note) => {
+      let streamed = "";
+      const blocks = [];
+      for await (const chunk of call.stream({
+        ...call.config,
+        messages: [{ role: "user", content: [{ type: "text", text: note.length === 0 ? baseInput : `${baseInput}
+
+${note}` }] }],
+        system,
+        ...sessionId.length === 0 ? {} : { sessionId },
+        signal: combined
+      })) {
+        if (chunk?.type === "text-delta" && typeof chunk.text === "string") streamed += chunk.text;
+        else if (chunk?.type === "block-end" && chunk.block?.type === "text" && typeof chunk.block.text === "string") {
+          blocks.push(chunk.block.text);
+        }
       }
+      return parseChangeRequestDraft(blocks.length > 0 ? blocks.join("\n") : streamed, { fallbackTitle: fallback.title });
+    };
+    let draft = await ask("");
+    if (!draftIsUsable(draft.title, draft.body)) {
+      logger?.warn?.("pr: the first change-request draft was unusable, retrying");
+      draft = await ask([
+        "Your previous answer was not usable as a pull request description.",
+        `Return the JSON object again with a concrete title that names this change (not "Update", "Changes", or "${branch}")`,
+        "and a body of at least three sentences plus the three required sections and their bullets, written in the requested language."
+      ].join(" "));
     }
-    const draft = parseChangeRequestDraft(blocks.length > 0 ? blocks.join("\n") : streamed, { fallbackTitle: fallback.title });
     if (draft.parsed === "fallback") return { ...fallback, error: "unparsed-answer" };
+    if (!draftIsUsable(draft.title, draft.body)) return { ...fallback, error: "unusable-answer" };
     return {
       title: draft.title,
-      body: draft.body.length > 0 ? draft.body : fallback.body,
+      body: draft.body,
       source: "model",
       model: `${route.provider}/${route.model}`,
       chosen: call.config?.reasoningEffort ?? null
@@ -4211,6 +4427,7 @@ var GITHUB_CREDENTIAL_REF = "DSH_GITHUB_TOKEN";
 var GITLAB_CREDENTIAL_REF = "DSH_GITLAB_TOKEN";
 var ACTION_RETENTION_MS = 5 * 60 * 1e3;
 var ACTION_OUTPUT_LINES = 40;
+var COUNT_PAGE = 50;
 function mountGit(ctx, config, deps) {
   const logger = deps.logger;
   const connection = ctx.get("connection");
@@ -4515,10 +4732,10 @@ function mountRoutes(ctx, connection, config, deps) {
       ...wantsPr ? ["pr"] : []
     ];
     try {
-      if (payload.featureBranch === true && !wantsCommit) {
+      if (payload.featureBranch === true && !wantsCommit && !wantsPush) {
         throw new CommandError(
           "action/feature-branch",
-          "A feature branch is only supported for actions that commit."
+          "A feature branch needs an action that commits or pushes."
         );
       }
       const { root } = await repository(payload, signal);
@@ -4534,7 +4751,8 @@ function mountRoutes(ctx, connection, config, deps) {
       let message3 = String(payload.commitMessage ?? "").trim();
       if (payload.featureBranch === true) {
         enterPhase(progress, "branch", "Preparing feature branch\xE2\u20AC\xA6");
-        if (message3.length === 0) {
+        let subject = message3.split(/\r?\n/)[0] ?? "";
+        if (wantsCommit && message3.length === 0) {
           progress.label = "Generating commit message\xE2\u20AC\xA6";
           const facts = await readCommitMessageFacts(runner, {
             root,
@@ -4557,8 +4775,11 @@ function mountRoutes(ctx, connection, config, deps) {
             logger
           });
           message3 = draft.message;
+          subject = message3.split(/\r?\n/)[0] ?? "";
+        } else if (!wantsCommit && subject.length === 0) {
+          const head = await runner.run("git", ["log", "-1", "--format=%s"], { cwd: root, signal });
+          subject = head.code === 0 ? String(head.stdout ?? "").trim() : "";
         }
-        const subject = message3.split(/\r?\n/)[0] ?? "";
         const refs = await readBranchRefs(runner, { root, limit: 200, signal });
         const localNames = refs.branches.filter((item) => !item.isRemote).map((item) => item.name);
         const name2 = resolveAutoFeatureBranchName(localNames, sanitizeFeatureBranchName(subject));
@@ -4697,23 +4918,34 @@ function mountRoutes(ctx, connection, config, deps) {
     if (facts.ahead === 0) {
       throw new CommandError("pr/no-commits", `Branch ${branch} has no commits over ${base}.`, { base });
     }
-    onPhase?.("Generating pull request content\xE2\u20AC\xA6");
-    const draft = await draftChangeRequest2({
-      sessionId,
-      payload,
-      facts: { ...facts, branch, base },
-      branch,
-      base,
-      signal
-    });
+    const providedTitle = typeof payload.title === "string" ? payload.title.trim() : "";
+    let title = providedTitle;
+    let body = typeof payload.body === "string" ? payload.body : "";
+    let draftInfo;
+    if (providedTitle.length > 0) {
+      draftInfo = { source: "manual", model: null, error: null };
+    } else {
+      onPhase?.("Generating pull request content\xE2\u20AC\xA6");
+      const draft = await draftChangeRequest2({
+        sessionId,
+        payload,
+        facts: { ...facts, branch, base },
+        branch,
+        base,
+        signal
+      });
+      title = draft.title;
+      body = draft.body;
+      draftInfo = { source: draft.source, model: draft.model, error: draft.error ?? null };
+    }
     onPhase?.("Creating pull request\xE2\u20AC\xA6");
     const created = await forge.createPull({
       root,
       remote,
       head: branch,
       base,
-      title: draft.title,
-      body: draft.body,
+      title,
+      body,
       signal
     });
     if (sessionId.length > 0 && created.number !== null) {
@@ -4732,7 +4964,9 @@ function mountRoutes(ctx, connection, config, deps) {
       url: created.url,
       base,
       head: branch,
-      title: draft.title
+      title,
+      body,
+      draft: draftInfo
     };
   }
   const handlers = {
@@ -4771,6 +5005,58 @@ function mountRoutes(ctx, connection, config, deps) {
         } catch (error) {
           value.branchPullError = failureOf(error);
         }
+      }
+      return value;
+    },
+    /**
+     * The counters the tab strip shows.
+     *
+     * Commits and checkouts are local and cheap; change requests and issues come
+     * from one page of the code host, so an answer larger than the page says so
+     * instead of pretending to be exact.
+     */
+    async counts(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const context = await readContext(runner, { root, config, signal });
+      const [revisionCount, worktrees] = await Promise.all([
+        runner.run("git", ["rev-list", "--count", "HEAD"], { cwd: root, signal }),
+        readWorktrees(runner, { root, signal }).catch(() => [])
+      ]);
+      const commits = revisionCount.code === 0 ? Number.parseInt(String(revisionCount.stdout ?? "").trim(), 10) || 0 : 0;
+      const value = {
+        commits,
+        worktrees: worktrees.length,
+        pulls: null,
+        issues: null,
+        pullsCapped: false,
+        issuesCapped: false
+      };
+      if (context.remote === null) return value;
+      try {
+        const [pulls, issues] = await Promise.all([
+          forge.listPulls({
+            root,
+            remote: context.remote,
+            state: "open",
+            limit: COUNT_PAGE,
+            signal,
+            refresh: payload.refresh === true
+          }),
+          forge.listIssues({
+            root,
+            remote: context.remote,
+            state: "open",
+            limit: COUNT_PAGE,
+            signal,
+            refresh: payload.refresh === true
+          })
+        ]);
+        value.pulls = pulls.pulls?.length ?? 0;
+        value.pullsCapped = value.pulls >= COUNT_PAGE;
+        value.issues = issues.issues?.length ?? 0;
+        value.issuesCapped = value.issues >= COUNT_PAGE;
+      } catch (error) {
+        logger.info("git: the tab counters could not read the code host: %s", messageOf5(error));
       }
       return value;
     },
@@ -5062,6 +5348,70 @@ function mountRoutes(ctx, connection, config, deps) {
       });
     },
     /**
+     * Draft a pull request's title and description without pushing or opening.
+     *
+     * The create dialog shows this draft for review; a title or body the caller
+     * already wrote is returned untouched so regenerating never replaces edits.
+     */
+    async draftPull(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const context = await readContext(runner, { root, config, signal });
+      if (context.branch === null) {
+        throw new CommandError("pr/detached", "A detached HEAD cannot draft a pull request.");
+      }
+      if (context.remote === null) {
+        throw new CommandError("pr/no-remote", "The repository has no remote, so it cannot draft a pull request.");
+      }
+      const requested = typeof payload.base === "string" ? payload.base.trim() : "";
+      const base = requested.length > 0 ? requested : config.pull.base.length > 0 ? config.pull.base : await forge.defaultBase({ root, remote: context.remote, signal });
+      if (base === null || base.length === 0) {
+        throw new CommandError("pr/no-base", "Cannot determine the base branch for the change request.");
+      }
+      if (base === context.branch) {
+        throw new CommandError("pr/same-branch", `Branch ${base} cannot be its own base branch.`);
+      }
+      const facts = await readChangeRequestFacts(runner, { root, base, config, signal });
+      if (facts.ahead === 0) {
+        throw new CommandError("pr/no-commits", `Branch ${context.branch} has no commits over ${base}.`, { base });
+      }
+      const providedTitle = typeof payload.title === "string" ? payload.title.trim() : "";
+      if (providedTitle.length > 0) {
+        return {
+          title: providedTitle,
+          body: typeof payload.body === "string" ? payload.body : "",
+          source: "manual",
+          model: null,
+          error: null,
+          base,
+          head: context.branch,
+          ahead: facts.ahead,
+          commits: facts.commits.length,
+          files: facts.files.length
+        };
+      }
+      const draft = await draftChangeRequest2({
+        sessionId,
+        payload,
+        facts: { ...facts, branch: context.branch, base },
+        branch: context.branch,
+        base,
+        signal
+      });
+      return {
+        title: draft.title,
+        body: draft.body,
+        source: draft.source === "model" ? "model" : "commits",
+        model: draft.model,
+        error: draft.error ?? null,
+        base,
+        head: context.branch,
+        ahead: facts.ahead,
+        commits: facts.commits.length,
+        files: facts.files.length
+      };
+    },
+    /**
      * Create a change request for the checked-out branch: push it, draft the
      * title and description with the Session's model, then open it on the code
      * host and bind it to the Session for merge tracking.
@@ -5102,10 +5452,32 @@ function mountRoutes(ctx, connection, config, deps) {
           head: pr.head ?? context.branch
         },
         title: pr.title ?? "",
-        body: "",
-        draft: { source: "model", model: null, error: null },
+        body: pr.body ?? "",
+        draft: pr.draft ?? (pr.status === "opened_existing" ? { source: "existing", model: null, error: null } : { source: "model", model: null, error: null }),
         watched: sessionId.length > 0 && typeof pr.number === "number"
       };
+    },
+    /**
+     * Merge one change request with the strategy the detail pane asked for.
+     *
+     * The code host enforces its own rules; this route never forces a merge, so
+     * a refusal surfaces as a `merge/*` code the pane can explain.
+     */
+    async mergePull(payload, signal) {
+      const { root } = await repository(payload, signal);
+      const context = await readContext(runner, { root, config, signal });
+      if (context.remote === null) {
+        throw new CommandError("pr/no-remote", "The repository has no remote, so it cannot merge a pull request.");
+      }
+      const method = payload.method === "squash" || payload.method === "rebase" ? payload.method : "merge";
+      return await forge.mergePull({
+        root,
+        remote: context.remote,
+        number: requiredNumber(payload.number, "number"),
+        method,
+        deleteBranch: payload.deleteBranch === true,
+        signal
+      });
     },
     /** Publish the repository to a code host, so it gains its first remote. */
     async publish(payload, signal) {
@@ -5714,7 +6086,7 @@ ${result.stderr ?? ""}`;
 function throwWriteFailure2(operation, result) {
   const reason = classifyGitFailure(result.stderr);
   const friendly = failureReasonMessage(reason);
-  throw new CommandError(`git/${operation}`, friendly ?? (firstLine3(result.stderr) || `git exited with status ${result.code}`), {
+  throw new CommandError(`git/${operation}`, friendly ?? (firstLine4(result.stderr) || `git exited with status ${result.code}`), {
     reason: reason ?? void 0,
     exitCode: result.code
   });
@@ -5723,7 +6095,7 @@ function firstUrl2(text2) {
   const match = /https?:\/\/[^\s]+/.exec(String(text2 ?? ""));
   return match === null ? null : match[0];
 }
-function firstLine3(text2) {
+function firstLine4(text2) {
   return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
 function sessionDirectory(ctx, sessionId) {
@@ -6032,17 +6404,17 @@ function toolChangeEntry(event) {
   if (name2.length === 0 || callId.length === 0) return null;
   const args = parseArguments(data?.arguments);
   if (name2 === "edit" || name2 === "write" || name2 === "str_replace_editor") {
-    const path = firstString(args.file_path, args.path, args.file);
+    const path = firstString2(args.file_path, args.path, args.file);
     if (path.length === 0) return null;
     return { callId, kind: "file", tool: name2, files: [{ path, added: 0, deleted: 0 }], failed: false };
   }
   if (name2 === "apply_patch") {
-    const paths = patchPaths(firstString(args.input, args.patch));
+    const paths = patchPaths(firstString2(args.input, args.patch));
     if (paths.length === 0) return null;
     return { callId, kind: "file", tool: name2, files: paths.map((path) => ({ path, added: 0, deleted: 0 })), failed: false };
   }
   if (SHELL_TOOL_NAMES.has(name2)) {
-    const command = firstString(args.command, args.cmd, args.input).trim();
+    const command = firstString2(args.command, args.cmd, args.input).trim();
     if (command.length === 0) return null;
     return { callId, kind: "command", tool: name2, command, failed: false };
   }
@@ -6260,7 +6632,7 @@ function parseArguments(raw) {
     return {};
   }
 }
-function firstString(...values) {
+function firstString2(...values) {
   for (const value of values) {
     if (typeof value === "string" && value.trim().length > 0) return value.trim();
   }
@@ -6293,8 +6665,8 @@ function displayPath(value, cwd) {
   return shorten(text2, MAX_PATH_CHARS);
 }
 function shortCommand(command) {
-  const firstLine4 = String(command ?? "").split(/\r?\n/)[0].trim();
-  return shorten(firstLine4, MAX_COMMAND_CHARS);
+  const firstLine5 = String(command ?? "").split(/\r?\n/)[0].trim();
+  return shorten(firstLine5, MAX_COMMAND_CHARS);
 }
 function shorten(text2, max) {
   return text2.length <= max ? text2 : `${text2.slice(0, max - 1)}\u2026`;

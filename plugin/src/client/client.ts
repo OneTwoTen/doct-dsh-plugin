@@ -20,6 +20,7 @@ import { MergeSettingsCard, MergeSettingsForm } from './git/settings.tsx'
 import { WorktreeHero, WorktreeOption } from './worktree.tsx'
 import { GitPanel, GitHeaderButton } from './git/panel.tsx'
 import { GitActions } from './git/actions.tsx'
+import { CreatePullDialog } from './git/create-pull.tsx'
 import { DiffFileSection } from './git/diff-view.tsx'
 import { CommitComposer } from './git/commit-composer.tsx'
 import { WorktreesView, WorktreeRow } from './git/worktrees.tsx'
@@ -59,6 +60,7 @@ export function createClient(): ClientModule {
       GitPanel,
       GitHeaderButton,
       GitActions,
+      CreatePullDialog,
       DiffFileSection,
       CommitComposer,
       WorktreesView,
