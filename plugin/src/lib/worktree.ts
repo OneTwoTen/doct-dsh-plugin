@@ -384,6 +384,11 @@ export async function branchIsTaken(
  * Git renames the current branch when no old name is given, which is what this
  * uses: the checkout keeps its directory, and the recorded name changes.
  *
+ * A checkout cut from a remote-tracking ref can inherit that ref as its
+ * upstream; the old name then no longer describes the branch, so a mismatched
+ * upstream is dropped instead of letting a later push publish over the base
+ * branch.
+ *
  * @param runner command runner.
  * @param options the checkout and its next branch name.
  * @returns the branch name the checkout now has.
@@ -403,7 +408,33 @@ export async function renameWorktreeBranch(
       { branch, detail: String(result.stderr ?? '').slice(0, 2000) },
     )
   }
+  await dropMismatchedUpstream(runner, { path, branch, signal })
   return branch
+}
+
+/**
+ * Drop a tracked branch whose name is not the branch's own.
+ *
+ * `git branch -m` keeps the old `branch.<name>.merge` key, which would still
+ * point at the base branch this checkout started from.
+ *
+ * @param runner command runner.
+ * @param options the checkout, its branch name, and cancellation.
+ */
+async function dropMismatchedUpstream(
+  runner: GitRunner,
+  { path, branch, signal }: { path: string, branch: string, signal?: AbortSignal },
+): Promise<void> {
+  const read = await runner.run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], {
+    cwd: path,
+    signal,
+  })
+  if (read.code !== 0) return
+  const upstream = String(read.stdout ?? '').trim()
+  const slash = upstream.indexOf('/')
+  const tracked = slash > 0 && slash < upstream.length - 1 ? upstream.slice(slash + 1) : ''
+  if (tracked === branch) return
+  await runner.run('git', ['branch', '--unset-upstream'], { cwd: path, signal }).catch(() => undefined)
 }
 
 /**
@@ -428,6 +459,11 @@ export async function uniqueBranchName(
  *
  * The pool directory is created lazily and ignored from the repository so the
  * new checkout never appears as an untracked directory of the project.
+ *
+ * The new branch is added with `--no-track`: when the start point is a
+ * remote-tracking ref, Git would otherwise make the checkout track the base
+ * branch, and the first push would publish this branch's commits over that base
+ * branch instead of over a branch of its own.
  *
  * @param runner command runner.
  * @param options the repository, the new checkout, where it starts, and cancellation.
@@ -471,7 +507,7 @@ export async function createWorktree(
   }
 
   await ensurePool(repoRoot, config)
-  const result = await runner.run('git', ['worktree', 'add', '-b', branch, path, start], {
+  const result = await runner.run('git', ['worktree', 'add', '--no-track', '-b', branch, path, start], {
     cwd: repoRoot,
     signal,
     timeoutMs,

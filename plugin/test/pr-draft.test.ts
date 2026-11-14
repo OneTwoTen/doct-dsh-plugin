@@ -5,6 +5,7 @@ import {
   buildChangeRequestInput,
   changeRequestSystemPrompt,
   draftChangeRequest,
+  draftIsUsable,
   extractJsonObject,
   MAX_TITLE_LENGTH,
   normalizeTitle,
@@ -17,12 +18,14 @@ import {
 interface Seen {
   configure: Record<string, unknown> | null
   options: { messages?: Array<{ role?: string }>; sessionId?: string; system?: string } | null
+  calls: Array<{ messages?: Array<{ role?: string; content?: Array<{ text?: string }> }>; sessionId?: string; system?: string }>
   maxTokens: unknown
 }
 
-/** One model stand-in that streams a fixed answer and records its controls. */
-function fakeModel(answer: string, { efforts = ['low', 'high'], chunk = 'text-delta' }: { efforts?: string[]; chunk?: 'text-delta' | 'block' } = {}) {
-  const seen: Seen = { configure: null, options: null, maxTokens: null }
+/** One model stand-in that streams a fixed answer (or the next of several) and records its controls. */
+function fakeModel(answer: string | string[], { efforts = ['low', 'high'], chunk = 'text-delta' }: { efforts?: string[]; chunk?: 'text-delta' | 'block' } = {}) {
+  const seen: Seen = { configure: null, options: null, calls: [], maxTokens: null }
+  const answers = Array.isArray(answer) ? answer : [answer]
   return {
     seen,
     llm: {
@@ -38,11 +41,13 @@ function fakeModel(answer: string, { efforts = ['low', 'high'], chunk = 'text-de
           config: { provider: config.provider, model: config.model, ...controls },
           async *stream(options: Seen['options']) {
             seen.options = options
+            seen.calls.push(options as Seen['calls'][number])
+            const reply = answers[Math.min(seen.calls.length - 1, answers.length - 1)]
             if (chunk === 'block') {
-              yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } }
+              yield { type: 'block-end', index: 0, block: { type: 'text', text: reply } }
               return
             }
-            for (const piece of String(answer).match(/[\s\S]{1,7}/g) ?? []) {
+            for (const piece of String(reply).match(/[\s\S]{1,7}/g) ?? []) {
               yield { type: 'text-delta', index: 0, text: piece }
             }
           },
@@ -51,6 +56,12 @@ function fakeModel(answer: string, { efforts = ['low', 'high'], chunk = 'text-de
     },
   }
 }
+
+/** A realistic answer the validator accepts. */
+const goodAnswer = JSON.stringify({
+  title: 'Add the Git panel to the right sidebar',
+  body: 'The panel lists changes, diffs, and pull requests.\n\n## Changes\n- Adds the panel component.\n- Wires the sidebar tab.\n\n## Testing\n- Tests were not run.',
+})
 
 const facts = {
   branch: 'feature/x',
@@ -66,7 +77,10 @@ test('the drafting instruction follows the reader language and forbids invention
   const english = changeRequestSystemPrompt('en')
   assert.match(english, /English/)
   assert.match(english, /Never invent/)
-  assert.match(changeRequestSystemPrompt('vi'), /Vietnamese/)
+  assert.match(english, /three sections/)
+  assert.match(english, /generic title/)
+  const vietnamese = changeRequestSystemPrompt('vi')
+  assert.match(vietnamese, /Vietnamese/)
   assert.match(changeRequestSystemPrompt('pt-BR'), /Portuguese/)
   assert.match(changeRequestSystemPrompt('xx'), /English/)
 })
@@ -77,8 +91,10 @@ test('the framed input is JSON so commit text cannot break the prompt', () => {
   const payload = JSON.parse(input.split('```json\n')[1].split('\n```')[0])
   assert.equal(payload.branch, 'feature/x')
   assert.equal(payload.base, 'main')
+  assert.equal(payload.ahead, 2)
   assert.equal(payload.commits.length, 2)
   assert.equal(payload.files[0].path, 'a.js')
+  assert.equal(payload.fileCount, 1)
   assert.equal(payload.diffTruncated, false)
 })
 
@@ -121,15 +137,32 @@ test('a fence is stripped once, at the edges only', () => {
   assert.equal(stripFence('no fence'), 'no fence')
 })
 
-test('the offline draft names the files and commits', () => {
-  const draft = offlineDraft(facts)
-  assert.equal(draft.title, 'add the panel')
-  assert.match(draft.body, /a\.js/)
-  assert.match(draft.body, /fix the route/)
+test('the offline draft names the files and commits, in the reader language', () => {
+  const vietnamese = offlineDraft(facts, 'vi')
+  assert.equal(vietnamese.title, 'add the panel')
+  assert.match(vietnamese.body, /a\.js/)
+  assert.match(vietnamese.body, /fix the route/)
+  assert.match(vietnamese.body, /## Thay đổi/)
+  assert.match(vietnamese.body, /## Kiểm thử/)
+
+  const english = offlineDraft(facts, 'en')
+  assert.match(english.body, /## Changes/)
+  assert.match(english.body, /## Testing/)
+  assert.doesNotMatch(english.body, /Thay đổi/)
+})
+
+test('a draft is usable only when the title is concrete and the body has substance', () => {
+  const body = 'This change adds the panel.\n\n## Changes\n- Adds the panel.\n\n## Testing\n- Tests were not run.'
+  assert.equal(draftIsUsable('Add the Git panel to the sidebar', body), true)
+  assert.equal(draftIsUsable('Update the sidebar layout with a compact header', body), true, 'a specific update is fine')
+  assert.equal(draftIsUsable('Update files', body), false, 'generic titles are rejected')
+  assert.equal(draftIsUsable('Fix', body), false, 'short titles are rejected')
+  assert.equal(draftIsUsable('Add the Git panel to the sidebar', 'Short body.'), false, 'a one-line body is rejected')
+  assert.equal(draftIsUsable('Add the Git panel to the sidebar', 'Add the Git panel to the sidebar'), false)
 })
 
 test('the model draft uses the lowest effort the route offers and the text answer', async () => {
-  const model = fakeModel('{"title":"Add the panel","body":"Why and what."}')
+  const model = fakeModel(goodAnswer)
   const draft = await draftChangeRequest({
     llm: model.llm,
     route: { provider: 'p', model: 'm' },
@@ -146,12 +179,45 @@ test('the model draft uses the lowest effort the route offers and the text answe
   assert.equal(model.seen.options?.sessionId, 'session-1')
   assert.match(String(model.seen.options?.system), /pull request/)
   assert.equal(draft.source, 'model')
-  assert.equal(draft.title, 'Add the panel')
+  assert.equal(draft.title, 'Add the Git panel to the right sidebar')
+  assert.match(draft.body, /## Changes/)
+  assert.equal(draft.error, undefined)
   assert.equal(draft.model, 'p/m')
 })
 
+test('a vague first answer is retried once with a pointed correction', async () => {
+  const model = fakeModel([JSON.stringify({ title: 'Update files', body: 'Changes.' }), goodAnswer])
+  const draft = await draftChangeRequest({
+    llm: model.llm,
+    route: { provider: 'p', model: 'm' },
+    facts,
+    branch: 'feature/x',
+    base: 'main',
+    config: {},
+  })
+  assert.equal(model.seen.calls.length, 2, 'the draft was asked for twice')
+  assert.match(String(model.seen.calls[1]?.messages?.[0]?.content?.[0]?.text), /not usable/)
+  assert.equal(draft.source, 'model')
+  assert.equal(draft.title, 'Add the Git panel to the right sidebar')
+})
+
+test('two vague answers fall back to the commits with a reason', async () => {
+  const model = fakeModel(JSON.stringify({ title: 'WIP', body: 'x' }))
+  const draft = await draftChangeRequest({
+    llm: model.llm,
+    route: { provider: 'p', model: 'm' },
+    facts,
+    branch: 'feature/x',
+    base: 'main',
+    config: {},
+    logger: { warn: () => {} },
+  })
+  assert.equal(draft.source, 'commits')
+  assert.equal(draft.error, 'unusable-answer')
+})
+
 test('a text-only route needs no effort choice', async () => {
-  const model = fakeModel('{"title":"T","body":"B"}', { efforts: [] })
+  const model = fakeModel(goodAnswer, { efforts: [] })
   await draftChangeRequest({
     llm: model.llm,
     route: { provider: 'p', model: 'm' },
@@ -164,7 +230,10 @@ test('a text-only route needs no effort choice', async () => {
 })
 
 test('a block-end answer is assembled like streamed text', async () => {
-  const model = fakeModel('{"title":"Block","body":"Body"}', { chunk: 'block' })
+  const model = fakeModel(JSON.stringify({
+    title: 'Add the Git panel to the sidebar',
+    body: 'Adds the panel with its diff stack.\n\n## Changes\n- Adds the panel component.\n\n## Testing\n- Tests were not run.',
+  }), { chunk: 'block' })
   const draft = await draftChangeRequest({
     llm: model.llm,
     route: { provider: 'p', model: 'm' },
@@ -173,7 +242,7 @@ test('a block-end answer is assembled like streamed text', async () => {
     base: 'main',
     config: {},
   })
-  assert.equal(draft.title, 'Block')
+  assert.equal(draft.title, 'Add the Git panel to the sidebar')
 })
 
 test('a missing model service or route falls back to the commits', async () => {

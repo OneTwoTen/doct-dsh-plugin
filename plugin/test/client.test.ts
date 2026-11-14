@@ -362,6 +362,80 @@ test('a diff file section renders its header, counts, and hunk lines', async () 
   assert.match(textOf(expanded), /const a = 1/)
 })
 
+test('a changed file offers stage, unstage, and discard in the working scope', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const DiffFileSection = view.DiffFileSection as (props: Record<string, unknown>) => unknown
+  const file = {
+    path: 'src/a.ts',
+    file: null,
+    additions: 1,
+    deletions: 0,
+    binary: false,
+    truncated: false,
+    tooLarge: false,
+    untracked: false,
+    oldPath: null,
+    whitespaceOnly: false,
+  }
+  const calls: string[] = []
+  const base = {
+    t: (key: string) => key,
+    file,
+    expanded: false,
+    selected: true,
+    layout: 'unified',
+    wrap: false,
+    onToggle: () => {},
+    onSelect: () => {},
+    onCopied: () => {},
+    onStage: () => calls.push('stage'),
+    onUnstage: () => calls.push('unstage'),
+    onDiscard: () => calls.push('discard'),
+  }
+  const unstaged = DiffFileSection({ ...base, staged: false })
+  const buttons = findAll(unstaged, (element) => element.type === 'button')
+  const byTitle = (title: string) => buttons.find((button) => button.props?.title === title)
+  assert.ok(byTitle('gitStage'), 'an unstaged file offers Stage')
+  assert.equal(byTitle('gitUnstage'), undefined)
+  assert.ok(byTitle('gitDiscard'))
+  ;(byTitle('gitStage')?.props?.onClick as (event: unknown) => void)({ stopPropagation() {} })
+  ;(byTitle('gitDiscard')?.props?.onClick as (event: unknown) => void)({ stopPropagation() {} })
+  assert.deepEqual(calls, ['stage', 'discard'])
+
+  const staged = DiffFileSection({ ...base, staged: true })
+  const stagedButtons = findAll(staged, (element) => element.type === 'button')
+  assert.ok(stagedButtons.some((button) => button.props?.title === 'gitUnstage'), 'a staged file offers Unstage')
+  assert.equal(stagedButtons.some((button) => button.props?.title === 'gitStage'), false)
+
+  // The branch scope renders the same file without working-tree actions.
+  const branch = DiffFileSection({ ...base, onStage: undefined, onUnstage: undefined, onDiscard: undefined })
+  const branchButtons = findAll(branch, (element) => element.type === 'button')
+  assert.equal(branchButtons.some((button) => button.props?.title === 'gitStage'), false)
+})
+
+test('the create-pull dialog shows the drafting state and keeps create disabled', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const CreatePullDialog = view.CreatePullDialog as (props: Record<string, unknown>) => unknown
+  const dialog = CreatePullDialog({
+    t: (key: string) => key,
+    api: { draftPull: async () => ({}), createPull: async () => ({ pull: {} }) },
+    sessionId: 's1',
+    cwd: '/repo',
+    base: 'main',
+    onClose: () => {},
+    onCreated: () => {},
+  })
+  assert.match(textOf(dialog), /gitPrAction/)
+  assert.match(textOf(dialog), /gitPrDrafting/)
+  const buttons = findAll(dialog, (element) => element.type === 'button')
+  const create = buttons.find((button) => button.props?.className === 'ph-primary')
+  assert.equal(create?.props?.disabled, true, 'create stays disabled until a draft exists')
+  const title = findAll(dialog, (element) => element.props?.className === 'ph-input')[1]
+  assert.equal(title?.props?.value, '')
+})
+
 test('the commit box shows the selection, the placeholder, and both commit actions', async () => {
   const module = await loadClient()
   const view = module.__internal as Record<string, unknown>

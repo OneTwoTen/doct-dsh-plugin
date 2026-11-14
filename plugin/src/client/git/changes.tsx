@@ -29,8 +29,6 @@ export interface ChangesViewProps {
   onCommit(request: CommitRequest): void
   onToast(title: string, description: string, tone: 'error' | 'success'): void
   onRefresh(): void
-  /** Report the active diff scope so the header summary can match it. */
-  onScope?(scope: 'working' | 'branch'): void
 }
 
 /** The stored view preferences. */
@@ -81,6 +79,8 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
   const [scope, setScope] = useState<'working' | 'branch'>(initial.scope)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [selection, setSelection] = useState<Set<string>>(() => new Set())
+  const [working, setWorking] = useState<string | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState<{ path: string; untracked: boolean } | null>(null)
   const known = useRef<Set<string>>(new Set())
   const initialized = useRef(false)
 
@@ -88,11 +88,13 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
     writePreferences({ layout, wrap, hideWhitespace, scope })
   }, [layout, wrap, hideWhitespace, scope])
 
-  useEffect(() => {
-    props.onScope?.(scope)
-  }, [scope, props.onScope])
-
   const signature = files.map((file) => file.path).join('\n')
+
+  /** Whether the index already holds this file's change. */
+  const stagedPaths = useMemo(
+    () => new Map(files.map((file) => [file.path, file.staged === true])),
+    [files],
+  )
 
   // Reconcile the commit scope and the expanded set when the change set moves:
   // new files arrive selected, a file the user excluded stays excluded, and a
@@ -155,10 +157,43 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
     setSelection(next ? new Set(files.map((file) => file.path)) : new Set())
   }
 
+  /**
+   * Stage, unstage, or discard exactly one file.
+   *
+   * The working tree stays authoritative: every action reloads the overview and
+   * the diff so a partially staged file cannot leave the two views disagreeing.
+   */
+  const runFileAction = async (kind: 'stage' | 'unstage' | 'discard', path: string, untracked: boolean): Promise<void> => {
+    if (working !== null) return
+    setWorking(path)
+    try {
+      const target = { sessionId: props.sessionId, cwd: props.cwd || undefined }
+      if (kind === 'stage') await api.stage({ ...target, paths: [path] })
+      else if (kind === 'unstage') await api.unstage({ ...target, paths: [path] })
+      else {
+        // A staged copy would otherwise survive the work-tree restore, leaving
+        // the file staged after it was "discarded".
+        if (!untracked) await api.unstage({ ...target, paths: [path] })
+        await api.discard({ ...target, paths: [path], includeUntracked: untracked })
+      }
+      const key = kind === 'stage' ? 'gitStageDone' : kind === 'unstage' ? 'gitUnstageDone' : 'gitDiscardDone'
+      props.onToast(t(key, { path }), '', 'success')
+      setConfirmDiscard(null)
+      props.onRefresh()
+    } catch (failure) {
+      props.onToast(t('gitActionFailed'), messageOf(failure), 'error')
+    } finally {
+      setWorking(null)
+    }
+  }
+
   const expandAll = (): void => setExpanded(new Set(stack.map((file) => stackKey(file))))
   const collapseAll = (): void => setExpanded(new Set())
 
   const baseLabel = overview.branchChanges?.baseRef ?? overview.repo.defaultBranch ?? ''
+  const totals = scope === 'branch'
+    ? { insertions: overview.branchChanges?.insertions ?? 0, deletions: overview.branchChanges?.deletions ?? 0 }
+    : { insertions: overview.stats.additions, deletions: overview.stats.deletions }
   const toolbar = h('div', { className: 'ph-stack-toolbar' },
     h('div', { style: { display: 'flex', borderRadius: '999px', border: '1px solid var(--dsw-alias-border-l1)', overflow: 'hidden' } },
       h('button', {
@@ -178,6 +213,8 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
     baseLabel.length > 0 && scope === 'branch'
       ? h('span', { className: 'ph-dim ph-tiny' }, t('gitScopeLabel', { base: baseLabel }))
       : null,
+    h('span', { className: 'ph-dim ph-tiny' }, t('gitFilesMany', { count: files.length })),
+    h(Counts, { additions: totals.insertions, deletions: totals.deletions }),
     h('span', { className: 'ph-spacer' }),
     h('button', {
       type: 'button',
@@ -226,9 +263,16 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
           wrap,
           expanded: expanded.has(key),
           selected: selection.has(file.path),
+          staged: stagedPaths.get(file.path) === true,
+          actionBusy: working === file.path,
           onToggle: () => toggleExpanded(key),
           onSelect: (next: boolean) => toggleSelected(file.path, next),
           onCopied: (path: string) => props.onToast(t('gitCopied'), path, 'success'),
+          onStage: scope === 'working' ? () => void runFileAction('stage', file.path, file.untracked) : undefined,
+          onUnstage: scope === 'working' ? () => void runFileAction('unstage', file.path, file.untracked) : undefined,
+          onDiscard: scope === 'working'
+            ? () => setConfirmDiscard({ path: file.path, untracked: file.untracked })
+            : undefined,
         })
       }),
     ]
@@ -250,7 +294,30 @@ export function ChangesView(props: ChangesViewProps): ReturnType<typeof h> {
         onToggleFile: toggleSelected,
         onCommit: props.onCommit,
         onToast: props.onToast,
-      })))
+      })),
+    confirmDiscard === null
+      ? null
+      : h('div', { className: 'ph-overlay', role: 'presentation' },
+          h('div', { className: 'ph-dialog', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': t('gitDiscard') },
+            h('div', { className: 'ph-dialog-title' }, t('gitDiscard')),
+            h('p', { className: 'ph-dialog-body' },
+              t(confirmDiscard.untracked ? 'gitDiscardUntracked' : 'gitDiscardConfirm', { path: confirmDiscard.path })),
+            h('div', { className: 'ph-dialog-actions' },
+              h('button', {
+                type: 'button',
+                className: 'ph-button',
+                disabled: working !== null,
+                onClick: () => setConfirmDiscard(null),
+              }, t('gitDefaultAbort')),
+              h('button', {
+                type: 'button',
+                className: 'ph-primary ph-danger',
+                disabled: working !== null,
+                onClick: () => {
+                  const target = confirmDiscard
+                  void runFileAction('discard', target.path, target.untracked)
+                },
+              }, working === confirmDiscard.path ? t('gitDiscardBusy') : t('gitDiscard'))))))
 }
 
 /** The clean-tree placeholder. */
@@ -259,32 +326,4 @@ function EmptyChanges(props: { t: Translate }): ReturnType<typeof h> {
     h('span', { className: 'ph-empty-icon' }, h(Icon, { name: 'check', size: 26 })),
     h('span', { className: 'ph-empty-title' }, props.t('gitClean')),
     h('span', { className: 'ph-empty-hint' }, props.t('gitCleanHint')))
-}
-
-/** A compact summary of the active change scope, for the header. */
-export function ChangesSummary(props: {
-  t: Translate
-  stats: GitOverview['stats']
-  branchChanges: GitOverview['branchChanges']
-  scope: 'working' | 'branch'
-  onClick?(): void
-}): ReturnType<typeof h> {
-  const branch = props.scope === 'branch' ? props.branchChanges : null
-  const totals = branch ?? { baseRef: null, insertions: props.stats.additions, deletions: props.stats.deletions }
-  const base = props.scope === 'branch'
-    ? branch !== null && branch.baseRef !== null
-      ? props.t('gitScopeLabel', { base: branch.baseRef })
-      : props.t('gitScopeBranch')
-    : props.t('gitUncommitted')
-  return h('button', {
-    type: 'button',
-    className: 'ph-button',
-    style: { width: '100%', justifyContent: 'flex-start', padding: '5px 8px' },
-    onClick: props.onClick,
-  },
-    h(Icon, { name: 'fileDiff', size: 12 }),
-    h('span', null, props.t('gitChanges')),
-    h('span', { className: 'ph-dim ph-tiny' }, base),
-    h('span', { className: 'ph-spacer' }),
-    h(Counts, { additions: totals.insertions, deletions: totals.deletions }))
 }

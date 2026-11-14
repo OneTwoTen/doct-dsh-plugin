@@ -11,6 +11,23 @@ export const NS = 'personalHub'
 /** A reader for one namespace, with `{name}` interpolation. */
 export type Translate = (key: string, values?: Record<string, string | number>) => string
 
+/**
+ * The language the panel is currently rendered in.
+ *
+ * The locale service only binds a translator, so the language is read back from
+ * one of this bundle's own strings; the browser language is the fallback for a
+ * deployment that translated nothing.
+ *
+ * @param t the namespace translator the components received.
+ */
+export function currentLocale(t: Translate): string {
+  const marker = t('gitActions')
+  if (marker === en.gitActions) return 'en'
+  if (marker === vi.gitActions) return 'vi'
+  const language = typeof navigator === 'undefined' ? '' : String(navigator.language ?? '')
+  return language.length > 0 ? language : 'en'
+}
+
 /** English strings. */
 export const en: Record<string, string> = {
   cardTitle: 'Personal hub',
@@ -114,7 +131,7 @@ export const en: Record<string, string> = {
 
   gitPrAction: 'Create pull request',
   gitPrConfirm: 'Create a pull request from {branch} into {base}?',
-  gitPrConfirmHint: 'The branch is pushed, then this chat’s model drafts the title and description before the request opens.',
+  gitPrConfirmHint: 'The model drafts the title and description; the branch is pushed only when you create the request.',
   gitPrCreate: 'Create',
   gitPrCancel: 'Cancel',
   gitPrBusy: 'Drafting the pull request…',
@@ -124,6 +141,49 @@ export const en: Record<string, string> = {
   gitPrBase: 'Base branch',
   gitPrNoForge: 'Pull requests need a signed-in code host CLI',
   gitPrNoBranch: 'This checkout has no named branch',
+  gitPrTitleLabel: 'Title',
+  gitPrBodyLabel: 'Description',
+  gitPrTitlePlaceholder: 'Write the title, or let the model draft one',
+  gitPrBodyPlaceholder: 'Describe what changed and how it was tested, or let the model draft it',
+  gitPrDrafting: 'Drafting the pull request…',
+  gitPrRegenerate: 'Draft again',
+  gitPrDraftModel: 'Drafted by {model}',
+  gitPrDraftFallback: 'Drafted from the commits',
+  gitPrDraftFallbackReason: 'Drafted from the commits ({reason})',
+  gitPrNoCommitsHint: 'The branch has no commit over its base yet.',
+  gitPrDefaultBranchHint: 'This checkout is on {branch}; create a feature branch before opening a pull request.',
+  gitPrCreating: 'Creating pull request…',
+
+  /* Merging a change request */
+  gitMerge: 'Merge',
+  gitMergeSquash: 'Squash & merge',
+  gitMergeRebase: 'Rebase & merge',
+  gitMergeTitle: 'Merge pull request #{number}',
+  gitMergeBody: 'Merge {branch} into {base}?',
+  gitMergeHint: 'The code host still applies its checks, reviews, and branch protection rules.',
+  gitMergeDeleteBranch: 'Delete the source branch after merging',
+  gitMergeCancel: 'Cancel',
+  gitMergeConfirm: 'Merge',
+  gitMergeBusy: 'Merging…',
+  gitMergeDone: 'Merged #{number}',
+  gitMergeQueued: 'Merge requested for #{number}',
+  gitMergeFailed: 'Could not merge the pull request',
+  gitMergeBlocked: 'The code host did not accept the merge',
+  gitMergeUnsupported: 'This code host does not support that merge method',
+  gitMergeDeletedBranch: 'The source branch was deleted.',
+  gitMergeDeleteFailed: 'The merge succeeded, but the source branch could not be deleted.',
+
+  /* Staging one file */
+  gitStage: 'Stage',
+  gitUnstage: 'Unstage',
+  gitDiscard: 'Discard',
+  gitDiscardBusy: 'Discarding…',
+  gitDiscardConfirm: 'Discard changes in {path}?',
+  gitDiscardUntracked: 'Delete the untracked file {path}?',
+  gitFileActions: 'File actions',
+  gitStageDone: 'Staged {path}',
+  gitUnstageDone: 'Unstaged {path}',
+  gitDiscardDone: 'Discarded {path}',
 
   wtOption: 'New worktree',
   wtSource: 'Start from',
@@ -530,7 +590,7 @@ export const vi: Record<string, string> = {
 
   gitPrAction: 'Tạo pull request',
   gitPrConfirm: 'Tạo pull request từ {branch} vào {base}?',
-  gitPrConfirmHint: 'Nhánh được đẩy lên trước, sau đó model của phiên này viết tiêu đề và mô tả rồi pull request mới được mở.',
+  gitPrConfirmHint: 'Model viết tiêu đề và mô tả; nhánh chỉ được đẩy lên khi bạn bấm tạo.',
   gitPrCreate: 'Tạo',
   gitPrCancel: 'Huỷ',
   gitPrBusy: 'Đang soạn pull request…',
@@ -540,6 +600,49 @@ export const vi: Record<string, string> = {
   gitPrBase: 'Nhánh nền',
   gitPrNoForge: 'Cần CLI của máy chủ mã nguồn đã đăng nhập để tạo pull request',
   gitPrNoBranch: 'Bản checkout này không ở trên nhánh nào',
+  gitPrTitleLabel: 'Tiêu đề',
+  gitPrBodyLabel: 'Mô tả',
+  gitPrTitlePlaceholder: 'Viết tiêu đề, hoặc để model viết',
+  gitPrBodyPlaceholder: 'Mô tả thay đổi và cách kiểm thử, hoặc để model viết',
+  gitPrDrafting: 'Đang soạn pull request…',
+  gitPrRegenerate: 'Viết lại',
+  gitPrDraftModel: 'Do {model} viết',
+  gitPrDraftFallback: 'Dựng từ commit',
+  gitPrDraftFallbackReason: 'Dựng từ commit ({reason})',
+  gitPrNoCommitsHint: 'Nhánh chưa có commit nào hơn nhánh nền.',
+  gitPrDefaultBranchHint: 'Checkout đang ở {branch}; hãy tạo nhánh feature trước khi mở pull request.',
+  gitPrCreating: 'Đang tạo pull request…',
+
+  /* Gộp pull request */
+  gitMerge: 'Gộp',
+  gitMergeSquash: 'Squash & gộp',
+  gitMergeRebase: 'Rebase & gộp',
+  gitMergeTitle: 'Gộp pull request #{number}',
+  gitMergeBody: 'Gộp {branch} vào {base}?',
+  gitMergeHint: 'Máy chủ mã nguồn vẫn áp dụng kiểm tra, review và quy tắc bảo vệ nhánh.',
+  gitMergeDeleteBranch: 'Xoá nhánh nguồn sau khi gộp',
+  gitMergeCancel: 'Huỷ',
+  gitMergeConfirm: 'Gộp',
+  gitMergeBusy: 'Đang gộp…',
+  gitMergeDone: 'Đã gộp #{number}',
+  gitMergeQueued: 'Đã gửi yêu cầu gộp #{number}',
+  gitMergeFailed: 'Không gộp được pull request',
+  gitMergeBlocked: 'Máy chủ mã nguồn không chấp nhận gộp',
+  gitMergeUnsupported: 'Máy chủ mã nguồn không hỗ trợ kiểu gộp này',
+  gitMergeDeletedBranch: 'Đã xoá nhánh nguồn.',
+  gitMergeDeleteFailed: 'Gộp thành công nhưng chưa xoá được nhánh nguồn.',
+
+  /* Stage từng tệp */
+  gitStage: 'Stage',
+  gitUnstage: 'Bỏ stage',
+  gitDiscard: 'Huỷ thay đổi',
+  gitDiscardBusy: 'Đang huỷ…',
+  gitDiscardConfirm: 'Huỷ thay đổi trong {path}?',
+  gitDiscardUntracked: 'Xoá tệp chưa theo dõi {path}?',
+  gitFileActions: 'Thao tác tệp',
+  gitStageDone: 'Đã stage {path}',
+  gitUnstageDone: 'Đã bỏ stage {path}',
+  gitDiscardDone: 'Đã huỷ thay đổi {path}',
 
   wtOption: 'Worktree mới',
   wtSource: 'Bắt đầu từ',

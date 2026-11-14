@@ -122,6 +122,10 @@ cửa sổ DSH.
 ### Thanh thao tác Git
 
 Đầu bảng là **một cụm nút giống T3 Code**: nút chính nêu việc nên làm tiếp, mũi tên bên phải mở menu.
+Phía trên là hai dòng gọn: tên kho (kèm chip worktree khi phiên đang ở checkout riêng) và nút ⟳, rồi
+nút nhánh với số commit trước/sau upstream và chip pull request của nhánh; slug remote nằm trong
+tooltip của tên kho thay vì chiếm một dòng. Dải tab hiện **số thật**: tệp đã đổi, số checkout, PR đang
+mở, issue đang mở (một trang 50 mục, hiện `50+` khi trang đầy), và tổng commit.
 
 | Nút chính | Khi nào |
 |---|---|
@@ -164,6 +168,9 @@ Ngăn Changes là **một khối cuộn gồm mọi tệp thay đổi**, mỗi t
 
 - **Header dính** khi cuộn: checkbox chọn commit, mũi tên mở/thu, nhãn A/M/D/R/C/!/U, đường dẫn
   (thư mục mờ, tên tệp sáng), `+n −m`, nút sao chép đường dẫn.
+- **Thao tác từng tệp** ngay trên header: `+` **Stage**, `×` **Bỏ stage** (khi tệp đã nằm trong index),
+  và **Huỷ thay đổi** (hỏi xác nhận; tệp chưa theo dõi bị xoá, tệp đã stage được bỏ stage trước).
+  Thao tác chạy xong thì bảng đọc lại cả overview lẫn diff để trạng thái index và diff không lệch nhau.
 - **Một cột / Hai cột** (unified/split), **xuống dòng**, **ẩn thay đổi khoảng trắng**, **mở tất cả**,
   **thu gọn tất cả**. Lựa chọn được nhớ trong trình duyệt.
 - **Phạm vi**: **Chưa commit** (`git diff HEAD` cộng tệp chưa theo dõi) hoặc **Nhánh** (so với
@@ -189,6 +196,20 @@ Lỗi checkout (cây bẩn, nhánh đã bị checkout ở worktree khác) hiện
 - Issue: danh sách lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả và bình luận.
 - Tab **Commit**: lịch sử gần nhất; bấm một commit để xem mô tả, tệp thay đổi và toàn bộ patch.
 
+### Gộp pull request
+
+Trang chi tiết pull request đang mở có thẻ **Gộp pull request** với ba cách: **Gộp** (merge commit),
+**Squash & gộp**, và **Rebase & gộp** (GitLab không hỗ trợ rebase-merge nên chỉ hiện hai nút đầu).
+Hộp xác nhận nêu nhánh nguồn → nhánh đích, cho chọn **xoá nhánh nguồn sau khi gộp**, và liệt kê lại
+ba cách gộp để đổi ngay tại chỗ.
+
+Plugin không ép gộp: kiểm tra CI, review và quy tắc bảo vệ nhánh vẫn do máy chủ quyết định, nên lỗi
+trả về thành mã `merge/blocked` (điều kiện chưa đạt), `merge/conflict` (nhánh đã đổi/xung đột), hoặc
+`merge/unsupported` (GitLab + rebase). Khi máy chủ chỉ bật auto-merge hoặc đưa PR vào hàng đợi merge,
+kết quả hiện **đã gửi yêu cầu gộp** chứ không giả báo đã gộp. Nếu xoá nhánh nguồn thất bại sau khi gộp
+thành công, dòng kết quả ghi rõ merge đã xong nhưng nhánh còn lại. Gộp xong, bảng tự làm mới và cơ chế
+dọn worktree sau khi PR được gộp vẫn chạy như cũ.
+
 ### GitHub, GitLab và GitLab tự host
 
 Plugin nhận diện máy chủ từ remote:
@@ -212,21 +233,27 @@ tự host và đường dẫn CLI. Cấu hình được lưu vào profile qua Co
 ### Tạo pull request bằng AI
 
 Tạo PR là một bước trong chuỗi thao tác (`commit_push_pr`, `create_pr`) hoặc mục **Tạo pull request**
-trong menu:
+trong menu. Trước khi mở PR, plugin luôn cho bạn **xem và sửa** nội dung model viết:
 
-1. Plugin đẩy nhánh hiện tại lên remote nếu cần (`git.push --set-upstream`); đặt
-   `git.pull.push: false` nếu bạn tự đẩy trước.
-2. Nếu nhánh đã có PR đang mở, plugin dùng lại PR đó (`opened_existing`) thay vì tạo trùng.
-3. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ các commit cùng diff của nhánh, với
-   **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`). Có thể ghim route
-   khác bằng `git.pull.provider` + `git.pull.model`.
-4. Pull request được mở bằng `gh pr create`; GitLab dùng `glab api` (hoặc REST API v4 khi có token),
-   nên hỗ trợ cả merge request và GitLab tự host.
-5. Pull request vừa tạo được **gắn với phiên** để theo dõi việc gộp.
+1. Hộp **Tạo pull request** hỏi model **đang dùng cho phiên này** viết tiêu đề và mô tả từ commit cùng
+   diff của nhánh, với **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`).
+   Có thể ghim route khác bằng `git.pull.provider` + `git.pull.model`.
+2. Tiêu đề và mô tả hiện trong hai ô sửa được; **Viết lại** gọi model lần nữa, còn sửa tay thì giữ
+   nguyên. Nhánh **chưa** được đẩy lên ở bước này.
+3. Bấm **Tạo** mới đẩy nhánh (`git.push --set-upstream`; đặt `git.pull.push: false` nếu bạn tự đẩy
+   trước) rồi mở PR bằng `gh pr create`; GitLab dùng `glab api` (hoặc REST API v4 khi có token).
+4. Nếu nhánh đã có PR đang mở, plugin dùng lại PR đó (`opened_existing`) thay vì tạo trùng.
+5. PR vừa tạo được **gắn với phiên** để theo dõi việc gộp.
 
-Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì plugin vẫn tạo PR bằng bản nháp dựng
-từ commit và tên tệp, và ghi lý do vào `draft.error` trong câu trả lời — không chặn thao tác.
-Nhánh chưa có commit mới so với nhánh nền sẽ bị từ chối với `pr/no-commits`.
+Mô tả do model viết phải có **ba phần**: đoạn tóm tắt, danh sách thay đổi theo tệp/hành vi, và phần
+kiểm thử (hoặc nói rõ là chưa chạy). Câu trả lời mơ hồ — tiêu đề chung chung như "Update files", thân
+bài một dòng, thiếu phần — sẽ được **hỏi lại một lần** với chỉ dẫn cụ thể; nếu vẫn không đạt thì plugin
+dựng bản nháp từ commit và ghi lý do, chứ không mở PR với mô tả rỗng. Ngôn ngữ bám theo ngôn ngữ UI
+(`vi` → tiếng Việt, còn lại → tiếng Anh), kể cả bản dựng từ commit.
+
+Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì hộp thoại vẫn mở với bản nháp dựng từ
+commit và tên tệp, kèm lý do trong dòng nguồn — không chặn thao tác. Nhánh chưa có commit mới so với
+nhánh nền sẽ bị từ chối với `pr/no-commits`, và nút **Tạo** bị khoá kèm gợi ý.
 
 ### Publish repository
 

@@ -531,6 +531,8 @@ export interface GitRunStackedActionResult {
     base?: string
     head?: string
     title?: string
+    body?: string
+    draft?: { source: string; model: string | null; error: string | null }
   }
   toast: GitActionToast
 }
@@ -691,6 +693,65 @@ export interface CreatePullRequest extends GitTarget {
   locale?: string
 }
 
+/** A draft request: the title and description the dialog will show before opening. */
+export interface DraftPullRequest extends GitTarget {
+  base?: string
+  /** A title the caller already wrote; when present the model is not called. */
+  title?: string
+  body?: string
+  locale?: string
+}
+
+/** What one drafting request answered; nothing is pushed or opened. */
+export interface PullDraftResult {
+  title: string
+  body: string
+  source: 'model' | 'commits' | 'manual'
+  model: string | null
+  error: string | null
+  base: string
+  head: string
+  ahead: number
+  commits: number
+  files: number
+}
+
+/** The merge strategy a change request may be merged with. */
+export type MergeMethod = 'merge' | 'squash' | 'rebase'
+
+/** One change request's merge, from the detail pane. */
+export interface MergePullRequest extends GitTarget {
+  number: number
+  method?: MergeMethod
+  /** Delete the source branch on the code host after a successful merge. */
+  deleteBranch?: boolean
+}
+
+/** What one merge did, as the pane reports it. */
+export interface MergePullResult {
+  merged: boolean
+  /** The state the code host left the change request in. */
+  state: string
+  sha: string | null
+  message: string
+  url: string
+  provider: string
+  backend: 'cli' | 'rest' | null
+  /** Null when deleting the source branch was not requested. */
+  branchDeleted: boolean | null
+}
+
+/** The counters the tab strip shows; null means the code host did not answer. */
+export interface GitCounts {
+  commits: number
+  worktrees: number
+  pulls: number | null
+  issues: number | null
+  /** The code host returned a full page, so the real number may be larger. */
+  pullsCapped: boolean
+  issuesCapped: boolean
+}
+
 /** The publish-repository request. */
 export interface PublishRequest extends GitTarget {
   provider: 'github' | 'gitlab'
@@ -730,6 +791,8 @@ export interface WorktreeRemovePathRequest extends GitTarget {
 /** One route the browser may call. */
 export interface GitApi {
   overview(payload: GitTarget): Promise<GitOverview>
+  /** The counts the tab strip shows. */
+  counts(payload: GitTarget & { refresh?: boolean }): Promise<GitCounts>
   diff(payload: DiffRequest): Promise<FileDiff>
   diffAll(payload: DiffAllRequest): Promise<DiffBundle>
   commits(payload: GitTarget & { limit?: number }): Promise<{ commits: GitCommitSummary[] }>
@@ -788,6 +851,10 @@ export interface GitApi {
     draft: { source: string; model: string | null; error: string | null }
     watched: boolean
   }>
+  /** Draft the title and description without pushing or opening anything. */
+  draftPull(payload: DraftPullRequest): Promise<PullDraftResult>
+  /** Merge one change request with the chosen strategy. */
+  mergePull(payload: MergePullRequest): Promise<MergePullResult>
   publish(payload: PublishRequest): Promise<{ remote: string; url: string | null; pushed: boolean }>
   worktreeState(payload: GitTarget & { probe?: boolean }): Promise<WorktreeState>
   worktrees(payload: GitTarget): Promise<WorktreeListResult>

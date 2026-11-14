@@ -11,12 +11,14 @@ import { useLoader, useDocumentVisible, splitPath } from '../hooks.ts'
 import { messageOf } from '../api.ts'
 import type { GitApi } from '../api.ts'
 import type { Translate } from '../i18n.ts'
+import { currentLocale } from '../i18n.ts'
 import { actionStatusOf, buildActionMenuItems, resolveQuickAction, needsDefaultBranchConfirmation, actionIncludesCommit } from './action-logic.ts'
 import type { ActionStatus, QuickAction } from './action-logic.ts'
 import { GitActions, DefaultBranchDialog, PublishDialog } from './actions.tsx'
 import type { InlineSuccess } from './actions.tsx'
 import { BranchSelector } from './branch-selector.tsx'
-import { ChangesView, ChangesSummary } from './changes.tsx'
+import { CreatePullDialog } from './create-pull.tsx'
+import { ChangesView } from './changes.tsx'
 import type { CommitRequest } from './commit-composer.tsx'
 import { CommitsView, CommitPane } from './commits.tsx'
 import { PullsView, PullPane } from './pulls.tsx'
@@ -74,7 +76,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     : ''
 
   const [view, setView] = useState<ViewId>('changes')
-  const [changesScope, setChangesScope] = useState<'working' | 'branch'>('working')
   const [selection, setSelection] = useState<Selection>(null)
   const [pullFilter, setPullFilter] = useState('open')
   const [issueFilter, setIssueFilter] = useState('open')
@@ -86,6 +87,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const [menuOpen, setMenuOpen] = useState(false)
   const [pending, setPending] = useState<{ action: GitStackedAction; options: ActionOptions } | null>(null)
   const [publishOpen, setPublishOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [publishBusy, setPublishBusy] = useState(false)
   const [publishError, setPublishError] = useState('')
   const mounted = useRef(true)
@@ -105,6 +107,11 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   )
   const overview = overviewState.value
   const status = actionStatusOf(overview)
+  const countsState = useLoader(
+    () => api.counts({ sessionId, cwd: cwd || undefined }),
+    [sessionId, cwd, revision],
+  )
+  const counts = countsState.value
 
   // Poll while the tab is on screen; a hidden tab stops asking.
   useEffect(() => {
@@ -138,6 +145,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       setMenuOpen(false)
       setPending(null)
       setPublishOpen(false)
+      setCreateOpen(false)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -162,7 +170,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     }, 10000)
   }
 
-  const pollAction = async (actionId: string): Promise<void> => {
+  /**
+   * Poll one action to completion.
+   * @param actionId the Host action id.
+   * @param after what to open once the action succeeded.
+   */
+  const pollAction = async (actionId: string, after?: 'create_pull'): Promise<void> => {
     for (;;) {
       let state: GitActionProgress
       try {
@@ -187,6 +200,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       }
       const result = state.result
       if (result === null) return
+      if (after === 'create_pull') setCreateOpen(true)
       const toastInfo = result.toast
       showSuccess({
         title: toastInfo.title,
@@ -199,7 +213,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     }
   }
 
-  const startAction = async (action: GitStackedAction, options: ActionOptions, confirmed = false): Promise<void> => {
+  const startAction = async (
+    action: GitStackedAction,
+    options: ActionOptions,
+    confirmed = false,
+    after?: 'create_pull',
+  ): Promise<void> => {
     if (running) return
     if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
       setPending({ action, options })
@@ -231,9 +250,9 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         paths: options.paths !== undefined && options.paths.length > 0 ? options.paths : undefined,
         featureBranch: options.featureBranch === true,
         base: options.base,
-        locale: typeof navigator === 'undefined' ? '' : navigator.language,
+        locale: currentLocale(t),
       })
-      await pollAction(started.actionId)
+      await pollAction(started.actionId, after)
     } catch (failure) {
       if (!mounted.current) return
       setRunning(false)
@@ -299,6 +318,15 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const quick = resolveQuickAction(status, running)
   const menuItems = buildActionMenuItems(status, running)
 
+  /** Open the review dialog, or explain why this branch cannot open a request yet. */
+  const openCreatePull = (): void => {
+    if (status?.isDefaultRef === true) {
+      toast(t('gitPrAction'), t('gitPrDefaultBranchHint', { branch: status.branch ?? '' }), 'info')
+      return
+    }
+    setCreateOpen(true)
+  }
+
   const runQuick = (): void => {
     if (quick.kind === 'run_pull') {
       void runPull()
@@ -309,6 +337,16 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       return
     }
     if (quick.kind === 'run_action' && quick.action !== undefined) {
+      if (quick.action === 'create_pr') {
+        openCreatePull()
+        return
+      }
+      // The combined action stops after the push so the dialog can show the
+      // model's draft: the request opens only after the user accepts the text.
+      if (quick.action === 'commit_push_pr') {
+        void startAction('commit_push', {}, false, 'create_pull')
+        return
+      }
       void startAction(quick.action, {})
     }
   }
@@ -328,6 +366,11 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     if (action === 'commit') {
       setMenuOpen(false)
       focusComposer()
+      return
+    }
+    if (action === 'create_pr') {
+      setMenuOpen(false)
+      openCreatePull()
       return
     }
     void startAction(action, {})
@@ -354,7 +397,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     api,
     sessionId,
     cwd,
-    scope: changesScope,
     onToggleMenu: () => setMenuOpen((value) => !value),
     onQuick: runQuick,
     onRun: onMenuRun,
@@ -376,10 +418,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     onBranchChanged: (branch: string | null) => {
       reload()
       toast(t('gitBranchSelect'), branch ?? t('gitDetachedHead'), 'success')
-    },
-    onOpenChanges: () => {
-      setView('changes')
-      setSelection(null)
     },
   })
 
@@ -411,6 +449,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       api, t, sessionId, cwd, revision,
       number: selection.number,
       onBack: () => setSelection(null),
+      onChanged: reload,
     })
   } else if (selection !== null && view === 'issues' && selection.type === 'issue') {
     body = h(IssuePane, {
@@ -453,7 +492,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       onCommit,
       onToast: toast,
       onRefresh: reload,
-      onScope: setChangesScope,
     })
   }
 
@@ -465,11 +503,15 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       t,
       value: view,
       counts: {
-        changes: overview?.stats.files ?? 0,
-        worktrees: 0,
-        pulls: 0,
-        issues: 0,
-        commits: 0,
+        changes: overview === undefined ? null : { value: overview.stats.files },
+        worktrees: counts === undefined ? null : { value: counts.worktrees },
+        pulls: counts === undefined || counts.pulls === null
+          ? null
+          : { value: counts.pulls, capped: counts.pullsCapped },
+        issues: counts === undefined || counts.issues === null
+          ? null
+          : { value: counts.issues, capped: counts.issuesCapped },
+        commits: counts === undefined ? null : { value: counts.commits },
       },
       onChange: (next: ViewId) => {
         setView(next)
@@ -512,6 +554,30 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         })
       : null,
 
+    createOpen
+      ? h(CreatePullDialog, {
+          api,
+          t,
+          sessionId,
+          cwd: cwd || undefined,
+          base: overview?.repo.defaultBranch ?? '',
+          onClose: () => setCreateOpen(false),
+          onCreated: (pull: { number: number | null; url: string; title: string }) => {
+            setCreateOpen(false)
+            reload()
+            toast(
+              t('gitPrCreated', { number: pull.number ?? '?' }),
+              pull.title,
+              'success',
+            )
+            if (pull.number !== null) {
+              setView('pulls')
+              setSelection({ type: 'pull', number: pull.number })
+            }
+          },
+        })
+      : null,
+
     toasts.length === 0
       ? null
       : h('div', { className: 'ph-toasts' }, toasts.map((item) => h('div', {
@@ -546,7 +612,6 @@ interface PanelHeaderProps {
   api: GitApi
   sessionId: string
   cwd: string
-  scope: 'working' | 'branch'
   onToggleMenu(): void
   onQuick(): void
   onRun(action: GitStackedAction): void
@@ -557,20 +622,28 @@ interface PanelHeaderProps {
   onOpenPull(number: number): void
   onOpenWorktrees(): void
   onBranchChanged(branch: string | null): void
-  onOpenChanges(): void
 }
 
-/** The header: repository, branch, actions, and the changes summary. */
+/** The header: repository, branch, and the action control. */
 function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
   const { t, overview } = props
   const repo = overview.repo
   const pull = overview.branchPull
   const inWorktree = props.cwd.length > 0 && props.cwd.toLowerCase() !== repo.root.toLowerCase()
   const worktreeName = inWorktree ? splitPath(props.cwd).name : ''
+  const remoteLabel = repo.remote?.slug ?? null
   return h('div', { className: 'ph-head' },
     h('div', { className: 'ph-repo-row' },
       h('span', { style: { display: 'flex', color: 'var(--dsw-alias-label-tertiary)' } }, h(Icon, { name: 'git', size: 14 })),
-      h('span', { className: 'ph-repo', title: repo.root }, repo.name),
+      h('span', { className: 'ph-repo', title: remoteLabel === null ? repo.root : `${remoteLabel}\n${repo.root}` }, repo.name),
+      inWorktree
+        ? h('button', {
+            type: 'button',
+            className: 'ph-chip ph-worktree-chip',
+            title: props.cwd,
+            onClick: props.onOpenWorktrees,
+          }, h(Icon, { name: 'folder', size: 10 }), h('span', { className: 'ph-ellipsis' }, worktreeName))
+        : null,
       h('span', { className: 'ph-spacer' }),
       h('button', {
         type: 'button',
@@ -593,6 +666,7 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
       }),
       repo.ahead > 0 ? h('span', { className: 'ph-pill', title: t('gitAhead', { count: repo.ahead }) }, `↑${repo.ahead}`) : null,
       repo.behind > 0 ? h('span', { className: 'ph-pill', 'data-tone': 'warn', title: t('gitBehind', { count: repo.behind }) }, `↓${repo.behind}`) : null,
+      h('span', { className: 'ph-spacer' }),
       pull === null
         ? null
         : h('button', {
@@ -604,18 +678,7 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
           },
             h('span', { className: 'ph-dot', 'data-state': pull.state }),
             `#${pull.number}`,
-            stateLabel(t, pull.state)),
-      repo.remote?.slug !== null && repo.remote?.slug !== undefined
-        ? h('span', { className: 'ph-dim ph-tiny ph-ellipsis', title: repo.remote.slug }, repo.remote.slug)
-        : null,
-      inWorktree
-        ? h('button', {
-            type: 'button',
-            className: 'ph-chip',
-            title: props.cwd,
-            onClick: props.onOpenWorktrees,
-          }, h(Icon, { name: 'folder', size: 10 }), h('span', { className: 'ph-ellipsis' }, worktreeName))
-        : null),
+            stateLabel(t, pull.state))),
 
     h(GitActions, {
       t,
@@ -631,45 +694,49 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
       onOpenPublish: props.onOpenPublish,
       onPull: props.onPull,
       onHint: props.onHint,
-    }),
-
-    h(ChangesSummary, {
-      t,
-      stats: overview.stats,
-      branchChanges: overview.branchChanges,
-      scope: props.scope,
-      onClick: props.onOpenChanges,
     }))
+}
+
+/** One count the tab strip may show. */
+interface TabCount {
+  value: number
+  /** The page was full, so the real number may be larger. */
+  capped?: boolean
 }
 
 /** Props of the tab strip. */
 interface PanelTabsProps {
   t: Translate
   value: ViewId
-  counts: Record<ViewId, number>
+  counts: Record<ViewId, TabCount | null>
   onChange(next: ViewId): void
 }
 
-/** The four views' tab strip. */
+/** The views' tab strip. */
 function PanelTabs(props: PanelTabsProps): ReturnType<typeof h> {
-  const items: Array<{ id: ViewId; label: string; count: number }> = [
-    { id: 'changes', label: props.t('gitChanges'), count: props.counts.changes },
-    { id: 'worktrees', label: props.t('gitWorktrees'), count: props.counts.worktrees },
-    { id: 'pulls', label: props.t('gitPulls'), count: props.counts.pulls },
-    { id: 'issues', label: props.t('gitIssues'), count: props.counts.issues },
-    { id: 'commits', label: props.t('gitCommits'), count: props.counts.commits },
+  const items: Array<{ id: ViewId; label: string }> = [
+    { id: 'changes', label: props.t('gitChanges') },
+    { id: 'worktrees', label: props.t('gitWorktrees') },
+    { id: 'pulls', label: props.t('gitPulls') },
+    { id: 'issues', label: props.t('gitIssues') },
+    { id: 'commits', label: props.t('gitCommits') },
   ]
   return h('div', { className: 'ph-tabs', role: 'tablist' },
-    items.map((item) => h('button', {
-      key: item.id,
-      type: 'button',
-      role: 'tab',
-      className: 'ph-tab',
-      'aria-selected': props.value === item.id ? 'true' : 'false',
-      onClick: () => props.onChange(item.id),
-    },
-      h('span', null, item.label),
-      item.count > 0 ? h('span', { className: 'ph-tab-count' }, String(item.count)) : null)))
+    items.map((item) => {
+      const count = props.counts[item.id]
+      return h('button', {
+        key: item.id,
+        type: 'button',
+        role: 'tab',
+        className: 'ph-tab',
+        'aria-selected': props.value === item.id ? 'true' : 'false',
+        onClick: () => props.onChange(item.id),
+      },
+        h('span', null, item.label),
+        count === null || count.value === 0
+          ? null
+          : h('span', { className: 'ph-tab-count' }, count.capped === true ? `${count.value}+` : String(count.value)))
+    }))
 }
 
 /** The publish providers the dialog offers, from the forge description. */

@@ -217,3 +217,154 @@ test('forcing gitlab treats a host whose name does not contain gitlab as GitLab'
   assert.equal(info.available, true)
   assert.equal(info.provider, 'gitlab')
 })
+
+test('merging a GitHub pull request uses gh, then reads the state and deletes the branch', async () => {
+  const remote = { name: 'origin', host: 'github.com', slug: 'owner/repo', provider: 'github' }
+  const calls: Call[] = []
+  const runner = fakeRunner((_program, args, stdin) => {
+    calls.push({ program: 'gh', args, stdin })
+    if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.60.0', stderr: '', truncated: false }
+    if (args[0] === 'auth') return { code: 0, stdout: 'Logged in to github.com account ada', stderr: '', truncated: false }
+    if (args[0] === 'pr' && args[1] === 'merge') return { code: 0, stdout: '✓ Squashed and merged pull request #12\n', stderr: '', truncated: false }
+    if (args[0] === 'pr' && args[1] === 'view') {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          state: 'MERGED',
+          mergedAt: '2024-02-01T10:00:00Z',
+          url: 'https://github.com/owner/repo/pull/12',
+          mergeCommit: { oid: 'abc1234' },
+          headRefName: 'feat/panel',
+        }),
+        stderr: '',
+        truncated: false,
+      }
+    }
+    return { code: 0, stdout: '', stderr: '', truncated: false }
+  })
+  const forge = createForge({ runner, config: gitConfig({}), logger, env: {} })
+
+  const result = await forge.mergePull({
+    root: '/repo',
+    remote,
+    number: 12,
+    method: 'squash',
+    deleteBranch: true,
+  })
+  assert.equal(result.merged, true)
+  assert.equal(result.state, 'merged')
+  assert.equal(result.sha, 'abc1234')
+  assert.equal(result.branchDeleted, true)
+  assert.equal(result.url, 'https://github.com/owner/repo/pull/12')
+
+  const merge = calls.find((call) => call.args[0] === 'pr' && call.args[1] === 'merge')
+  assert.deepEqual(merge?.args, ['pr', 'merge', '12', '--repo', 'owner/repo', '--squash'])
+  const deleted = calls.find((call) => call.args[0] === 'api')
+  assert.ok(deleted?.args.includes('repos/owner/repo/git/refs/heads/feat/panel'))
+})
+
+test('an auto-merge answer is reported as requested, not merged', async () => {
+  const remote = { name: 'origin', host: 'github.com', slug: 'owner/repo', provider: 'github' }
+  const runner = fakeRunner((_program, args) => {
+    if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.60.0', stderr: '', truncated: false }
+    if (args[0] === 'auth') return { code: 0, stdout: 'Logged in to github.com account ada', stderr: '', truncated: false }
+    if (args[0] === 'pr' && args[1] === 'merge') return { code: 0, stdout: '✓ Enabled auto-merge (squash)\n', stderr: '', truncated: false }
+    if (args[0] === 'pr' && args[1] === 'view') {
+      return {
+        code: 0,
+        stdout: JSON.stringify({ state: 'OPEN', mergedAt: null, url: 'https://github.com/owner/repo/pull/9' }),
+        stderr: '',
+        truncated: false,
+      }
+    }
+    return { code: 0, stdout: '', stderr: '', truncated: false }
+  })
+  const forge = createForge({ runner, config: gitConfig({}), logger, env: {} })
+  const result = await forge.mergePull({ root: '/repo', remote, number: 9, method: 'squash' })
+  assert.equal(result.merged, false)
+  assert.equal(result.state, 'open')
+  assert.equal(result.branchDeleted, null)
+})
+
+test('a GitLab merge request is squashed through the API and reports its merge commit', async () => {
+  const remote = { name: 'origin', host: 'gitlab.com', slug: 'group/repo', provider: 'gitlab' }
+  const calls: Call[] = []
+  const runner = fakeRunner((_program, args, stdin) => {
+    calls.push({ program: 'glab', args, stdin })
+    if (args[0] === '--version') return { code: 0, stdout: 'glab 1.40.0', stderr: '', truncated: false }
+    if (args[0] === 'auth') return { code: 0, stdout: 'Logged in to gitlab.com as ada', stderr: '', truncated: false }
+    if (args[0] === 'api') {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          iid: 7,
+          state: 'merged',
+          web_url: 'https://gitlab.com/group/repo/-/merge_requests/7',
+          squash_commit_sha: 'def5678',
+          source_branch: 'feat/panel',
+        }),
+        stderr: '',
+        truncated: false,
+      }
+    }
+    return { code: 0, stdout: '[]', stderr: '', truncated: false }
+  })
+  const forge = createForge({ runner, config: gitConfig({}), logger, env: {} })
+
+  const result = await forge.mergePull({
+    root: '/repo',
+    remote,
+    number: 7,
+    method: 'squash',
+    deleteBranch: true,
+  })
+  assert.equal(result.merged, true)
+  assert.equal(result.state, 'merged')
+  assert.equal(result.sha, 'def5678')
+  assert.equal(result.branchDeleted, true)
+  assert.equal(result.provider, 'gitlab')
+
+  const merge = calls.find((call) => call.args[0] === 'api' && call.args.includes('PUT'))
+  assert.ok(merge?.args.includes('projects/group%2Frepo/merge_requests/7/merge'))
+  assert.deepEqual(JSON.parse(merge?.stdin ?? '{}'), { squash: true, should_remove_source_branch: true })
+  const deleted = calls.find((call) => call.args[0] === 'api' && call.args.includes('DELETE'))
+  assert.ok(deleted?.args.includes('projects/group%2Frepo/repository/branches/feat%2Fpanel'))
+})
+
+test('rebase is refused for GitLab before any request is made', async () => {
+  const remote = { name: 'origin', host: 'gitlab.com', slug: 'group/repo', provider: 'gitlab' }
+  const runner = fakeRunner((_program, args) => {
+    if (args[0] === '--version') return { code: 0, stdout: 'glab 1.40.0', stderr: '', truncated: false }
+    if (args[0] === 'auth') return { code: 0, stdout: 'Logged in to gitlab.com as ada', stderr: '', truncated: false }
+    return { code: 0, stdout: '[]', stderr: '', truncated: false }
+  })
+  const forge = createForge({ runner, config: gitConfig({}), logger, env: {} })
+  await assert.rejects(
+    () => forge.mergePull({ root: '/repo', remote, number: 7, method: 'rebase' }),
+    (error: { code?: string }) => error.code === 'merge/unsupported',
+  )
+})
+
+test('the GitHub REST fallback merges with the chosen method', async () => {
+  const remote = { name: 'origin', host: 'github.com', slug: 'owner/repo', provider: 'github' }
+  const calls: Array<{ url: string; init: { method?: string; body?: string; headers: Record<string, string> } }> = []
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
+    calls.push({ url, init })
+    const payload = url.endsWith('/pulls/3/merge') ? { merged: true, sha: 'feed123', message: 'Pull Request successfully merged' } : {}
+    return { ok: true, status: 200, text: async () => JSON.stringify(payload) }
+  }) as unknown as typeof fetch
+  try {
+    const runner = fakeRunner(() => ({ code: 1, stdout: '', stderr: 'gh not found', truncated: false }))
+    const forge = createForge({ runner, config: gitConfig({}), logger, env: { GITHUB_TOKEN: 'secret' } })
+    const result = await forge.mergePull({ root: '/repo', remote, number: 3, method: 'merge' })
+    assert.equal(result.merged, true)
+    assert.equal(result.sha, 'feed123')
+    assert.equal(result.backend, 'rest')
+    const merge = calls.find((call) => call.url.endsWith('/pulls/3/merge'))
+    assert.equal(merge?.init.method, 'PUT')
+    assert.deepEqual(JSON.parse(merge?.init.body ?? '{}'), { merge_method: 'merge' })
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})

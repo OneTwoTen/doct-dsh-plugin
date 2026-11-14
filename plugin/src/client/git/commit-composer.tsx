@@ -8,6 +8,7 @@
 import { h, useState } from '../runtime.ts'
 import { Icon } from '../icons.tsx'
 import type { Translate } from '../i18n.ts'
+import { currentLocale } from '../i18n.ts'
 import type { GitApi } from '../api.ts'
 import { messageOf } from '../api.ts'
 import type { GitFileChange } from '../../shared/protocol.ts'
@@ -54,7 +55,7 @@ export function CommitComposer(props: CommitComposerProps): ReturnType<typeof h>
         sessionId: props.sessionId,
         cwd: props.cwd || undefined,
         paths: selectedPaths.length > 0 ? selectedPaths : undefined,
-        locale: typeof navigator === 'undefined' ? '' : navigator.language,
+        locale: currentLocale(t),
       })
       setMessage(draft.message)
       if (draft.error !== undefined && draft.source !== 'model') {

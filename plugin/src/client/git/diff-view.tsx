@@ -26,10 +26,17 @@ export interface DiffFileSectionProps {
   layout: 'unified' | 'split'
   wrap: boolean
   t: Translate
+  /** Whether the index already holds this file's change. */
+  staged?: boolean
+  /** Whether one of this file's actions is running. */
+  actionBusy?: boolean
   onToggle(): void
   onSelect(next: boolean): void
   /** Report the file whose patch is copied, for the panel's toast. */
   onCopied(path: string): void
+  onStage?(): void
+  onUnstage?(): void
+  onDiscard?(): void
 }
 
 /** The status letter one file's change deserves. */
@@ -94,6 +101,45 @@ export function DiffFileSection(props: DiffFileSectionProps): ReturnType<typeof 
         : null,
       h('span', { className: 'ph-file-name' }, parts.name)),
     h(Counts, { additions: file.additions, deletions: file.deletions }),
+    props.onStage === undefined && props.onUnstage === undefined && props.onDiscard === undefined
+      ? null
+      : h('div', { className: 'ph-file-actions' },
+          props.staged === true
+            ? h('button', {
+                type: 'button',
+                className: 'ph-icon-button',
+                title: t('gitUnstage'),
+                'aria-label': t('gitUnstage'),
+                disabled: props.actionBusy === true || props.onUnstage === undefined,
+                onClick: (event: { stopPropagation(): void }) => {
+                  event.stopPropagation()
+                  props.onUnstage?.()
+                },
+              }, h(Icon, { name: 'cross', size: 12 }))
+            : h('button', {
+                type: 'button',
+                className: 'ph-icon-button',
+                title: t('gitStage'),
+                'aria-label': t('gitStage'),
+                disabled: props.actionBusy === true || props.onStage === undefined,
+                onClick: (event: { stopPropagation(): void }) => {
+                  event.stopPropagation()
+                  props.onStage?.()
+                },
+              }, h(Icon, { name: 'plus', size: 12 })),
+          props.onDiscard === undefined
+            ? null
+            : h('button', {
+                type: 'button',
+                className: 'ph-icon-button ph-file-discard',
+                title: t('gitDiscard'),
+                'aria-label': t('gitDiscard'),
+                disabled: props.actionBusy === true,
+                onClick: (event: { stopPropagation(): void }) => {
+                  event.stopPropagation()
+                  props.onDiscard?.()
+                },
+              }, h(Icon, { name: file.untracked ? 'trash' : 'back', size: 12 }))),
     h('button', {
       type: 'button',
       className: 'ph-icon-button ph-file-copy',

@@ -5,12 +5,14 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 - **Telegram** — điều khiển DSH từ xa: tin nhắn trong chat đã ghép nối trở thành prompt cho một
   phiên, câu trả lời được gửi ngược về chat.
 - **Git** — bảng Git ở thanh bên phải theo mô hình T3 Code: một nút thao tác thông minh (commit,
-  push, pull, tạo PR, publish), hộp commit chọn tệp với thông điệp do model viết, diff xếp chồng,
-  đổi nhánh, lịch sử commit, pull request kèm trạng thái kiểm tra/đánh giá, và issue.
+  push, pull, tạo PR, publish), hộp commit chọn tệp với thông điệp do model viết, diff xếp chồng có
+  stage/unstage/huỷ thay đổi từng tệp, đổi nhánh, lịch sử commit, pull request kèm trạng thái kiểm tra/
+  đánh giá và **gộp PR (merge/squash/rebase)** ngay trong panel, và issue. Dải tab hiện số thật.
 - **Quản lý worktree** — tab Worktree trong bảng Git: liệt kê mọi checkout, tạo worktree mới, chuyển
   chat sang checkout, mở chat trong checkout, xoá và dọn đăng ký mồ côi.
-- **Pull request bằng AI** — một bước trong chuỗi thao tác: đẩy nhánh, để model hiện tại của phiên
-  (effort thấp nhất) viết tiêu đề/mô tả, rồi mở PR.
+- **Pull request bằng AI** — một bước trong chuỗi thao tác: model hiện tại của phiên (effort thấp nhất)
+  viết tiêu đề/mô tả, bạn **xem và sửa trong hộp thoại** (hoặc bấm Viết lại) rồi mới đẩy nhánh và mở PR.
+  Mô tả mơ hồ được hỏi lại một lần; ngôn ngữ bám theo UI (vi/en).
 - **Worktree cho phiên mới** — chọn ở màn hình New Session: worktree riêng, bắt đầu từ nhánh local
   hoặc nhánh remote đã fetch.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
@@ -142,7 +144,7 @@ diff xếp chồng, và đổi nhánh ngay trong bảng.
 | Diff | mọi tệp trong một khối cuộn, header dính, mở/thu từng tệp, một cột/hai cột, xuống dòng, ẩn thay đổi khoảng trắng, phạm vi Chưa commit hoặc Nhánh, sao chép đường dẫn |
 | Worktree | tab quản lý mọi checkout: danh sách kèm trạng thái, tạo worktree mới (tên + nhánh nền local/remote), chuyển chat sang checkout, mở chat trong checkout, xoá (kèm nhánh hoặc buộc xoá), dọn đăng ký mồ côi |
 | Nhánh | danh sách tìm kiếm local + remote, đánh dấu nhánh hiện tại/mặc định, tạo nhánh mới bằng cách gõ tên |
-| Pull request | lọc Đang mở / Đã gộp / Đã đóng / Tất cả; trạng thái kiểm tra, đánh giá; chi tiết có checks, reviews, tệp, bình luận |
+| Pull request | lọc Đang mở / Đã gộp / Đã đóng / Tất cả; trạng thái kiểm tra, đánh giá; chi tiết có checks, reviews, tệp, bình luận; **gộp PR** kiểu Merge / Squash / Rebase kèm tuỳ chọn xoá nhánh nguồn |
 | Issue | lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả, bình luận |
 | Commit | lịch sử gần nhất; bấm để xem mô tả, tệp và patch |
 
@@ -204,11 +206,12 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
 - Phê duyệt và câu hỏi của DSH được báo về chat nhưng chưa trả lời được từ Telegram.
 - DSH chưa có API xoá phiên; plugin chỉ **lưu trữ** (ẩn khỏi danh sách, dữ liệu vẫn còn) và **khôi phục**.
   Phiên đang chạy phải `/cancel` hoặc đợi xong trước khi lưu trữ.
-- Bảng Git giờ **đọc và ghi**: commit (chọn tệp), push, pull, đổi/tạo nhánh, tạo PR, publish; diff
-  dừng sau 4000 dòng mỗi tệp. Chưa có amend, rebase tương tác hay stage từng hunk.
+- Bảng Git giờ **đọc và ghi**: commit (chọn tệp), stage/unstage/huỷ thay đổi từng tệp, push, pull,
+  đổi/tạo nhánh, tạo PR, gộp PR (merge/squash/rebase), publish; diff dừng sau 4000 dòng mỗi tệp.
+  Chưa có amend, rebase tương tác hay stage từng hunk.
   PR/issue cần remote GitHub/GitLab; thiếu CLI thì GitHub vẫn xem được (không có chi tiết checks), còn
   GitLab cần `glab` hoặc token `GITLAB_TOKEN`/`DSH_GITLAB_TOKEN` để dùng REST. GitLab tự host phải khai
-  báo host trong `git.gitlabHosts`.
+  báo host trong `git.gitlabHosts`. GitLab không hỗ trợ rebase-merge nên nút đó không hiện.
 - Web Remote mới có bridge Host, giao thức, và thẻ cấu hình/ghép cặp trong DSH UI: chưa có relay
   Zig hay web client SvelteKit (dev relay có WebChat tối giản); chỉ nhận prompt văn bản và chưa có
   E2E (relay thấy plaintext — cần TLS và relay tự quản).
