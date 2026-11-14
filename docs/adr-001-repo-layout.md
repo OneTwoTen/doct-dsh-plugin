@@ -116,9 +116,11 @@ Cơ chế tách: `git filter-repo --path web --path server --path protocol` (gi�
 - [x] Thẻ Web Remote trong hàng plugin (`src/client/web-remote.tsx` + `src/features/web-remote-routes.ts`):
       trạng thái, mã ghép cặp, huỷ/ghép lại, ngắt ghép nối, sửa relay/tên thiết bị.
 - [x] `tools/dev-relay/` — relay Node + WebChat tối giản để thử end-to-end (không phải `server/`).
+- [x] `server/` — relay Zig 0.17.1 (Phase 2): SQLite, pairing, token, WebSocket, test e2e.
+- [x] `deploy/` mẫu Caddyfile + systemd unit (không chứa secret).
 - [ ] Tạo `pnpm-workspace.yaml` chỉ gồm `web`, `protocol` (khi scaffold web).
 - [ ] Thêm `server/`, `web/` vào `.gitignore` cho artifact build (`zig-out/`, `.zig-cache/`, `web/build/`, `web/.svelte-kit/`).
-- [ ] Relay Zig (Phase 2), web SvelteKit (Phase 3).
+- [ ] Web SvelteKit (Phase 3).
 - [ ] Thêm ba workflow path-filter.
 - [ ] Ghi quy ước tag vào README.
 

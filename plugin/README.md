@@ -480,9 +480,10 @@ vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn s
 
 Điều khiển DSH từ điện thoại qua một relay WebSocket. Plugin là bên **chủ động nối ra ngoài**;
 máy chạy DSH không mở port nào. Phần đã xong là **bridge Host**, **giao thức v1**
-([`protocol/`](../protocol/README.md)) và **thẻ Web Remote** trong hàng plugin (trạng thái, mã ghép
-cặp, ngắt ghép nối). Relay Zig là Phase 2 và web client SvelteKit là Phase 3; để chạy thử ngay, repo
-có relay phát triển bằng Node tại [`tools/dev-relay/`](../tools/dev-relay/).
+([`protocol/`](../protocol/README.md)), **thẻ Web Remote** trong hàng plugin (trạng thái, mã ghép
+cặp, ngắt ghép nối) và **relay production bằng Zig** ([`server/`](../server/README.md)). Web client
+SvelteKit là Phase 3; để chạy thử ngay, repo có relay phát triển bằng Node tại
+[`tools/dev-relay/`](../tools/dev-relay/).
 
 ```powershell
 node tools/dev-relay/index.mjs --port 8787
@@ -581,8 +582,9 @@ Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
 
 ### Giới hạn Phase 1
 
-- Relay Zig và web client SvelteKit chưa có. Relay Node trong `tools/dev-relay/` chỉ để phát triển
-  (RAM, một người dùng, không TLS); không dùng cho dữ liệu thật.
+- Relay Node trong `tools/dev-relay/` chỉ để phát triển (RAM, một người dùng, không TLS); relay
+  production bằng Zig nằm trong [`server/`](../server/README.md) — cùng giao thức, có SQLite, rate
+  limit và test e2e với bridge này.
 - Chỉ prompt văn bản; ảnh/tệp, xoá phiên, đổi workspace chưa có trong giao thức.
 - Chưa có E2E: relay thấy plaintext. Chỉ dùng TLS và relay do bạn kiểm soát.
 

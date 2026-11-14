@@ -17,8 +17,8 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
   hoặc nhánh remote đã fetch.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
 - **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
-  mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH) và dev
-  relay đã có; relay Zig và web client đang triển khai.
+  mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH), dev
+  relay và **relay production bằng Zig (`server/`)** đã có; web client SvelteKit là Phase 3.
 
 ## Cấu trúc
 
@@ -28,7 +28,9 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 | [`protocol/`](protocol/) | Giao thức Web Remote v1: schema, fixture dùng chung, đặc tả frame/thao tác/lỗi |
 | [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH, và **dev relay** Web Remote (`tools/dev-relay/`) |
 | [`docs/`](docs/) | Nghiên cứu kiến trúc, đặc tả ghép cặp/xác thực, ADR bố trí repo |
-| `web/`, `server/`, `deploy/` | Kế hoạch Web Remote (chưa scaffold) — xem [ADR-001](docs/adr-001-repo-layout.md) |
+| [`server/`](server/) | **Relay Web Remote bằng Zig 0.17.1** (Phase 2): SQLite, pairing, token, WebSocket, test e2e |
+| [`deploy/`](deploy/) | Mẫu Caddyfile và systemd unit cho relay — xem [ADR-001](docs/adr-001-repo-layout.md) |
+| `web/` | Kế hoạch Web client SvelteKit (Phase 3, chưa scaffold) |
 
 `plugin/` là thư mục cài đặt; `tools/` và `docs/` không nằm trong package.
 
@@ -47,7 +49,7 @@ Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở p
 | Thẻ Web Remote (`src/client/web-remote.tsx`) | đã có: trạng thái, mã ghép cặp kèm đếm ngược, ghép cặp lại, ngắt ghép nối, sửa relay/tên thiết bị |
 | Giao thức v1 + fixture | đã có: schema, golden frame, test codec |
 | Relay phát triển (Node) | đã có trong [`tools/dev-relay/`](tools/dev-relay/) — chạy thử end-to-end, không dùng production |
-| Relay (Zig) | chưa có — Phase 2 |
+| Relay (Zig) | **đã có** trong [`server/`](server/) — Phase 2: SQLite WAL, pairing luồng B, token xoay vòng, WebSocket, rate limit, Caddy/systemd mẫu |
 | Web client (SvelteKit) | chưa có — Phase 3; dev relay có WebChat tối giản để thử |
 
 Cấu hình, trạng thái và giới hạn: [`plugin/README.md#7-web-remote-phase-1--bridge`](plugin/README.md#7-web-remote-phase-1--bridge).
