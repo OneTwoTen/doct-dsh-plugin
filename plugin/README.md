@@ -130,8 +130,8 @@ mở, issue đang mở (một trang 50 mục, hiện `50+` khi trang đầy), v�
 | Nút chính | Khi nào |
 |---|---|
 | **Commit** | có thay đổi và nhánh đang chậm hơn upstream (hoặc kho chưa có remote) |
-| **Commit & push** | có thay đổi, nhánh đã có PR đang mở hoặc đang ở nhánh mặc định |
-| **Commit, push & pull request** | có thay đổi, nhánh riêng, chưa có PR |
+| **Commit & push** | có thay đổi và nhánh đã có PR đang mở |
+| **Commit, push & pull request** | có thay đổi, chưa có PR — kể cả đang ở nhánh mặc định |
 | **Push** / **Push & tạo pull request** | cây sạch, có commit local chưa đẩy |
 | **Pull** | nhánh chậm hơn upstream |
 | **Publish repository** | kho chưa có remote |
@@ -141,13 +141,19 @@ Bấm nút chính là chạy ngay; nếu ô thông điệp đang trống thì mo
 **Commit**, **Push**, **Tạo pull request** và **Publish repository**; mục nào không dùng được thì có
 lý do khi rê chuột. Commit trong menu mở hộp commit thay vì chạy ngay.
 
+Dưới cụm nút là nút **Tạo pull request** thường trực (khi kho đã có remote): không phải mở menu ▾,
+và khi chưa tạo được thì lý do hiện ngay bên dưới (đang chạy thao tác, HEAD rời, nhánh đang có PR mở,
+chậm hơn upstream, chưa có commit). Cùng nút đó nằm ở đầu tab **Pull request**.
+
 Trong lúc chạy, cả cụm nút đổi thành dòng tiến trình: nhãn pha (`Đang commit…`, `Đang push…`,
 `Đang tạo pull request…`, `Đang chạy <hook>…`), đồng hồ đếm giây, và dòng output cuối của lệnh.
 Xong thì dòng đó thành **dòng thành công 10 giây** (ví dụ `Đã push 1a2b3c4 lên origin/feat`) kèm nút
 **Xem pull request**; lỗi hiện thành toast đỏ giữ tới khi bạn đóng.
 
-Ở **nhánh mặc định**, push và tạo PR hỏi xác nhận trước: tiếp tục trên nhánh mặc định, hoặc
-**checkout nhánh feature rồi chạy tiếp** — cùng một thao tác, không phải làm lại từ đầu.
+Ở **nhánh mặc định**, push và tạo PR hỏi xác nhận trước: **checkout nhánh feature rồi chạy tiếp** là
+lựa chọn mặc định (nút chính của hộp thoại), còn tiếp tục trên nhánh mặc định vẫn dùng được. Nhờ
+vậy **Commit, push & pull request** và nút **Tạo pull request** vẫn là mặc định ngay cả khi bạn đang
+đứng trên `main` — chỉ cần xác nhận tạo nhánh feature.
 
 ### Hộp commit
 
@@ -289,6 +295,10 @@ Xoá checkout đang dùng sẽ đưa chat về checkout chính trước, nên kh
 Ở màn hình **New Session**, cạnh bộ chọn workspace có một hàng giống T3 Code: nút **Worktree mới**,
 ông chọn **nhánh nền** (mặc định là nhánh mặc định của kho, hoặc `git.worktree.base`), và hai nút
 **Nhánh local** / **Nhánh remote**.
+
+Mặc định hàng này mở sẵn ở **Nhánh remote** (`git.worktree.source: remote`), và nút **Worktree mới**
+vẫn là thứ tạo checkout — plugin không tự tạo khi bạn chưa bấm. Kho chưa có nhánh remote nào (dự án
+local mới, hoặc clone chưa fetch) thì hàng tự chuyển về **Nhánh local** để nút không bị khoá.
 
 - Bấm **Worktree mới** là checkout được tạo ngay: `<kho>/.agents/worktrees/dsh-<8 ký tự id>-<4 ký
   tự>` trên nhánh mới cùng tên, rồi **thư mục làm việc của phiên** chuyển sang đó. Hàng đổi thành
@@ -453,7 +463,7 @@ git:
     base: ''             # nhánh bắt đầu; rỗng = nhánh mặc định của kho
     naming: id           # id | semantic (đổi nhánh theo tin nhắn đầu)
     nameInstructions: '' # dặn thêm cho model đặt tên nhánh
-    source: local        # local | remote  (lựa chọn ban đầu trên giao diện)
+    source: remote       # local | remote  (lựa chọn ban đầu trên giao diện; mặc định remote)
     remote: ''           # remote dùng cho nguồn remote; rỗng = remote của bảng, rồi origin
     cleanup:             # dọn checkout không dùng (mặc định tắt)
       enabled: false

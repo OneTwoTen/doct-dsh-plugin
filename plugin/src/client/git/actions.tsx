@@ -153,6 +153,41 @@ function quickIcon(quick: QuickAction): 'commit' | 'upload' | 'download' | 'merg
   return 'commit'
 }
 
+/** Props of the standalone change-request button. */
+export interface CreatePullButtonProps {
+  t: Translate
+  /** Whether the dialog can open; a false value renders the button disabled. */
+  enabled: boolean
+  /** The i18n key of the reason the button is disabled. */
+  hintKey?: string
+  onClick(): void
+}
+
+/**
+ * The always-visible change-request button.
+ *
+ * It stays on screen whatever the branch can do, so finding "create pull
+ * request" never depends on knowing the little caret menu; when it cannot run,
+ * the reason sits right under it.
+ */
+export function CreatePullButton(props: CreatePullButtonProps): ReturnType<typeof h> {
+  const { t } = props
+  const hint = props.enabled || props.hintKey === undefined ? '' : t(props.hintKey)
+  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 } },
+    h('button', {
+      type: 'button',
+      className: 'ph-button',
+      style: { width: '100%', justifyContent: 'center' },
+      disabled: !props.enabled,
+      title: hint.length > 0 ? hint : undefined,
+      'aria-label': t('gitActionCreatePr'),
+      onClick: props.onClick,
+    },
+      h(Icon, { name: 'merge', size: 12 }),
+      h('span', { className: 'ph-ellipsis' }, t('gitActionCreatePr'))),
+    hint.length > 0 ? h('p', { className: 'ph-hint', style: { textAlign: 'center' } }, hint) : null)
+}
+
 /** Props of the default-branch confirmation. */
 export interface DefaultBranchDialogProps {
   t: Translate
@@ -170,7 +205,7 @@ export function DefaultBranchDialog(props: DefaultBranchDialogProps): ReturnType
   const { t } = props
   const title = props.action === 'push'
     ? t('gitDefaultPushTitle', { branch: props.branch })
-    : props.action === 'create_pr'
+    : props.action === 'create_pr' || props.action === 'commit_push_pr'
       ? t('gitDefaultPrTitle', { branch: props.branch })
       : t('gitDefaultTitle', { branch: props.branch })
   return h('div', { className: 'ph-overlay', role: 'presentation' },
@@ -180,9 +215,13 @@ export function DefaultBranchDialog(props: DefaultBranchDialogProps): ReturnType
       props.includesCommit ? null : h('p', { className: 'ph-hint' }, t('gitDefaultWarning')),
       h('div', { className: 'ph-dialog-actions' },
         h('button', { type: 'button', className: 'ph-button', disabled: props.busy, onClick: props.onAbort }, t('gitDefaultAbort')),
-        h('button', { type: 'button', className: 'ph-button', disabled: props.busy, onClick: props.onFeatureBranch }, t('gitDefaultFeature')),
-        h('button', { type: 'button', className: 'ph-primary', disabled: props.busy, onClick: props.onContinue },
-          t('gitDefaultContinue', { branch: props.branch })))))
+        h('button', { type: 'button', className: 'ph-button', disabled: props.busy, onClick: props.onContinue },
+          t('gitDefaultContinue', { branch: props.branch })),
+        // A request needs a branch of its own, so the feature-branch path is the
+        // default answer; continuing on the default branch stays available but
+        // secondary.
+        h('button', { type: 'button', className: 'ph-primary', disabled: props.busy, onClick: props.onFeatureBranch },
+          t('gitDefaultFeature')))))
 }
 
 /** Props of the publish dialog. */

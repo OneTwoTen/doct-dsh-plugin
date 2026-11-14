@@ -54,4 +54,8 @@ test('normalizeConfig fills defaults and clamps ranges', () => {
   assert.equal(normalizeConfig(undefined).telegram.enabled, true)
   assert.equal(normalizeConfig({ telegram: { enabled: 'false' } }).telegram.enabled, false)
   assert.equal(normalizeConfig({ telegram: { pushResponses: 'false' } }).telegram.pushResponses, false)
+  // A worktree starts from a fetched remote branch by default; an explicit choice still wins.
+  assert.equal(normalizeConfig({}).git.worktree.source, 'remote')
+  assert.equal(normalizeConfig({ git: { worktree: { source: 'local' } } }).git.worktree.source, 'local')
+  assert.equal(normalizeConfig({ git: { worktree: { source: 'nonsense' } } }).git.worktree.source, 'remote')
 })

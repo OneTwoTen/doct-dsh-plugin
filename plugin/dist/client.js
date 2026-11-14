@@ -267,6 +267,7 @@
     gitHintNoBranch: "Detached HEAD: check out a branch first.",
     gitHintBehindPr: "The branch is behind its upstream. Pull before opening a pull request.",
     gitHintNoPrCommits: "No local commits to include in a pull request.",
+    gitHintOpenPr: "This branch already has an open pull request.",
     gitHintCannotWrite: "This page cannot change source control.",
     gitStarting: "Starting\u2026",
     gitPhaseBranch: "Preparing feature branch\u2026",
@@ -707,6 +708,7 @@
     gitHintNoBranch: "HEAD r\u1EDDi: h\xE3y checkout m\u1ED9t nh\xE1nh tr\u01B0\u1EDBc.",
     gitHintBehindPr: "Nh\xE1nh \u0111ang ch\u1EADm h\u01A1n upstream. H\xE3y pull tr\u01B0\u1EDBc khi m\u1EDF pull request.",
     gitHintNoPrCommits: "Kh\xF4ng c\xF3 commit local n\xE0o \u0111\u1EC3 \u0111\u01B0a v\xE0o pull request.",
+    gitHintOpenPr: "Nh\xE1nh n\xE0y \u0111\xE3 c\xF3 pull request \u0111ang m\u1EDF.",
     gitHintCannotWrite: "Trang n\xE0y kh\xF4ng \u0111\u01B0\u1EE3c ph\xE9p \u0111\u1ED5i m\xE3 ngu\u1ED3n.",
     gitStarting: "\u0110ang b\u1EAFt \u0111\u1EA7u\u2026",
     gitPhaseBranch: "\u0110ang chu\u1EA9n b\u1ECB nh\xE1nh feature\u2026",
@@ -2712,7 +2714,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       if (isBehind || !status.hasUpstream && !status.hasPrimaryRemote) {
         return { labelKey: "gitActionCommit", disabled: false, kind: "run_action", action: "commit" };
       }
-      if (hasOpenPr || status.isDefaultRef) {
+      if (hasOpenPr) {
         return { labelKey: "gitActionCommitPush", disabled: false, kind: "run_action", action: "commit_push" };
       }
       return { labelKey: "gitActionCommitPushPr", disabled: false, kind: "run_action", action: "commit_push_pr" };
@@ -2724,13 +2726,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       if (!isAhead) {
         return hasOpenPr ? { labelKey: "gitActionCommit", disabled: true, kind: "show_hint", hintKey: "gitHintUpToDate" } : { labelKey: "gitActionPush", disabled: true, kind: "show_hint", hintKey: "gitHintNoCommits" };
       }
-      if (hasOpenPr || status.isDefaultRef) {
-        return {
-          labelKey: "gitActionPush",
-          disabled: false,
-          kind: "run_action",
-          action: status.isDefaultRef ? "commit_push" : "push"
-        };
+      if (hasOpenPr) {
+        return { labelKey: "gitActionPush", disabled: false, kind: "run_action", action: "push" };
       }
       return { labelKey: "gitActionPushPr", disabled: false, kind: "run_action", action: "create_pr" };
     }
@@ -2741,13 +2738,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       return { labelKey: "gitActionPull", disabled: false, kind: "run_pull" };
     }
     if (isAhead) {
-      if (hasOpenPr || status.isDefaultRef) {
-        return {
-          labelKey: "gitActionPush",
-          disabled: false,
-          kind: "run_action",
-          action: status.isDefaultRef ? "commit_push" : "push"
-        };
+      if (hasOpenPr) {
+        return { labelKey: "gitActionPush", disabled: false, kind: "run_action", action: "push" };
       }
       return { labelKey: "gitActionPushPr", disabled: false, kind: "run_action", action: "create_pr" };
     }
@@ -2759,14 +2751,22 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     }
     return { labelKey: "gitActionCommit", disabled: true, kind: "show_hint", hintKey: "gitHintUpToDate" };
   }
+  function resolvePrAction(status, isRunning) {
+    if (isRunning) return { enabled: false, hintKey: "gitHintBusy" };
+    if (status === null) return { enabled: false, hintKey: "gitHintNoStatus" };
+    if (status.branch === null) return { enabled: false, hintKey: "gitHintNoBranch" };
+    if (!status.hasPrimaryRemote) return { enabled: false, hintKey: "gitHintNoRemote" };
+    if (status.prState === "open") return { enabled: false, hintKey: "gitHintOpenPr" };
+    if (status.behind > 0) return { enabled: false, hintKey: "gitHintBehindPr" };
+    if ((status.aheadOfDefault || status.ahead) === 0) return { enabled: false, hintKey: "gitHintNoPrCommits" };
+    return { enabled: true };
+  }
   function buildActionMenuItems(status, isRunning) {
     if (status === null) return [];
     const busy = isRunning;
     const hasBranch = status.branch !== null;
-    const hasOpenPr = status.prState === "open";
     const canCommit = !busy && status.hasWorkingTreeChanges;
     const canPush = !busy && hasBranch && status.behind === 0 && status.ahead > 0 && (status.hasUpstream || status.hasPrimaryRemote);
-    const canCreatePr = !busy && hasBranch && !hasOpenPr && (status.aheadOfDefault || status.ahead) > 0 && status.behind === 0 && (status.hasUpstream || status.hasPrimaryRemote);
     const commit = {
       id: "commit",
       labelKey: "gitActionCommit",
@@ -2781,12 +2781,12 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       disabled: !canPush,
       disabledHintKey: busy ? "gitHintBusy" : !hasBranch ? "gitHintNoBranch" : status.behind > 0 ? "gitHintBehind" : !status.hasUpstream && !status.hasPrimaryRemote ? "gitHintNoRemote" : "gitHintNoCommits"
     };
-    if (hasOpenPr) return [commit, push];
+    const prAction = resolvePrAction(status, isRunning);
     const pr = {
       id: "pr",
       labelKey: "gitActionCreatePr",
-      disabled: !canCreatePr,
-      disabledHintKey: busy ? "gitHintBusy" : !hasBranch ? "gitHintNoBranch" : status.behind > 0 ? "gitHintBehindPr" : (status.aheadOfDefault || status.ahead) === 0 ? "gitHintNoPrCommits" : "gitActionUnavailable"
+      disabled: !prAction.enabled,
+      disabledHintKey: prAction.hintKey
     };
     return [commit, push, pr];
   }
@@ -2921,9 +2921,32 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     if (quick.action === "create_pr" || quick.action === "commit_push_pr") return "merge";
     return "commit";
   }
+  function CreatePullButton(props) {
+    const { t } = props;
+    const hint = props.enabled || props.hintKey === void 0 ? "" : t(props.hintKey);
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 } },
+      h(
+        "button",
+        {
+          type: "button",
+          className: "ph-button",
+          style: { width: "100%", justifyContent: "center" },
+          disabled: !props.enabled,
+          title: hint.length > 0 ? hint : void 0,
+          "aria-label": t("gitActionCreatePr"),
+          onClick: props.onClick
+        },
+        h(Icon, { name: "merge", size: 12 }),
+        h("span", { className: "ph-ellipsis" }, t("gitActionCreatePr"))
+      ),
+      hint.length > 0 ? h("p", { className: "ph-hint", style: { textAlign: "center" } }, hint) : null
+    );
+  }
   function DefaultBranchDialog(props) {
     const { t } = props;
-    const title = props.action === "push" ? t("gitDefaultPushTitle", { branch: props.branch }) : props.action === "create_pr" ? t("gitDefaultPrTitle", { branch: props.branch }) : t("gitDefaultTitle", { branch: props.branch });
+    const title = props.action === "push" ? t("gitDefaultPushTitle", { branch: props.branch }) : props.action === "create_pr" || props.action === "commit_push_pr" ? t("gitDefaultPrTitle", { branch: props.branch }) : t("gitDefaultTitle", { branch: props.branch });
     return h(
       "div",
       { className: "ph-overlay", role: "presentation" },
@@ -2937,11 +2960,18 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           "div",
           { className: "ph-dialog-actions" },
           h("button", { type: "button", className: "ph-button", disabled: props.busy, onClick: props.onAbort }, t("gitDefaultAbort")),
-          h("button", { type: "button", className: "ph-button", disabled: props.busy, onClick: props.onFeatureBranch }, t("gitDefaultFeature")),
           h(
             "button",
-            { type: "button", className: "ph-primary", disabled: props.busy, onClick: props.onContinue },
+            { type: "button", className: "ph-button", disabled: props.busy, onClick: props.onContinue },
             t("gitDefaultContinue", { branch: props.branch })
+          ),
+          // A request needs a branch of its own, so the feature-branch path is the
+          // default answer; continuing on the default branch stays available but
+          // secondary.
+          h(
+            "button",
+            { type: "button", className: "ph-primary", disabled: props.busy, onClick: props.onFeatureBranch },
+            t("gitDefaultFeature")
           )
         )
       )
@@ -4503,6 +4533,16 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     return h(
       "div",
       null,
+      props.prAction.enabled ? h(
+        "div",
+        { className: "ph-toolbar" },
+        h("span", { className: "ph-spacer" }),
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          onClick: props.onCreatePr
+        }, h(Icon, { name: "merge", size: 12 }), t("gitActionCreatePr"))
+      ) : null,
       h(Filters, {
         value: props.filter,
         onChange: props.onFilter,
@@ -5539,7 +5579,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const startAction = async (action, options, confirmed = false, after) => {
       if (running) return;
       if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
-        setPending({ action, options });
+        setPending({ action, options, after });
         return;
       }
       setMenuOpen(false);
@@ -5630,9 +5670,10 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     };
     const quick = resolveQuickAction(status, running);
     const menuItems = buildActionMenuItems(status, running);
+    const prAction = resolvePrAction(status, running);
     const openCreatePull = () => {
       if (status?.isDefaultRef === true) {
-        toast(t("gitPrAction"), t("gitPrDefaultBranchHint", { branch: status.branch ?? "" }), "info");
+        setPending({ action: "create_pr", options: {} });
         return;
       }
       setCreateOpen(true);
@@ -5694,6 +5735,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       status,
       quick,
       menuItems,
+      prAction,
       running,
       progress,
       success,
@@ -5704,6 +5746,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       onToggleMenu: () => setMenuOpen((value) => !value),
       onQuick: runQuick,
       onRun: onMenuRun,
+      onCreatePr: openCreatePull,
       onOpenPublish: () => {
         setMenuOpen(false);
         setPublishOpen(true);
@@ -5777,6 +5820,8 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         revision,
         filter: pullFilter,
         forgeState: overview.forge,
+        prAction,
+        onCreatePr: openCreatePull,
         onFilter: setPullFilter,
         onSelect: (number) => setSelection({ type: "pull", number })
       });
@@ -5861,12 +5906,12 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         onContinue: () => {
           const next = pending;
           setPending(null);
-          void startAction(next.action, next.options, true);
+          void startAction(next.action, next.options, true, next.after);
         },
         onFeatureBranch: () => {
           const next = pending;
           setPending(null);
-          void startAction(next.action, { ...next.options, featureBranch: true }, true);
+          void startAction(next.action, { ...next.options, featureBranch: true }, true, next.after);
         }
       }),
       publishOpen ? h(PublishDialog, {
@@ -5997,7 +6042,15 @@ ${repo.root}` }, repo.name),
         onOpenPublish: props.onOpenPublish,
         onPull: props.onPull,
         onHint: props.onHint
-      })
+      }),
+      // The change request control is always on screen once a remote exists, so
+      // "create pull request" never hides behind the caret menu.
+      props.status !== null && props.status.hasPrimaryRemote ? h(CreatePullButton, {
+        t,
+        enabled: props.prAction.enabled,
+        hintKey: props.prAction.hintKey,
+        onClick: props.onCreatePr
+      }) : null
     );
   }
   function PanelTabs(props) {

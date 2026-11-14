@@ -90,9 +90,11 @@ export function resolveQuickAction(status: ActionStatus | null, isRunning: boole
     if (isBehind || (!status.hasUpstream && !status.hasPrimaryRemote)) {
       return { labelKey: 'gitActionCommit', disabled: false, kind: 'run_action', action: 'commit' }
     }
-    if (hasOpenPr || status.isDefaultRef) {
+    if (hasOpenPr) {
       return { labelKey: 'gitActionCommitPush', disabled: false, kind: 'run_action', action: 'commit_push' }
     }
+    // The stacked action stays the default even on the default branch: the
+    // confirmation offers a feature branch, which is what a request needs.
     return { labelKey: 'gitActionCommitPushPr', disabled: false, kind: 'run_action', action: 'commit_push_pr' }
   }
 
@@ -105,13 +107,8 @@ export function resolveQuickAction(status: ActionStatus | null, isRunning: boole
         ? { labelKey: 'gitActionCommit', disabled: true, kind: 'show_hint', hintKey: 'gitHintUpToDate' }
         : { labelKey: 'gitActionPush', disabled: true, kind: 'show_hint', hintKey: 'gitHintNoCommits' }
     }
-    if (hasOpenPr || status.isDefaultRef) {
-      return {
-        labelKey: 'gitActionPush',
-        disabled: false,
-        kind: 'run_action',
-        action: status.isDefaultRef ? 'commit_push' : 'push',
-      }
+    if (hasOpenPr) {
+      return { labelKey: 'gitActionPush', disabled: false, kind: 'run_action', action: 'push' }
     }
     return { labelKey: 'gitActionPushPr', disabled: false, kind: 'run_action', action: 'create_pr' }
   }
@@ -123,13 +120,8 @@ export function resolveQuickAction(status: ActionStatus | null, isRunning: boole
     return { labelKey: 'gitActionPull', disabled: false, kind: 'run_pull' }
   }
   if (isAhead) {
-    if (hasOpenPr || status.isDefaultRef) {
-      return {
-        labelKey: 'gitActionPush',
-        disabled: false,
-        kind: 'run_action',
-        action: status.isDefaultRef ? 'commit_push' : 'push',
-      }
+    if (hasOpenPr) {
+      return { labelKey: 'gitActionPush', disabled: false, kind: 'run_action', action: 'push' }
     }
     return { labelKey: 'gitActionPushPr', disabled: false, kind: 'run_action', action: 'create_pr' }
   }
@@ -142,6 +134,35 @@ export function resolveQuickAction(status: ActionStatus | null, isRunning: boole
   return { labelKey: 'gitActionCommit', disabled: true, kind: 'show_hint', hintKey: 'gitHintUpToDate' }
 }
 
+/** What the always-visible change-request control can do. */
+export interface PrAction {
+  /** Whether the button opens the change request dialog. */
+  enabled: boolean
+  /** The i18n key of the reason the button is disabled. */
+  hintKey?: string
+}
+
+/**
+ * Whether a change request can be opened for this branch, and if not, why.
+ *
+ * The control is rendered even when the answer is no, so a user looking for
+ * "create pull request" always finds it with the reason it cannot run yet
+ * instead of an action that silently disappears.
+ *
+ * @param status the repository state, or null when it is unknown.
+ * @param isRunning whether another action is already running.
+ */
+export function resolvePrAction(status: ActionStatus | null, isRunning: boolean): PrAction {
+  if (isRunning) return { enabled: false, hintKey: 'gitHintBusy' }
+  if (status === null) return { enabled: false, hintKey: 'gitHintNoStatus' }
+  if (status.branch === null) return { enabled: false, hintKey: 'gitHintNoBranch' }
+  if (!status.hasPrimaryRemote) return { enabled: false, hintKey: 'gitHintNoRemote' }
+  if (status.prState === 'open') return { enabled: false, hintKey: 'gitHintOpenPr' }
+  if (status.behind > 0) return { enabled: false, hintKey: 'gitHintBehindPr' }
+  if ((status.aheadOfDefault || status.ahead) === 0) return { enabled: false, hintKey: 'gitHintNoPrCommits' }
+  return { enabled: true }
+}
+
 /**
  * The dropdown entries, with the reason each disabled one is disabled.
  *
@@ -152,18 +173,11 @@ export function buildActionMenuItems(status: ActionStatus | null, isRunning: boo
   if (status === null) return []
   const busy = isRunning
   const hasBranch = status.branch !== null
-  const hasOpenPr = status.prState === 'open'
   const canCommit = !busy && status.hasWorkingTreeChanges
   const canPush = !busy
     && hasBranch
     && status.behind === 0
     && status.ahead > 0
-    && (status.hasUpstream || status.hasPrimaryRemote)
-  const canCreatePr = !busy
-    && hasBranch
-    && !hasOpenPr
-    && (status.aheadOfDefault || status.ahead) > 0
-    && status.behind === 0
     && (status.hasUpstream || status.hasPrimaryRemote)
 
   const commit: ActionMenuItem = {
@@ -193,21 +207,16 @@ export function buildActionMenuItems(status: ActionStatus | null, isRunning: boo
             ? 'gitHintNoRemote'
             : 'gitHintNoCommits',
   }
-  if (hasOpenPr) return [commit, push]
 
+  // The change request stays in the list even when it cannot run, so the entry
+  // never disappears just because a pull request is already open or the branch
+  // is the default one; the disabled entry carries the reason.
+  const prAction = resolvePrAction(status, isRunning)
   const pr: ActionMenuItem = {
     id: 'pr',
     labelKey: 'gitActionCreatePr',
-    disabled: !canCreatePr,
-    disabledHintKey: busy
-      ? 'gitHintBusy'
-      : !hasBranch
-        ? 'gitHintNoBranch'
-        : status.behind > 0
-          ? 'gitHintBehindPr'
-          : (status.aheadOfDefault || status.ahead) === 0
-            ? 'gitHintNoPrCommits'
-            : 'gitActionUnavailable',
+    disabled: !prAction.enabled,
+    disabledHintKey: prAction.hintKey,
   }
   return [commit, push, pr]
 }

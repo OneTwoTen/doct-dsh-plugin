@@ -9,6 +9,7 @@ import type { GitApi } from '../api.ts'
 import { messageOf } from '../api.ts'
 import { Empty, Failure, Loading, DetailBar, Filters, ForgeNotice, PullMeta, CheckRow, reviewLabel, stateLabel } from './common.tsx'
 import { Counts } from './diff-view.tsx'
+import type { PrAction } from './action-logic.ts'
 import type { ForgeState, MergeMethod, MergePullResult } from '../../shared/protocol.ts'
 
 /** Props of the change-request list. */
@@ -20,6 +21,9 @@ export interface PullsViewProps {
   revision: number
   filter: string
   forgeState: ForgeState | undefined
+  /** Whether this branch can open one now; the header already shows why not. */
+  prAction: PrAction
+  onCreatePr(): void
   onFilter(next: string): void
   onSelect(number: number): void
 }
@@ -44,6 +48,15 @@ export function PullsView(props: PullsViewProps): ReturnType<typeof h> {
   if (value.available !== true) return h(ForgeNotice, { t, forge: props.forgeState ?? value })
   const pulls = value.pulls ?? []
   return h('div', null,
+    props.prAction.enabled
+      ? h('div', { className: 'ph-toolbar' },
+          h('span', { className: 'ph-spacer' }),
+          h('button', {
+            type: 'button',
+            className: 'ph-button',
+            onClick: props.onCreatePr,
+          }, h(Icon, { name: 'merge', size: 12 }), t('gitActionCreatePr')))
+      : null,
     h(Filters, {
       value: props.filter,
       onChange: props.onFilter,

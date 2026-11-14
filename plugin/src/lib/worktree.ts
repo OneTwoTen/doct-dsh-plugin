@@ -250,6 +250,29 @@ export async function readBases(
   }
 }
 
+/**
+ * The source a base picker starts on.
+ *
+ * The configured source wins whenever it has branches; otherwise the other one
+ * takes over, so a repository with no remote-tracking branches (a fresh local
+ * project, or a clone that never fetched) still offers a working "new worktree"
+ * action instead of a dead button.
+ *
+ * @param configured `git.worktree.source`.
+ * @param bases the branches `readBases` found.
+ */
+export function resolveSourceDefault(
+  configured: 'local' | 'remote',
+  { local, remote }: { local: readonly unknown[], remote: readonly unknown[] },
+): 'local' | 'remote' {
+  if (configured === 'remote') {
+    if (remote.length > 0 || local.length === 0) return 'remote'
+    return 'local'
+  }
+  if (local.length > 0 || remote.length === 0) return 'local'
+  return 'remote'
+}
+
 /** Local branches in the shape the client needs. */
 function parseLocalBases(raw: string): LocalWorktreeBase[] {
   const branches: LocalWorktreeBase[] = []

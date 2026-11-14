@@ -17,6 +17,7 @@ import {
   removeWorktree,
   renameWorktreeBranch,
   resolveDefaultBase,
+  resolveSourceDefault,
   worktreePath,
 } from '../src/lib/worktree.ts'
 
@@ -52,6 +53,20 @@ test('one directory is recognized as inside another', () => {
   assert.equal(isInside('C:/repo', 'C:/repo'), true)
   assert.equal(isInside('C:/repo', 'C:/repo-other'), false)
   assert.equal(isInside('C:/repo', 'C:/elsewhere/x'), false)
+})
+
+test('the source picker keeps the configured default and falls back when it is empty', () => {
+  const local = [{ name: 'main' }]
+  const remote = [{ name: 'origin/main', branch: 'main' }]
+  // The configured source wins while it has branches to offer.
+  assert.equal(resolveSourceDefault('remote', { local, remote }), 'remote')
+  assert.equal(resolveSourceDefault('local', { local, remote }), 'local')
+  // A repository without remote branches still opens on a source that works.
+  assert.equal(resolveSourceDefault('remote', { local, remote: [] }), 'local')
+  assert.equal(resolveSourceDefault('local', { local: [], remote }), 'remote')
+  // Nothing to start from: the picker reports the configured source.
+  assert.equal(resolveSourceDefault('remote', { local: [], remote: [] }), 'remote')
+  assert.equal(resolveSourceDefault('local', { local: [], remote: [] }), 'local')
 })
 
 test('the porcelain worktree list is parsed into records', () => {

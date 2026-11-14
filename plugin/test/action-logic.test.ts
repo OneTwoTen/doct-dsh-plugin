@@ -11,6 +11,7 @@ import {
   defaultBranchCopy,
   needsDefaultBranchConfirmation,
   resolveChangesTotals,
+  resolvePrAction,
   resolveQuickAction,
 } from '../src/client/git/action-logic.ts'
 import type { ActionStatus } from '../src/client/git/action-logic.ts'
@@ -43,7 +44,9 @@ test('the quick action names the next useful step, in the reference order', () =
     'commit',
   )
   assert.equal(resolveQuickAction(status({ hasWorkingTreeChanges: true, prState: 'open' }), false).action, 'commit_push')
-  assert.equal(resolveQuickAction(status({ hasWorkingTreeChanges: true, isDefaultRef: true }), false).action, 'commit_push')
+  // The stacked request action stays the default on the default branch too: the
+  // confirmation offers the feature branch it needs.
+  assert.equal(resolveQuickAction(status({ hasWorkingTreeChanges: true, isDefaultRef: true }), false).action, 'commit_push_pr')
   assert.equal(resolveQuickAction(status({ hasWorkingTreeChanges: true }), false).action, 'commit_push_pr')
 
   // A clean tree: publish, push, pull, or open the change request.
@@ -54,7 +57,7 @@ test('the quick action names the next useful step, in the reference order', () =
   )
   assert.equal(resolveQuickAction(status({ hasUpstream: false }), false).hintKey, 'gitHintNoCommits')
   assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1, prState: 'open' }), false).action, 'push')
-  assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1, isDefaultRef: true }), false).action, 'commit_push')
+  assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1, isDefaultRef: true }), false).action, 'create_pr')
   assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1 }), false).action, 'create_pr')
 
   assert.equal(resolveQuickAction(status({ ahead: 2, behind: 1 }), false).hintKey, 'gitHintDiverged')
@@ -75,10 +78,12 @@ test('the menu lists the actions the repository can actually run', () => {
   assert.equal(noRemote[0].opensCommitDialog, true)
 
   const withOpenPr = buildActionMenuItems(status({ prState: 'open', ahead: 1 }), false)
-  assert.deepEqual(withOpenPr.map((item) => item.id), ['commit', 'push'])
+  assert.deepEqual(withOpenPr.map((item) => item.id), ['commit', 'push', 'pr'])
   assert.equal(withOpenPr[0].disabled, true, 'a clean tree cannot commit')
   assert.equal(withOpenPr[0].disabledHintKey, 'gitHintClean')
   assert.equal(withOpenPr[1].disabled, false)
+  assert.equal(withOpenPr[2].disabled, true, 'the branch already has an open request')
+  assert.equal(withOpenPr[2].disabledHintKey, 'gitHintOpenPr')
 
   const full = buildActionMenuItems(status({ hasWorkingTreeChanges: true, ahead: 2, aheadOfDefault: 2 }), false)
   assert.deepEqual(full.map((item) => item.id), ['commit', 'push', 'pr'])
@@ -96,6 +101,23 @@ test('the menu lists the actions the repository can actually run', () => {
 
   const detached = buildActionMenuItems(status({ branch: null, hasWorkingTreeChanges: true }), false)
   assert.equal(detached[0].disabledHintKey, 'gitHintDetached')
+})
+
+test('the change request control is always shown with the reason it cannot run', () => {
+  assert.deepEqual(resolvePrAction(null, false), { enabled: false, hintKey: 'gitHintNoStatus' })
+  assert.equal(resolvePrAction(status(), true).hintKey, 'gitHintBusy')
+  assert.equal(resolvePrAction(status({ branch: null }), false).hintKey, 'gitHintNoBranch')
+  assert.equal(resolvePrAction(status({ hasPrimaryRemote: false }), false).hintKey, 'gitHintNoRemote')
+  assert.equal(resolvePrAction(status({ prState: 'open', ahead: 1 }), false).hintKey, 'gitHintOpenPr')
+  assert.equal(resolvePrAction(status({ behind: 2 }), false).hintKey, 'gitHintBehindPr')
+  assert.equal(resolvePrAction(status({ ahead: 0 }), false).hintKey, 'gitHintNoPrCommits')
+
+  // A pushed feature branch with a commit ahead can open a request.
+  assert.deepEqual(resolvePrAction(status({ ahead: 1 }), false), { enabled: true })
+  assert.deepEqual(resolvePrAction(status({ aheadOfDefault: 2, hasUpstream: false }), false), { enabled: true })
+  // The default branch is fine: the flow offers the feature branch it needs.
+  assert.deepEqual(resolvePrAction(status({ isDefaultRef: true, ahead: 2 }), false), { enabled: true })
+  assert.equal(resolvePrAction(status({ isDefaultRef: true }), false).hintKey, 'gitHintNoPrCommits')
 })
 
 test('changes totals prefer a non-zero branch range over the working tree', () => {

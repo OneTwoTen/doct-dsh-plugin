@@ -109,8 +109,13 @@ var GIT_DEFAULTS = Object.freeze({
     nameInstructions: "",
     /** Branch the picker starts on; empty asks the repository for its default branch. */
     base: "",
-    /** Where a new worktree starts: `local` (recent local branches) or `remote` (fetched remote branches). */
-    source: "local",
+    /**
+     * Where a new worktree starts: `local` (recent local branches) or `remote`
+     * (fetched remote branches). `remote` is the default, so a new Session
+     * starts from the code host's branch; a repository without remote branches
+     * falls back to `local` on its own.
+     */
+    source: "remote",
     /** Remote used for `source: remote`; empty follows the selected remote, then `origin`. */
     remote: "",
     /** Removing checkouts nobody uses any more. */
@@ -1888,6 +1893,14 @@ async function readBases(runner, { root, remote = "", limit = 40, signal }) {
     defaultBase: await resolveDefaultBase(runner, { root, remote, signal }),
     current: current.length > 0 && current !== "HEAD" ? current : null
   };
+}
+function resolveSourceDefault(configured, { local, remote }) {
+  if (configured === "remote") {
+    if (remote.length > 0 || local.length === 0) return "remote";
+    return "local";
+  }
+  if (local.length > 0 || remote.length === 0) return "local";
+  return "remote";
 }
 function parseLocalBases(raw) {
   const branches = [];
@@ -5571,7 +5584,7 @@ function mountRoutes(ctx, connection, config, deps) {
         reason: config.worktree.enabled === true ? kind.linked === true ? "linked-project" : null : "disabled",
         repositoryRoot: mainRoot,
         remote,
-        sourceDefault: config.worktree.source,
+        sourceDefault: resolveSourceDefault(config.worktree.source, bases),
         project: { directory, linked: kind.linked === true },
         bases,
         current: sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null

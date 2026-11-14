@@ -252,8 +252,13 @@ export const GIT_DEFAULTS = Object.freeze({  enabled: true,
     nameInstructions: '',
     /** Branch the picker starts on; empty asks the repository for its default branch. */
     base: '',
-    /** Where a new worktree starts: `local` (recent local branches) or `remote` (fetched remote branches). */
-    source: 'local',
+    /**
+     * Where a new worktree starts: `local` (recent local branches) or `remote`
+     * (fetched remote branches). `remote` is the default, so a new Session
+     * starts from the code host's branch; a repository without remote branches
+     * falls back to `local` on its own.
+     */
+    source: 'remote',
     /** Remote used for `source: remote`; empty follows the selected remote, then `origin`. */
     remote: '',
     /** Removing checkouts nobody uses any more. */

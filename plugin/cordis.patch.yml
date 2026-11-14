@@ -31,10 +31,11 @@
             enabled: true
             provider: ''
             model: ''
-          # Worktree riêng cho phiên mới; nguồn local hoặc nhánh remote đã fetch.
+          # Worktree riêng cho phiên mới: mặc định tạo checkout mới từ nhánh
+          # remote đã fetch (repo không có nhánh remote thì tự lùi về local).
           worktree:
             enabled: true
-            source: local
+            source: remote
             # Nhánh bắt đầu mặc định; để trống = nhánh mặc định của kho mã.
             base: ''
             # id = dsh-<id phiên>; semantic = đổi thành feat/... theo tin nhắn đầu.

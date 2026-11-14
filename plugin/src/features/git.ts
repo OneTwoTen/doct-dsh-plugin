@@ -75,6 +75,7 @@ import {
   remoteNames,
   renameWorktreeBranch,
   resolveDefaultBase,
+  resolveSourceDefault,
   uniqueBranchName,
 } from '../lib/worktree.ts'
 import { resolveAutoFeatureBranchName, sanitizeBranchFragment, sanitizeFeatureBranchName } from '../lib/git-core.ts'
@@ -1522,7 +1523,7 @@ function mountRoutes(
           : 'disabled',
         repositoryRoot: mainRoot,
         remote,
-        sourceDefault: config.worktree.source,
+        sourceDefault: resolveSourceDefault(config.worktree.source, bases),
         project: { directory, linked: kind.linked === true },
         bases,
         current: sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null,

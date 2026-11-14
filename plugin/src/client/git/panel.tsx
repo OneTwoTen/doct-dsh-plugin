@@ -12,9 +12,9 @@ import { messageOf } from '../api.ts'
 import type { GitApi } from '../api.ts'
 import type { Translate } from '../i18n.ts'
 import { currentLocale } from '../i18n.ts'
-import { actionStatusOf, buildActionMenuItems, resolveQuickAction, needsDefaultBranchConfirmation, actionIncludesCommit } from './action-logic.ts'
-import type { ActionStatus, QuickAction } from './action-logic.ts'
-import { GitActions, DefaultBranchDialog, PublishDialog } from './actions.tsx'
+import { actionStatusOf, buildActionMenuItems, resolvePrAction, resolveQuickAction, needsDefaultBranchConfirmation, actionIncludesCommit } from './action-logic.ts'
+import type { ActionStatus, PrAction, QuickAction } from './action-logic.ts'
+import { GitActions, CreatePullButton, DefaultBranchDialog, PublishDialog } from './actions.tsx'
 import type { InlineSuccess } from './actions.tsx'
 import { BranchSelector } from './branch-selector.tsx'
 import { CreatePullDialog } from './create-pull.tsx'
@@ -85,7 +85,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const [success, setSuccess] = useState<InlineSuccess | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
-  const [pending, setPending] = useState<{ action: GitStackedAction; options: ActionOptions } | null>(null)
+  const [pending, setPending] = useState<{ action: GitStackedAction; options: ActionOptions; after?: 'create_pull' } | null>(null)
   const [publishOpen, setPublishOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [publishBusy, setPublishBusy] = useState(false)
@@ -221,7 +221,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   ): Promise<void> => {
     if (running) return
     if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
-      setPending({ action, options })
+      setPending({ action, options, after })
       return
     }
     setMenuOpen(false)
@@ -317,11 +317,15 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
 
   const quick = resolveQuickAction(status, running)
   const menuItems = buildActionMenuItems(status, running)
+  const prAction = resolvePrAction(status, running)
 
-  /** Open the review dialog, or explain why this branch cannot open a request yet. */
+  /**
+   * Open the review dialog, or offer a feature branch when the checkout sits on
+   * the default branch, where a request needs a branch of its own.
+   */
   const openCreatePull = (): void => {
     if (status?.isDefaultRef === true) {
-      toast(t('gitPrAction'), t('gitPrDefaultBranchHint', { branch: status.branch ?? '' }), 'info')
+      setPending({ action: 'create_pr', options: {} })
       return
     }
     setCreateOpen(true)
@@ -390,6 +394,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     status,
     quick,
     menuItems,
+    prAction,
     running,
     progress,
     success,
@@ -400,6 +405,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     onToggleMenu: () => setMenuOpen((value) => !value),
     onQuick: runQuick,
     onRun: onMenuRun,
+    onCreatePr: openCreatePull,
     onOpenPublish: () => {
       setMenuOpen(false)
       setPublishOpen(true)
@@ -462,6 +468,8 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       api, t, sessionId, cwd, revision,
       filter: pullFilter,
       forgeState: overview.forge,
+      prAction,
+      onCreatePr: openCreatePull,
       onFilter: setPullFilter,
       onSelect: (number: number) => setSelection({ type: 'pull', number }),
     })
@@ -533,12 +541,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
           onContinue: () => {
             const next = pending
             setPending(null)
-            void startAction(next.action, next.options, true)
+            void startAction(next.action, next.options, true, next.after)
           },
           onFeatureBranch: () => {
             const next = pending
             setPending(null)
-            void startAction(next.action, { ...next.options, featureBranch: true }, true)
+            void startAction(next.action, { ...next.options, featureBranch: true }, true, next.after)
           },
         }),
 
@@ -605,6 +613,7 @@ interface PanelHeaderProps {
   status: ActionStatus | null
   quick: QuickAction
   menuItems: ReturnType<typeof buildActionMenuItems>
+  prAction: PrAction
   running: boolean
   progress: GitActionProgress | null
   success: InlineSuccess | null
@@ -615,6 +624,7 @@ interface PanelHeaderProps {
   onToggleMenu(): void
   onQuick(): void
   onRun(action: GitStackedAction): void
+  onCreatePr(): void
   onOpenPublish(): void
   onPull(): void
   onHint(key: string): void
@@ -694,7 +704,18 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
       onOpenPublish: props.onOpenPublish,
       onPull: props.onPull,
       onHint: props.onHint,
-    }))
+    }),
+
+    // The change request control is always on screen once a remote exists, so
+    // "create pull request" never hides behind the caret menu.
+    props.status !== null && props.status.hasPrimaryRemote
+      ? h(CreatePullButton, {
+          t,
+          enabled: props.prAction.enabled,
+          hintKey: props.prAction.hintKey,
+          onClick: props.onCreatePr,
+        })
+      : null)
 }
 
 /** One count the tab strip may show. */
