@@ -160,6 +160,8 @@ export interface CreatePullButtonProps {
   enabled: boolean
   /** The i18n key of the reason the button is disabled. */
   hintKey?: string
+  /** Render the reason under the button; callers hide it when another control already says it. */
+  showHint?: boolean
   onClick(): void
 }
 
@@ -173,6 +175,7 @@ export interface CreatePullButtonProps {
 export function CreatePullButton(props: CreatePullButtonProps): ReturnType<typeof h> {
   const { t } = props
   const hint = props.enabled || props.hintKey === undefined ? '' : t(props.hintKey)
+  const visible = hint.length > 0 && props.showHint !== false
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 } },
     h('button', {
       type: 'button',
@@ -185,7 +188,7 @@ export function CreatePullButton(props: CreatePullButtonProps): ReturnType<typeo
     },
       h(Icon, { name: 'merge', size: 12 }),
       h('span', { className: 'ph-ellipsis' }, t('gitActionCreatePr'))),
-    hint.length > 0 ? h('p', { className: 'ph-hint', style: { textAlign: 'center' } }, hint) : null)
+    visible ? h('p', { className: 'ph-hint', style: { textAlign: 'center' } }, hint) : null)
 }
 
 /** Props of the default-branch confirmation. */

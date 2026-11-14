@@ -81,9 +81,11 @@ export function resolveQuickAction(status: ActionStatus | null, isRunning: boole
 
   const hasChanges = status.hasWorkingTreeChanges
   const hasOpenPr = status.prState === 'open'
-  const isAhead = status.ahead > 0
   const isBehind = status.behind > 0
-  const isDiverged = isAhead && isBehind
+  // Without an upstream there is nothing to compare against, so the commits
+  // ahead of the base branch are what "ahead" means for this checkout.
+  const isAhead = status.ahead > 0 || (!status.hasUpstream && status.aheadOfDefault > 0)
+  const isDiverged = status.ahead > 0 && isBehind
   const hasDefaultDelta = (status.aheadOfDefault || status.ahead) > 0
 
   if (hasChanges) {
@@ -158,7 +160,9 @@ export function resolvePrAction(status: ActionStatus | null, isRunning: boolean)
   if (status.branch === null) return { enabled: false, hintKey: 'gitHintNoBranch' }
   if (!status.hasPrimaryRemote) return { enabled: false, hintKey: 'gitHintNoRemote' }
   if (status.prState === 'open') return { enabled: false, hintKey: 'gitHintOpenPr' }
-  if (status.behind > 0) return { enabled: false, hintKey: 'gitHintBehindPr' }
+  if (status.behind > 0) {
+    return { enabled: false, hintKey: status.ahead > 0 ? 'gitHintDiverged' : 'gitHintBehindPr' }
+  }
   if ((status.aheadOfDefault || status.ahead) === 0) return { enabled: false, hintKey: 'gitHintNoPrCommits' }
   return { enabled: true }
 }
@@ -174,10 +178,12 @@ export function buildActionMenuItems(status: ActionStatus | null, isRunning: boo
   const busy = isRunning
   const hasBranch = status.branch !== null
   const canCommit = !busy && status.hasWorkingTreeChanges
+  // A branch that was never pushed has no upstream to compare against, so its
+  // commits ahead of the base branch are the ones a push would publish.
   const canPush = !busy
     && hasBranch
     && status.behind === 0
-    && status.ahead > 0
+    && (status.ahead > 0 || (!status.hasUpstream && status.aheadOfDefault > 0))
     && (status.hasUpstream || status.hasPrimaryRemote)
 
   const commit: ActionMenuItem = {

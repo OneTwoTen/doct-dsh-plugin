@@ -2016,6 +2016,28 @@ async function dropMismatchedUpstream(runner, { path, branch, signal }) {
   if (tracked === branch) return;
   await runner.run("git", ["branch", "--unset-upstream"], { cwd: path, signal }).catch(() => void 0);
 }
+async function repairInheritedBaseUpstream(runner, { path, branch, base, source, signal }) {
+  if (source !== "remote" || branch.length === 0 || base.length === 0) return null;
+  const head = await runner.run("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: path, signal });
+  if (head.code !== 0 || String(head.stdout ?? "").trim() !== branch) return null;
+  const read = await runner.run("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], {
+    cwd: path,
+    signal
+  });
+  if (read.code !== 0) return null;
+  const upstream = String(read.stdout ?? "").trim();
+  const slash = upstream.indexOf("/");
+  if (slash <= 0) return null;
+  const remoteName = upstream.slice(0, slash);
+  if (upstream.slice(slash + 1) !== base) return null;
+  const own = await runner.run("git", ["rev-parse", "--verify", "--quiet", `refs/remotes/${remoteName}/${branch}^{commit}`], {
+    cwd: path,
+    signal
+  });
+  const result = own.code === 0 ? await runner.run("git", ["branch", `--set-upstream-to=${remoteName}/${branch}`], { cwd: path, signal }) : await runner.run("git", ["branch", "--unset-upstream"], { cwd: path, signal });
+  if (result.code !== 0) return null;
+  return own.code === 0 ? "moved" : "dropped";
+}
 async function uniqueBranchName(runner, { root, branch, signal }) {
   if (!await branchIsTaken(runner, { root, branch, signal })) return branch;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -4989,11 +5011,21 @@ function mountRoutes(ctx, connection, config, deps) {
     async overview(payload, signal) {
       const { root } = await repository(payload, signal);
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const stored = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null;
+      if (stored !== null && typeof stored.path === "string" && pathKey(stored.path) === pathKey(root)) {
+        await repairInheritedBaseUpstream(runner, {
+          path: root,
+          branch: String(stored.branch ?? ""),
+          base: String(stored.base ?? ""),
+          source: stored.source,
+          signal
+        }).catch(() => null);
+      }
       const read = await readOverview(runner, { root, config, signal });
       const value = {
         ...read,
         forge: await describeForge(read.repo.remote, root, signal),
-        worktree: sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null,
+        worktree: stored,
         branchPull: null
       };
       if (value.forge.available === true && read.repo.branch !== null) {

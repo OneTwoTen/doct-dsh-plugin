@@ -461,6 +461,55 @@ async function dropMismatchedUpstream(
 }
 
 /**
+ * Point a legacy checkout branch at its own remote branch.
+ *
+ * Builds before the `--no-track` fix let Git make a new worktree branch track
+ * the remote base branch (`origin/main`) instead of nothing, so every base
+ * update made the checkout look like it had diverged. This repairs what the
+ * plugin itself created: an upstream that names the recorded base is replaced
+ * by the branch's own remote-tracking branch when that exists, and dropped
+ * otherwise. A branch tracking any other name on purpose is left alone.
+ *
+ * @param runner command runner.
+ * @param options the checkout, its recorded branch and base, and cancellation.
+ * @returns what the repair did, or null when the upstream was already fine.
+ */
+export async function repairInheritedBaseUpstream(
+  runner: GitRunner,
+  { path, branch, base, source, signal }: {
+    path: string
+    branch: string
+    base: string
+    source?: 'local' | 'remote'
+    signal?: AbortSignal
+  },
+): Promise<'moved' | 'dropped' | null> {
+  if (source !== 'remote' || branch.length === 0 || base.length === 0) return null
+  const head = await runner.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path, signal })
+  if (head.code !== 0 || String(head.stdout ?? '').trim() !== branch) return null
+  const read = await runner.run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], {
+    cwd: path,
+    signal,
+  })
+  if (read.code !== 0) return null
+  const upstream = String(read.stdout ?? '').trim()
+  const slash = upstream.indexOf('/')
+  if (slash <= 0) return null
+  const remoteName = upstream.slice(0, slash)
+  if (upstream.slice(slash + 1) !== base) return null
+
+  const own = await runner.run('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteName}/${branch}^{commit}`], {
+    cwd: path,
+    signal,
+  })
+  const result = own.code === 0
+    ? await runner.run('git', ['branch', `--set-upstream-to=${remoteName}/${branch}`], { cwd: path, signal })
+    : await runner.run('git', ['branch', '--unset-upstream'], { cwd: path, signal })
+  if (result.code !== 0) return null
+  return own.code === 0 ? 'moved' : 'dropped'
+}
+
+/**
  * Make one branch name unique by appending a short suffix when it is taken.
  * @param runner command runner.
  * @param options the repository and the wanted branch.

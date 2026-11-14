@@ -16,6 +16,7 @@ import {
   readBases,
   removeWorktree,
   renameWorktreeBranch,
+  repairInheritedBaseUpstream,
   resolveDefaultBase,
   resolveSourceDefault,
   worktreePath,
@@ -213,6 +214,82 @@ test('renaming a checkout branch drops an upstream that names another branch', a
     assert.notEqual(upstream.code, 0, 'the inherited upstream is gone')
 
     await removeWorktree(runner, { repoRoot: root, path: created.path, branch: renamed, deleteBranch: true })
+  } finally {
+    await rm(root.slice(0, root.lastIndexOf('\\project')), { recursive: true, force: true }).catch(() => {})
+  }
+})
+
+test('a legacy checkout that tracks its base is pointed back at its own branch', async () => {
+  const { root } = await makeRepositoryWithRemote()
+  const runner = gitRunner()
+  const trackBase = (created: { path: string, branch: string }) => runner.run(
+    'git',
+    ['branch', '--set-upstream-to=origin/main', created.branch],
+    { cwd: created.path },
+  )
+  try {
+    // A branch the code host already has is pointed at its own remote branch.
+    const pushed = await createWorktree(runner, {
+      repoRoot: root,
+      name: 'dsh-test-0006',
+      base: 'main',
+      source: 'remote',
+      remote: 'origin',
+      config,
+    })
+    await runner.run('git', ['push', '-q', 'origin', `HEAD:refs/heads/${pushed.branch}`], { cwd: pushed.path })
+    await runner.run('git', ['fetch', '-q', 'origin'], { cwd: root })
+    assert.equal((await trackBase(pushed)).code, 0)
+    const repaired = await repairInheritedBaseUpstream(runner, {
+      path: pushed.path,
+      branch: pushed.branch,
+      base: 'main',
+      source: 'remote',
+    })
+    assert.equal(repaired, 'moved')
+    const upstream = await runner.run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], { cwd: pushed.path })
+    assert.equal(String(upstream.stdout ?? '').trim(), `origin/${pushed.branch}`)
+    await removeWorktree(runner, { repoRoot: root, path: pushed.path, branch: pushed.branch, deleteBranch: true })
+
+    // A branch that was never pushed drops the inherited tracking instead.
+    const localOnly = await createWorktree(runner, {
+      repoRoot: root,
+      name: 'dsh-test-0007',
+      base: 'main',
+      source: 'remote',
+      remote: 'origin',
+      config,
+    })
+    assert.equal((await trackBase(localOnly)).code, 0)
+    assert.equal(await repairInheritedBaseUpstream(runner, {
+      path: localOnly.path,
+      branch: localOnly.branch,
+      base: 'main',
+      source: 'remote',
+    }), 'dropped')
+    const dropped = await runner.run('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: localOnly.path })
+    assert.notEqual(dropped.code, 0, 'the inherited upstream is gone')
+    await removeWorktree(runner, { repoRoot: root, path: localOnly.path, branch: localOnly.branch, deleteBranch: true })
+
+    // An upstream that names something other than the recorded base is a
+    // deliberate choice and stays untouched.
+    const deliberate = await createWorktree(runner, {
+      repoRoot: root,
+      name: 'dsh-test-0008',
+      base: 'main',
+      source: 'remote',
+      remote: 'origin',
+      config,
+    })
+    assert.equal((await trackBase(deliberate)).code, 0)
+    assert.equal(await repairInheritedBaseUpstream(runner, {
+      path: deliberate.path,
+      branch: deliberate.branch,
+      base: 'feature/remote-only',
+      source: 'remote',
+    }), null)
+    assert.equal(String((await runner.run('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: deliberate.path })).stdout ?? '').trim(), 'origin/main')
+    await removeWorktree(runner, { repoRoot: root, path: deliberate.path, branch: deliberate.branch, deleteBranch: true })
   } finally {
     await rm(root.slice(0, root.lastIndexOf('\\project')), { recursive: true, force: true }).catch(() => {})
   }

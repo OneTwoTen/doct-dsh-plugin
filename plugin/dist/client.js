@@ -2706,9 +2706,9 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     }
     const hasChanges = status.hasWorkingTreeChanges;
     const hasOpenPr = status.prState === "open";
-    const isAhead = status.ahead > 0;
     const isBehind = status.behind > 0;
-    const isDiverged = isAhead && isBehind;
+    const isAhead = status.ahead > 0 || !status.hasUpstream && status.aheadOfDefault > 0;
+    const isDiverged = status.ahead > 0 && isBehind;
     const hasDefaultDelta = (status.aheadOfDefault || status.ahead) > 0;
     if (hasChanges) {
       if (isBehind || !status.hasUpstream && !status.hasPrimaryRemote) {
@@ -2757,7 +2757,9 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     if (status.branch === null) return { enabled: false, hintKey: "gitHintNoBranch" };
     if (!status.hasPrimaryRemote) return { enabled: false, hintKey: "gitHintNoRemote" };
     if (status.prState === "open") return { enabled: false, hintKey: "gitHintOpenPr" };
-    if (status.behind > 0) return { enabled: false, hintKey: "gitHintBehindPr" };
+    if (status.behind > 0) {
+      return { enabled: false, hintKey: status.ahead > 0 ? "gitHintDiverged" : "gitHintBehindPr" };
+    }
     if ((status.aheadOfDefault || status.ahead) === 0) return { enabled: false, hintKey: "gitHintNoPrCommits" };
     return { enabled: true };
   }
@@ -2766,7 +2768,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const busy = isRunning;
     const hasBranch = status.branch !== null;
     const canCommit = !busy && status.hasWorkingTreeChanges;
-    const canPush = !busy && hasBranch && status.behind === 0 && status.ahead > 0 && (status.hasUpstream || status.hasPrimaryRemote);
+    const canPush = !busy && hasBranch && status.behind === 0 && (status.ahead > 0 || !status.hasUpstream && status.aheadOfDefault > 0) && (status.hasUpstream || status.hasPrimaryRemote);
     const commit = {
       id: "commit",
       labelKey: "gitActionCommit",
@@ -2924,6 +2926,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
   function CreatePullButton(props) {
     const { t } = props;
     const hint = props.enabled || props.hintKey === void 0 ? "" : t(props.hintKey);
+    const visible = hint.length > 0 && props.showHint !== false;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 } },
@@ -2941,7 +2944,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         h(Icon, { name: "merge", size: 12 }),
         h("span", { className: "ph-ellipsis" }, t("gitActionCreatePr"))
       ),
-      hint.length > 0 ? h("p", { className: "ph-hint", style: { textAlign: "center" } }, hint) : null
+      visible ? h("p", { className: "ph-hint", style: { textAlign: "center" } }, hint) : null
     );
   }
   function DefaultBranchDialog(props) {
@@ -6049,6 +6052,8 @@ ${repo.root}` }, repo.name),
         t,
         enabled: props.prAction.enabled,
         hintKey: props.prAction.hintKey,
+        // The primary control already explains the same blocker.
+        showHint: props.quick.hintKey !== props.prAction.hintKey,
         onClick: props.onCreatePr
       }) : null
     );

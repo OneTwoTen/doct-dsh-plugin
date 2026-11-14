@@ -713,6 +713,8 @@ function PanelHeader(props: PanelHeaderProps): ReturnType<typeof h> {
           t,
           enabled: props.prAction.enabled,
           hintKey: props.prAction.hintKey,
+          // The primary control already explains the same blocker.
+          showHint: props.quick.hintKey !== props.prAction.hintKey,
           onClick: props.onCreatePr,
         })
       : null)

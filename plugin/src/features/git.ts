@@ -74,6 +74,7 @@ import {
   removeWorktree,
   remoteNames,
   renameWorktreeBranch,
+  repairInheritedBaseUpstream,
   resolveDefaultBase,
   resolveSourceDefault,
   uniqueBranchName,
@@ -884,11 +885,24 @@ function mountRoutes(
     async overview(payload, signal) {
       const { root } = await repository(payload, signal)
       const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      const stored = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null
+      // A checkout from an older build may still track the base branch it
+      // started from; repairing it here keeps "behind/diverged" honest without
+      // a migration step.
+      if (stored !== null && typeof stored.path === 'string' && pathKey(stored.path) === pathKey(root)) {
+        await repairInheritedBaseUpstream(runner, {
+          path: root,
+          branch: String(stored.branch ?? ''),
+          base: String(stored.base ?? ''),
+          source: stored.source,
+          signal,
+        }).catch(() => null)
+      }
       const read = await readOverview(runner, { root, config, signal })
       const value: GitOverview = {
         ...read,
         forge: await describeForge(read.repo.remote, root, signal),
-        worktree: sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null,
+        worktree: stored,
         branchPull: null,
       }
       if (value.forge.available === true && read.repo.branch !== null) {

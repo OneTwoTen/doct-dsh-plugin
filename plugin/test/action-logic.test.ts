@@ -59,6 +59,10 @@ test('the quick action names the next useful step, in the reference order', () =
   assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1, prState: 'open' }), false).action, 'push')
   assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1, isDefaultRef: true }), false).action, 'create_pr')
   assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 1 }), false).action, 'create_pr')
+  // A branch that was never pushed has no upstream; commits ahead of the base
+  // branch are still work a push would publish.
+  assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 0, aheadOfDefault: 2 }), false).action, 'create_pr')
+  assert.equal(resolveQuickAction(status({ hasUpstream: false, ahead: 0 }), false).hintKey, 'gitHintNoCommits')
 
   assert.equal(resolveQuickAction(status({ ahead: 2, behind: 1 }), false).hintKey, 'gitHintDiverged')
   assert.equal(resolveQuickAction(status({ behind: 1 }), false).kind, 'run_pull')
@@ -97,7 +101,11 @@ test('the menu lists the actions the repository can actually run', () => {
   assert.equal(behind[1].disabled, true)
   assert.equal(behind[1].disabledHintKey, 'gitHintBehind')
   assert.equal(behind[2].disabled, true)
-  assert.equal(behind[2].disabledHintKey, 'gitHintBehindPr')
+  assert.equal(behind[2].disabledHintKey, 'gitHintDiverged')
+
+  const unpushed = buildActionMenuItems(status({ hasUpstream: false, ahead: 0, aheadOfDefault: 2 }), false)
+  assert.equal(unpushed[1].disabled, false, 'a never-pushed branch can push its commits')
+  assert.equal(unpushed[2].disabled, false)
 
   const detached = buildActionMenuItems(status({ branch: null, hasWorkingTreeChanges: true }), false)
   assert.equal(detached[0].disabledHintKey, 'gitHintDetached')
@@ -110,6 +118,7 @@ test('the change request control is always shown with the reason it cannot run',
   assert.equal(resolvePrAction(status({ hasPrimaryRemote: false }), false).hintKey, 'gitHintNoRemote')
   assert.equal(resolvePrAction(status({ prState: 'open', ahead: 1 }), false).hintKey, 'gitHintOpenPr')
   assert.equal(resolvePrAction(status({ behind: 2 }), false).hintKey, 'gitHintBehindPr')
+  assert.equal(resolvePrAction(status({ ahead: 1, behind: 2 }), false).hintKey, 'gitHintDiverged')
   assert.equal(resolvePrAction(status({ ahead: 0 }), false).hintKey, 'gitHintNoPrCommits')
 
   // A pushed feature branch with a commit ahead can open a request.
