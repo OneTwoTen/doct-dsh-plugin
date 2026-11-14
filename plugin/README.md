@@ -238,18 +238,16 @@ tự host và đường dẫn CLI. Cấu hình được lưu vào profile qua Co
 
 ### Tạo pull request bằng AI
 
-Tạo PR là một bước trong chuỗi thao tác (`commit_push_pr`, `create_pr`) hoặc mục **Tạo pull request**
-trong menu. Trước khi mở PR, plugin luôn cho bạn **xem và sửa** nội dung model viết:
+Tạo PR là một bước trong chuỗi thao tác (`commit_push_pr`, `create_pr`): bấm nút chính, nút **Tạo pull
+request**, hoặc mục trong menu là plugin chạy luôn — không mở hộp soạn nháp để bạn duyệt trước.
 
-1. Hộp **Tạo pull request** hỏi model **đang dùng cho phiên này** viết tiêu đề và mô tả từ commit cùng
-   diff của nhánh, với **effort suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`).
-   Có thể ghim route khác bằng `git.pull.provider` + `git.pull.model`.
-2. Tiêu đề và mô tả hiện trong hai ô sửa được; **Viết lại** gọi model lần nữa, còn sửa tay thì giữ
-   nguyên. Nhánh **chưa** được đẩy lên ở bước này.
-3. Bấm **Tạo** mới đẩy nhánh (`git.push --set-upstream`; đặt `git.pull.push: false` nếu bạn tự đẩy
+1. Model **đang dùng cho phiên này** viết tiêu đề và mô tả từ commit cùng diff của nhánh, với **effort
+   suy luận thấp nhất** mà route đó hỗ trợ (`reasoning.efforts[0]`). Có thể ghim route khác bằng
+   `git.pull.provider` + `git.pull.model`.
+2. Tiếp đó nhánh được đẩy lên (`git push --set-upstream`; đặt `git.pull.push: false` nếu bạn tự đẩy
    trước) rồi mở PR bằng `gh pr create`; GitLab dùng `glab api` (hoặc REST API v4 khi có token).
-4. Nếu nhánh đã có PR đang mở, plugin dùng lại PR đó (`opened_existing`) thay vì tạo trùng.
-5. PR vừa tạo được **gắn với phiên** để theo dõi việc gộp.
+3. Nếu nhánh đã có PR đang mở, plugin dùng lại PR đó (`opened_existing`) thay vì tạo trùng.
+4. PR vừa tạo được **gắn với phiên** để theo dõi việc gộp; dòng thành công kèm nút **Xem pull request**.
 
 Mô tả do model viết phải có **ba phần**: đoạn tóm tắt, danh sách thay đổi theo tệp/hành vi, và phần
 kiểm thử (hoặc nói rõ là chưa chạy). Câu trả lời mơ hồ — tiêu đề chung chung như "Update files", thân
@@ -257,9 +255,9 @@ bài một dòng, thiếu phần — sẽ được **hỏi lại một lần** v
 dựng bản nháp từ commit và ghi lý do, chứ không mở PR với mô tả rỗng. Ngôn ngữ bám theo ngôn ngữ UI
 (`vi` → tiếng Việt, còn lại → tiếng Anh), kể cả bản dựng từ commit.
 
-Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì hộp thoại vẫn mở với bản nháp dựng từ
-commit và tên tệp, kèm lý do trong dòng nguồn — không chặn thao tác. Nhánh chưa có commit mới so với
-nhánh nền sẽ bị từ chối với `pr/no-commits`, và nút **Tạo** bị khoá kèm gợi ý.
+Nếu không gọi được model (chưa có LLM, model lỗi, timeout) thì plugin vẫn dựng bản nháp từ commit và
+tên tệp (ghi lý do vào kết quả) — không chặn thao tác. Nhánh chưa có commit mới so với nhánh nền sẽ bị
+từ chối với `pr/no-commits`, và nút **Tạo pull request** bị khoá kèm lý do.
 
 ### Publish repository
 

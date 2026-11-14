@@ -94,7 +94,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-button:disabled{opacity:.55;cursor:default}
 .ph-button[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
 .ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 13px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap}
-.ph-primary:disabled{opacity:.55;cursor:default}
+.ph-primary:disabled{opacity:.55;cursor:default;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);border-color:var(--dsw-alias-border-l1)}
 .ph-primary:hover:not(:disabled){filter:brightness(1.06)}
 .ph-primary.ph-danger{background:var(--dsw-alias-state-error-primary)}
 .ph-icon-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}

@@ -17,7 +17,6 @@ import type { ActionStatus, PrAction, QuickAction } from './action-logic.ts'
 import { GitActions, CreatePullButton, DefaultBranchDialog, PublishDialog } from './actions.tsx'
 import type { InlineSuccess } from './actions.tsx'
 import { BranchSelector } from './branch-selector.tsx'
-import { CreatePullDialog } from './create-pull.tsx'
 import { ChangesView } from './changes.tsx'
 import type { CommitRequest } from './commit-composer.tsx'
 import { CommitsView, CommitPane } from './commits.tsx'
@@ -85,9 +84,8 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const [success, setSuccess] = useState<InlineSuccess | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
-  const [pending, setPending] = useState<{ action: GitStackedAction; options: ActionOptions; after?: 'create_pull' } | null>(null)
+  const [pending, setPending] = useState<{ action: GitStackedAction; options: ActionOptions } | null>(null)
   const [publishOpen, setPublishOpen] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
   const [publishBusy, setPublishBusy] = useState(false)
   const [publishError, setPublishError] = useState('')
   const mounted = useRef(true)
@@ -145,7 +143,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       setMenuOpen(false)
       setPending(null)
       setPublishOpen(false)
-      setCreateOpen(false)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -173,9 +170,8 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   /**
    * Poll one action to completion.
    * @param actionId the Host action id.
-   * @param after what to open once the action succeeded.
    */
-  const pollAction = async (actionId: string, after?: 'create_pull'): Promise<void> => {
+  const pollAction = async (actionId: string): Promise<void> => {
     for (;;) {
       let state: GitActionProgress
       try {
@@ -200,7 +196,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       }
       const result = state.result
       if (result === null) return
-      if (after === 'create_pull') setCreateOpen(true)
       const toastInfo = result.toast
       showSuccess({
         title: toastInfo.title,
@@ -217,11 +212,10 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     action: GitStackedAction,
     options: ActionOptions,
     confirmed = false,
-    after?: 'create_pull',
   ): Promise<void> => {
     if (running) return
     if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
-      setPending({ action, options, after })
+      setPending({ action, options })
       return
     }
     setMenuOpen(false)
@@ -252,7 +246,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         base: options.base,
         locale: currentLocale(t),
       })
-      await pollAction(started.actionId, after)
+      await pollAction(started.actionId)
     } catch (failure) {
       if (!mounted.current) return
       setRunning(false)
@@ -320,15 +314,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const prAction = resolvePrAction(status, running)
 
   /**
-   * Open the review dialog, or offer a feature branch when the checkout sits on
-   * the default branch, where a request needs a branch of its own.
+   * Run the change-request action directly: the Host pushes the branch, drafts
+   * the title and description, and opens the request without an intermediate
+   * review dialog. The default branch still asks for a feature branch first.
    */
   const openCreatePull = (): void => {
-    if (status?.isDefaultRef === true) {
-      setPending({ action: 'create_pr', options: {} })
-      return
-    }
-    setCreateOpen(true)
+    void startAction('create_pr', {})
   }
 
   const runQuick = (): void => {
@@ -341,16 +332,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
       return
     }
     if (quick.kind === 'run_action' && quick.action !== undefined) {
-      if (quick.action === 'create_pr') {
-        openCreatePull()
-        return
-      }
-      // The combined action stops after the push so the dialog can show the
-      // model's draft: the request opens only after the user accepts the text.
-      if (quick.action === 'commit_push_pr') {
-        void startAction('commit_push', {}, false, 'create_pull')
-        return
-      }
       void startAction(quick.action, {})
     }
   }
@@ -370,11 +351,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     if (action === 'commit') {
       setMenuOpen(false)
       focusComposer()
-      return
-    }
-    if (action === 'create_pr') {
-      setMenuOpen(false)
-      openCreatePull()
       return
     }
     void startAction(action, {})
@@ -541,12 +517,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
           onContinue: () => {
             const next = pending
             setPending(null)
-            void startAction(next.action, next.options, true, next.after)
+            void startAction(next.action, next.options, true)
           },
           onFeatureBranch: () => {
             const next = pending
             setPending(null)
-            void startAction(next.action, { ...next.options, featureBranch: true }, true, next.after)
+            void startAction(next.action, { ...next.options, featureBranch: true }, true)
           },
         }),
 
@@ -559,30 +535,6 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
           onCancel: () => setPublishOpen(false),
           onPublish: (provider: 'github' | 'gitlab', repository: string, visibility: 'private' | 'public') =>
             void publish(provider, repository, visibility),
-        })
-      : null,
-
-    createOpen
-      ? h(CreatePullDialog, {
-          api,
-          t,
-          sessionId,
-          cwd: cwd || undefined,
-          base: overview?.repo.defaultBranch ?? '',
-          onClose: () => setCreateOpen(false),
-          onCreated: (pull: { number: number | null; url: string; title: string }) => {
-            setCreateOpen(false)
-            reload()
-            toast(
-              t('gitPrCreated', { number: pull.number ?? '?' }),
-              pull.title,
-              'success',
-            )
-            if (pull.number !== null) {
-              setView('pulls')
-              setSelection({ type: 'pull', number: pull.number })
-            }
-          },
         })
       : null,
 

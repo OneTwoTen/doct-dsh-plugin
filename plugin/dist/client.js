@@ -1129,7 +1129,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-button:disabled{opacity:.55;cursor:default}
 .ph-button[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
 .ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 13px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap}
-.ph-primary:disabled{opacity:.55;cursor:default}
+.ph-primary:disabled{opacity:.55;cursor:default;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);border-color:var(--dsw-alias-border-l1)}
 .ph-primary:hover:not(:disabled){filter:brightness(1.06)}
 .ph-primary.ph-danger{background:var(--dsw-alias-state-error-primary)}
 .ph-icon-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
@@ -3233,185 +3233,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     );
   }
 
-  // src/client/git/create-pull.tsx
-  function CreatePullDialog(props) {
-    const { t, api } = props;
-    const [base, setBase] = useState(props.base ?? "");
-    const [title, setTitle] = useState("");
-    const [body2, setBody] = useState("");
-    const [drafting, setDrafting] = useState(true);
-    const [creating, setCreating] = useState(false);
-    const [error, setError] = useState("");
-    const [draftSource, setDraftSource] = useState(null);
-    const [ahead, setAhead] = useState(0);
-    const [branchHint, setBranchHint] = useState("");
-    const draft = async (nextBase) => {
-      setDrafting(true);
-      setError("");
-      setDraftSource(null);
-      try {
-        const value = await api.draftPull({
-          sessionId: props.sessionId,
-          cwd: props.cwd || void 0,
-          base: nextBase ?? (base.trim().length > 0 ? base.trim() : void 0),
-          locale: currentLocale(t)
-        });
-        setBase(value.base);
-        setTitle(value.title);
-        setBody(value.body);
-        setAhead(value.ahead);
-        setDraftSource({ source: value.source, model: value.model, error: value.error });
-      } catch (failure) {
-        setError(messageOf(failure));
-        if (codeOf(failure) === "pr/same-branch") {
-          setBranchHint(t("gitPrDefaultBranchHint", { branch: base || "main" }));
-        }
-      } finally {
-        setDrafting(false);
-      }
-    };
-    useEffect(() => {
-      void draft();
-    }, []);
-    const create = async () => {
-      if (creating || drafting || title.trim().length === 0) return;
-      setCreating(true);
-      setError("");
-      try {
-        const answer = await api.createPull({
-          sessionId: props.sessionId,
-          cwd: props.cwd || void 0,
-          base: base.trim().length > 0 ? base.trim() : void 0,
-          title: title.trim(),
-          body: body2,
-          push: true,
-          locale: currentLocale(t)
-        });
-        props.onCreated({
-          number: answer.pull.number,
-          url: answer.pull.url,
-          title: answer.pull.title
-        });
-      } catch (failure) {
-        setError(messageOf(failure));
-      } finally {
-        setCreating(false);
-      }
-    };
-    const sourceLine = () => {
-      if (drafting) return t("gitPrDrafting");
-      if (draftSource === null) return "";
-      if (draftSource.source === "model") {
-        return draftSource.model === null ? t("gitPrDraftModel") : t("gitPrDraftModel", { model: draftSource.model });
-      }
-      if (draftSource.source === "manual") return "";
-      return draftSource.error === null ? t("gitPrDraftFallback") : t("gitPrDraftFallbackReason", { reason: draftSource.error });
-    };
-    const canCreate = !drafting && !creating && ahead > 0 && title.trim().length > 0;
-    return h(
-      "div",
-      { className: "ph-overlay", role: "presentation" },
-      h(
-        "div",
-        {
-          className: "ph-dialog ph-create",
-          role: "dialog",
-          "aria-modal": "true",
-          "aria-label": t("gitPrAction")
-        },
-        h(
-          "div",
-          { className: "ph-create-head" },
-          h("span", { className: "ph-create-title" }, h(Icon, { name: "branchPlus", size: 14 }), t("gitPrAction")),
-          h("button", {
-            type: "button",
-            className: "ph-icon-button",
-            title: t("gitPrCancel"),
-            "aria-label": t("gitPrCancel"),
-            onClick: props.onClose
-          }, h(Icon, { name: "cross", size: 13 }))
-        ),
-        h("p", { className: "ph-hint" }, t("gitPrConfirmHint")),
-        h(
-          "div",
-          { className: "ph-create-fields" },
-          h(
-            "label",
-            { className: "ph-field" },
-            h("span", { className: "ph-field-label" }, t("gitPrBase")),
-            h("input", {
-              className: "ph-input",
-              value: base,
-              spellcheck: false,
-              disabled: creating || drafting,
-              onChange: (event) => setBase(event.target.value)
-            })
-          ),
-          h(
-            "label",
-            { className: "ph-field" },
-            h("span", { className: "ph-field-label" }, t("gitPrTitleLabel")),
-            h("input", {
-              className: "ph-input",
-              value: title,
-              spellcheck: false,
-              disabled: creating || drafting,
-              placeholder: t("gitPrTitlePlaceholder"),
-              onInput: (event) => setTitle(event.target.value),
-              onChange: (event) => setTitle(event.target.value)
-            })
-          ),
-          h(
-            "label",
-            { className: "ph-field" },
-            h("span", { className: "ph-field-label" }, t("gitPrBodyLabel")),
-            h("textarea", {
-              className: "ph-textarea ph-create-body",
-              value: body2,
-              spellcheck: false,
-              disabled: creating || drafting,
-              placeholder: t("gitPrBodyPlaceholder"),
-              onInput: (event) => setBody(event.target.value),
-              onChange: (event) => setBody(event.target.value)
-            })
-          ),
-          sourceLine().length > 0 ? h(
-            "p",
-            { className: "ph-dim ph-tiny ph-create-source" },
-            drafting ? h("span", { className: "ph-spinner" }) : null,
-            sourceLine()
-          ) : null,
-          ahead === 0 && !drafting ? h("p", { className: "ph-hint" }, t("gitPrNoCommitsHint")) : null
-        ),
-        branchHint.length > 0 ? h("p", { className: "ph-hint" }, branchHint) : null,
-        error.length > 0 ? h("p", { className: "ph-error-text" }, `${t("gitPrFailed")}: ${error}`) : null,
-        h(
-          "div",
-          { className: "ph-dialog-actions" },
-          h("button", {
-            type: "button",
-            className: "ph-button",
-            disabled: drafting || creating,
-            onClick: () => void draft()
-          }, h(Icon, { name: "sparkles", size: 11 }), drafting ? t("gitPrDrafting") : t("gitPrRegenerate")),
-          h("span", { className: "ph-spacer" }),
-          h("button", {
-            type: "button",
-            className: "ph-button",
-            disabled: creating,
-            onClick: props.onClose
-          }, t("gitPrCancel")),
-          h("button", {
-            type: "button",
-            className: "ph-primary",
-            disabled: !canCreate,
-            onClick: () => void create()
-          }, creating ? t("gitPrCreating") : t("gitPrCreate"))
-        )
-      )
-    );
-  }
-
   // src/client/git/diff-model.ts
   function isWhitespaceOnlyHunk(hunk) {
     const removed = hunk.lines.filter((line) => line.type === "del").map((line) => normalizeWhitespace(line.text));
@@ -5474,7 +5295,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const [menuOpen, setMenuOpen] = useState(false);
     const [pending, setPending] = useState(null);
     const [publishOpen, setPublishOpen] = useState(false);
-    const [createOpen, setCreateOpen] = useState(false);
     const [publishBusy, setPublishBusy] = useState(false);
     const [publishError, setPublishError] = useState("");
     const mounted = useRef(true);
@@ -5522,7 +5342,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         setMenuOpen(false);
         setPending(null);
         setPublishOpen(false);
-        setCreateOpen(false);
       };
       document.addEventListener("keydown", onKey);
       return () => document.removeEventListener("keydown", onKey);
@@ -5544,7 +5363,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         if (mounted.current) setSuccess(null);
       }, 1e4);
     };
-    const pollAction = async (actionId, after) => {
+    const pollAction = async (actionId) => {
       for (; ; ) {
         let state;
         try {
@@ -5569,7 +5388,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         }
         const result = state.result;
         if (result === null) return;
-        if (after === "create_pull") setCreateOpen(true);
         const toastInfo = result.toast;
         showSuccess({
           title: toastInfo.title,
@@ -5579,10 +5397,10 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         return;
       }
     };
-    const startAction = async (action, options, confirmed = false, after) => {
+    const startAction = async (action, options, confirmed = false) => {
       if (running) return;
       if (!confirmed && needsDefaultBranchConfirmation(action, status?.isDefaultRef === true)) {
-        setPending({ action, options, after });
+        setPending({ action, options });
         return;
       }
       setMenuOpen(false);
@@ -5613,7 +5431,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           base: options.base,
           locale: currentLocale(t)
         });
-        await pollAction(started.actionId, after);
+        await pollAction(started.actionId);
       } catch (failure) {
         if (!mounted.current) return;
         setRunning(false);
@@ -5675,11 +5493,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const menuItems = buildActionMenuItems(status, running);
     const prAction = resolvePrAction(status, running);
     const openCreatePull = () => {
-      if (status?.isDefaultRef === true) {
-        setPending({ action: "create_pr", options: {} });
-        return;
-      }
-      setCreateOpen(true);
+      void startAction("create_pr", {});
     };
     const runQuick = () => {
       if (quick.kind === "run_pull") {
@@ -5691,14 +5505,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         return;
       }
       if (quick.kind === "run_action" && quick.action !== void 0) {
-        if (quick.action === "create_pr") {
-          openCreatePull();
-          return;
-        }
-        if (quick.action === "commit_push_pr") {
-          void startAction("commit_push", {}, false, "create_pull");
-          return;
-        }
         void startAction(quick.action, {});
       }
     };
@@ -5716,11 +5522,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       if (action === "commit") {
         setMenuOpen(false);
         focusComposer();
-        return;
-      }
-      if (action === "create_pr") {
-        setMenuOpen(false);
-        openCreatePull();
         return;
       }
       void startAction(action, {});
@@ -5909,12 +5710,12 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         onContinue: () => {
           const next = pending;
           setPending(null);
-          void startAction(next.action, next.options, true, next.after);
+          void startAction(next.action, next.options, true);
         },
         onFeatureBranch: () => {
           const next = pending;
           setPending(null);
-          void startAction(next.action, { ...next.options, featureBranch: true }, true, next.after);
+          void startAction(next.action, { ...next.options, featureBranch: true }, true);
         }
       }),
       publishOpen ? h(PublishDialog, {
@@ -5924,27 +5725,6 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         providers: publishProviders(overview?.forge),
         onCancel: () => setPublishOpen(false),
         onPublish: (provider, repository, visibility) => void publish(provider, repository, visibility)
-      }) : null,
-      createOpen ? h(CreatePullDialog, {
-        api,
-        t,
-        sessionId,
-        cwd: cwd || void 0,
-        base: overview?.repo.defaultBranch ?? "",
-        onClose: () => setCreateOpen(false),
-        onCreated: (pull) => {
-          setCreateOpen(false);
-          reload();
-          toast(
-            t("gitPrCreated", { number: pull.number ?? "?" }),
-            pull.title,
-            "success"
-          );
-          if (pull.number !== null) {
-            setView("pulls");
-            setSelection({ type: "pull", number: pull.number });
-          }
-        }
       }) : null,
       toasts.length === 0 ? null : h("div", { className: "ph-toasts" }, toasts.map((item) => h(
         "div",
@@ -6134,7 +5914,6 @@ ${repo.root}` }, repo.name),
         GitPanel,
         GitHeaderButton,
         GitActions,
-        CreatePullDialog,
         DiffFileSection,
         CommitComposer,
         WorktreesView,

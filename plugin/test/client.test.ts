@@ -414,28 +414,6 @@ test('a changed file offers stage, unstage, and discard in the working scope', a
   assert.equal(branchButtons.some((button) => button.props?.title === 'gitStage'), false)
 })
 
-test('the create-pull dialog shows the drafting state and keeps create disabled', async () => {
-  const module = await loadClient()
-  const view = module.__internal as Record<string, unknown>
-  const CreatePullDialog = view.CreatePullDialog as (props: Record<string, unknown>) => unknown
-  const dialog = CreatePullDialog({
-    t: (key: string) => key,
-    api: { draftPull: async () => ({}), createPull: async () => ({ pull: {} }) },
-    sessionId: 's1',
-    cwd: '/repo',
-    base: 'main',
-    onClose: () => {},
-    onCreated: () => {},
-  })
-  assert.match(textOf(dialog), /gitPrAction/)
-  assert.match(textOf(dialog), /gitPrDrafting/)
-  const buttons = findAll(dialog, (element) => element.type === 'button')
-  const create = buttons.find((button) => button.props?.className === 'ph-primary')
-  assert.equal(create?.props?.disabled, true, 'create stays disabled until a draft exists')
-  const title = findAll(dialog, (element) => element.props?.className === 'ph-input')[1]
-  assert.equal(title?.props?.value, '')
-})
-
 test('the commit box shows the selection, the placeholder, and both commit actions', async () => {
   const module = await loadClient()
   const view = module.__internal as Record<string, unknown>
