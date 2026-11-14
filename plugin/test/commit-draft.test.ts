@@ -118,6 +118,11 @@ test('an unusable answer keeps the caller fallback subject', () => {
   })
 })
 
+test('a draft-shaped JSON answer with no subject falls back instead of committing the JSON', () => {
+  const draft = parseCommitDraft('{"subject":"","body":""}', { fallbackSubject: 'Update the panel' })
+  assert.deepEqual(draft, { subject: 'Update the panel', body: '', parsed: 'fallback' })
+})
+
 test('a subject line loses quotes, list markers, periods, and extra space', () => {
   assert.equal(sanitizeCommitMessage('"`Add the panel.`"').subject, 'Add the panel')
   assert.equal(sanitizeCommitMessage('- Add   the panel').subject, 'Add the panel')

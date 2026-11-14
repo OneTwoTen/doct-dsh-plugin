@@ -1609,6 +1609,37 @@ export async function readCommitMessageFacts(
 }
 
 /**
+ * The ref a change-request draft compares against.
+ *
+ * A request targets the base branch on the code host, so the draft must compare
+ * against the remote-tracking ref. Comparing with the local base branch makes
+ * every commit the remote gained since the last fetch look like this branch's
+ * work, which sends the model a huge unrelated diff to describe.
+ *
+ * @param runner command runner.
+ * @param options repository root, base branch name, the primary remote, and cancellation.
+ * @returns a ref usable as `git diff <ref>...HEAD`.
+ */
+export async function resolveDraftBase(
+  runner: GitRunner,
+  { root, base, remote, signal }: {
+    root: string
+    base: string
+    remote?: string | null
+    signal?: AbortSignal
+  },
+): Promise<string> {
+  const candidates: string[] = []
+  if (remote !== undefined && remote !== null && remote.length > 0) candidates.push(`${remote}/${base}`)
+  if (!base.includes('/')) candidates.push(`origin/${base}`)
+  for (const ref of candidates) {
+    const result = await runner.run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root, signal })
+    if (result.code === 0) return ref
+  }
+  return base
+}
+
+/**
  * Read the facts a change-request draft needs: the commits this branch adds,
  * its changed files, and a bounded diff excerpt.
  *
@@ -1620,6 +1651,12 @@ export async function readChangeRequestFacts(
   options: {
     root: string
     base: string
+    /**
+     * The ref the commit list and diff are compared with. Defaults to `base`;
+     * pass a remote-tracking ref so a stale local base branch does not leak
+     * already-merged commits into the draft.
+     */
+    compareRef?: string
     config: { pull: { commitLimit: number; contextBytes: number } }
     signal?: AbortSignal
   },
@@ -1632,7 +1669,7 @@ export async function readChangeRequestFacts(
   truncated: boolean
 }> {
   const { root, base, config, signal } = options
-  const range = `${base}...HEAD`
+  const range = `${options.compareRef ?? base}...HEAD`
   const limit = Number(config.pull?.commitLimit) || 40
   const maxBytes = Number(config.pull?.contextBytes) || 60000
   const [count, log, stats, patch] = await Promise.all([

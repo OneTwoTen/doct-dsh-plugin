@@ -1733,9 +1733,19 @@ async function readCommitMessageFacts(runner, options) {
     truncated: patch.truncated === true
   };
 }
+async function resolveDraftBase(runner, { root, base, remote, signal }) {
+  const candidates = [];
+  if (remote !== void 0 && remote !== null && remote.length > 0) candidates.push(`${remote}/${base}`);
+  if (!base.includes("/")) candidates.push(`origin/${base}`);
+  for (const ref of candidates) {
+    const result = await runner.run("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, signal });
+    if (result.code === 0) return ref;
+  }
+  return base;
+}
 async function readChangeRequestFacts(runner, options) {
   const { root, base, config, signal } = options;
-  const range = `${base}...HEAD`;
+  const range = `${options.compareRef ?? base}...HEAD`;
   const limit = Number(config.pull?.commitLimit) || 40;
   const maxBytes = Number(config.pull?.contextBytes) || 6e4;
   const [count, log, stats, patch] = await Promise.all([
@@ -3810,6 +3820,9 @@ function parseCommitDraft(text2, options = {}) {
       const subject2 = cleanSubjectLine(String(record2.subject ?? record2.title ?? ""));
       const body = normalizeCommitBody(String(record2.body ?? record2.description ?? ""));
       if (subject2.length > 0) return { subject: subject2, body, parsed: "json" };
+      if ("subject" in record2 || "title" in record2 || "body" in record2 || "description" in record2) {
+        return { subject: fallbackSubject, body, parsed: "fallback" };
+      }
     } catch {
     }
   }
@@ -4949,7 +4962,18 @@ function mountRoutes(ctx, connection, config, deps) {
     if (base === branch) {
       throw new CommandError("pr/same-branch", `Branch ${base} cannot be its own base branch.`);
     }
-    const facts = await readChangeRequestFacts(runner, { root, base, config, signal });
+    await runner.run("git", ["fetch", "--quiet", remote.name, base], {
+      cwd: root,
+      signal,
+      timeoutMs: config.commandTimeoutMs
+    }).catch(() => void 0);
+    const facts = await readChangeRequestFacts(runner, {
+      root,
+      base,
+      compareRef: await resolveDraftBase(runner, { root, base, remote: remote.name, signal }),
+      config,
+      signal
+    });
     if (facts.ahead === 0) {
       throw new CommandError("pr/no-commits", `Branch ${branch} has no commits over ${base}.`, { base });
     }
@@ -5416,7 +5440,13 @@ function mountRoutes(ctx, connection, config, deps) {
       if (base === context.branch) {
         throw new CommandError("pr/same-branch", `Branch ${base} cannot be its own base branch.`);
       }
-      const facts = await readChangeRequestFacts(runner, { root, base, config, signal });
+      const facts = await readChangeRequestFacts(runner, {
+        root,
+        base,
+        compareRef: await resolveDraftBase(runner, { root, base, remote: context.remote.name, signal }),
+        config,
+        signal
+      });
       if (facts.ahead === 0) {
         throw new CommandError("pr/no-commits", `Branch ${context.branch} has no commits over ${base}.`, { base });
       }

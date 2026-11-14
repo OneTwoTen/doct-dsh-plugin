@@ -503,6 +503,48 @@ test('drafting a pull request returns a commit-backed draft without pushing', as
   }
 })
 
+test('a draft compares with the remote base, not a stale local branch', async () => {
+  const root = await makeRepository()
+  const remoteRoot = await mkdtemp(join(tmpdir(), 'personal-hub-remote-'))
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('git', ['init', '--bare', '-q', '-b', 'main'], { cwd: remoteRoot, encoding: 'utf8' })
+  git('remote', 'add', 'origin', remoteRoot)
+  git('add', '-A')
+  git('commit', '-qm', 'panel work')
+  git('push', '-q', '-u', 'origin', 'main')
+  const firstMain = String(git('rev-parse', 'HEAD')).trim()
+
+  // The code host gains a commit the local base branch has not seen yet.
+  await writeFile(join(root, 'c.txt'), 'remote only\n', 'utf8')
+  git('add', '-A')
+  git('commit', '-qm', 'a change merged on the code host')
+  git('push', '-q', 'origin', 'main')
+
+  // A fresh checkout starts from the remote base while local main stays
+  // behind, which is what a new worktree does.
+  git('reset', '-q', '--hard', firstMain)
+  git('checkout', '-q', '-b', 'feature/draft', 'origin/main')
+  await writeFile(join(root, 'b.txt'), 'draft route\n', 'utf8')
+  git('add', '-A')
+  git('commit', '-qm', 'add the draft route')
+
+  const feature = mountFeature()
+  try {
+    const answer = await feature.call('draftPull', { cwd: root, locale: 'en' })
+    assert.equal(answer.ok, true, JSON.stringify(answer))
+    const value = answer.value as unknown as Record<string, unknown>
+    assert.equal(value.base, 'main', 'the request still targets the base branch name')
+    assert.equal(value.ahead, 1, 'only this branch commits count, not the remote-only one')
+    assert.equal(value.title, 'add the draft route')
+    assert.doesNotMatch(String(value.body), /c\.txt/)
+    assert.doesNotMatch(String(value.body), /merged on the code host/)
+  } finally {
+    feature.dispose()
+    await rm(root, { recursive: true, force: true })
+    await rm(remoteRoot, { recursive: true, force: true })
+  }
+})
+
 test('a session id resolves the working folder through the agents service', async () => {
   const root = await makeRepository()
   const agents = { get: (id: string) => (id === 'session-1' ? { session: { header: { cwd: root } } } : undefined) }

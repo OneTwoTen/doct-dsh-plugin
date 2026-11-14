@@ -144,6 +144,11 @@ export function parseCommitDraft(text: string, options: { fallbackSubject?: stri
       const subject = cleanSubjectLine(String(record.subject ?? record.title ?? ''))
       const body = normalizeCommitBody(String(record.body ?? record.description ?? ''))
       if (subject.length > 0) return { subject, body, parsed: 'json' }
+      // A draft-shaped object with no usable subject is an unusable answer:
+      // falling through to the raw text would commit the JSON itself.
+      if ('subject' in record || 'title' in record || 'body' in record || 'description' in record) {
+        return { subject: fallbackSubject, body, parsed: 'fallback' }
+      }
     } catch {
       // A malformed object still leaves the readable text below.
     }

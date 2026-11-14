@@ -46,6 +46,7 @@ import {
   readFilePatch,
   readLog,
   readOverview,
+  resolveDraftBase,
   stagePaths,
   switchBranch,
   unstagePaths,
@@ -816,7 +817,21 @@ function mountRoutes(
       throw new CommandError('pr/same-branch', `Branch ${base} cannot be its own base branch.`)
     }
 
-    const facts = await readChangeRequestFacts(runner, { root, base, config, signal })
+    // The draft compares against the code host's base, so refresh that ref
+    // first; a failed fetch keeps whatever this machine already has.
+    await runner.run('git', ['fetch', '--quiet', remote.name, base], {
+      cwd: root,
+      signal,
+      timeoutMs: config.commandTimeoutMs,
+    }).catch(() => undefined)
+
+    const facts = await readChangeRequestFacts(runner, {
+      root,
+      base,
+      compareRef: await resolveDraftBase(runner, { root, base, remote: remote.name, signal }),
+      config,
+      signal,
+    })
     if (facts.ahead === 0) {
       throw new CommandError('pr/no-commits', `Branch ${branch} has no commits over ${base}.`, { base })
     }
@@ -1326,7 +1341,13 @@ function mountRoutes(
       if (base === context.branch) {
         throw new CommandError('pr/same-branch', `Branch ${base} cannot be its own base branch.`)
       }
-      const facts = await readChangeRequestFacts(runner, { root, base, config, signal })
+      const facts = await readChangeRequestFacts(runner, {
+        root,
+        base,
+        compareRef: await resolveDraftBase(runner, { root, base, remote: context.remote.name, signal }),
+        config,
+        signal,
+      })
       if (facts.ahead === 0) {
         throw new CommandError('pr/no-commits', `Branch ${context.branch} has no commits over ${base}.`, { base })
       }
