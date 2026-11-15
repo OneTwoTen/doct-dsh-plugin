@@ -1044,7 +1044,13 @@
   var GIT_CSS = `
 .ph-git{display:flex;flex-direction:column;min-height:0;height:100%;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px}
 .ph-git *{box-sizing:border-box}
-.ph-git button{font:inherit;color:inherit}
+.ph-git button{font:inherit}
+/* The panel's text colour is only a default for buttons: written as
+   .ph-git button it out-ranked every single-class rule below, so a
+   .ph-primary kept its brand-black fill while its label was repainted in the
+   theme's dark colour \u2014 an apparently empty black button. Zero specificity lets
+   .ph-primary (white on the fill), .ph-chip, .ph-filter and the rest win. */
+:where(.ph-git) :where(button){color:inherit}
 .ph-git .ph-spacer{flex:1 1 auto;min-width:0}
 .ph-git .ph-dim{color:var(--dsw-alias-label-tertiary)}
 .ph-git .ph-tiny{font-size:11px}
@@ -1127,11 +1133,11 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-button{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:12px;white-space:nowrap}
 .ph-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ph-button:disabled{opacity:.55;cursor:default}
-.ph-button[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
-.ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 13px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:#fff;cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap}
+.ph-button[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-inverted)}
+.ph-primary{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:6px 13px;border:1px solid transparent;border-radius:8px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-inverted);cursor:pointer;font-size:12.5px;font-weight:600;white-space:nowrap}
+.ph-primary.ph-danger{background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-label-on-color)}
 .ph-primary:disabled{opacity:.55;cursor:default;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);border-color:var(--dsw-alias-border-l1)}
 .ph-primary:hover:not(:disabled){filter:brightness(1.06)}
-.ph-primary.ph-danger{background:var(--dsw-alias-state-error-primary)}
 .ph-icon-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
 .ph-icon-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .ph-icon-button:disabled{opacity:.5;cursor:default}
@@ -1279,7 +1285,7 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-check-duration{flex:none;color:var(--dsw-alias-label-tertiary);font-size:10.5px}
 .ph-filters{display:flex;align-items:center;gap:4px;padding:6px 10px;flex-wrap:wrap;border-bottom:1px solid var(--dsw-alias-border-l3)}
 .ph-filter{padding:2px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:11px}
-.ph-filter[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:#fff}
+.ph-filter[aria-pressed=true]{border-color:transparent;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-inverted)}
 
 /* Empty, loading, failure */
 .ph-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:28px 18px;text-align:center;color:var(--dsw-alias-label-tertiary)}
