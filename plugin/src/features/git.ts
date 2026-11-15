@@ -115,9 +115,11 @@ import type {
   StackedActionRequest,
   SwitchBranchRequest,
   WorktreeRecord,
+  WorktreeRequest,
+  WorktreeCreation,
   WorktreeState,
 } from '../shared/protocol.ts'
-import type { DshContext, Logger, ConfigEditorEntry, ConfigEditorService, LlmService, SessionLike } from '../host/dsh.ts'
+import type { DshContext, Logger, ConfigEditorEntry, ConfigEditorService, LlmService, SessionLike, AgentLike } from '../host/dsh.ts'
 import type { GitConfig, HubConfig } from '../lib/config.ts'
 
 /** The Connection shared-channel prefix the browser posts to. */
@@ -136,6 +138,8 @@ const COUNT_PAGE = 50
 /** The durable state this feature keeps between restarts. */
 type GitState = MergeStoreState & {
   worktrees?: Record<string, WorktreeRecord>
+  /** What the next message of a Session should do about its own checkout. */
+  worktreeRequests?: Record<string, WorktreeRequest>
   probe?: { at: number; sessionId: string; directory: string; root: string; supported: boolean }
   cleanup?: CleanupRunResult | null
   runtime?: { mountedAt: number; routes: number; backend: string }
@@ -144,6 +148,18 @@ type GitState = MergeStoreState & {
 /** One action the Host is running, mutable while it runs. */
 interface MutableProgress extends GitActionProgress {
   controller: AbortController
+}
+
+/**
+ * A live Agent, as the worktree hold needs it.
+ *
+ * `runMaintenance` claims the Agent's idle phase before the delivery wakes it,
+ * which is what lets the checkout exist and the Session's folder change before
+ * the message's first step is assembled.
+ */
+type MaintenanceAgent = AgentLike & {
+  session?: SessionLike
+  runMaintenance?(job: (signal: AbortSignal) => Promise<unknown>): Promise<unknown>
 }
 
 /** The mapped handler type: every route answers its protocol type. */
@@ -250,6 +266,31 @@ function mountRoutes(
     await store.load()
     return store.state
   }
+
+  /**
+   * What the next message of each Session should do about its own checkout.
+   *
+   * The inbox listener runs before the delivery wakes the Agent, so it must
+   * claim the Agent synchronously and cannot wait for the disk. These mirrors
+   * of the durable records are therefore what the listener reads.
+   */
+  const requests = new Map<string, WorktreeRequest>()
+  /** The checkout creation one Session's message waits for, while it runs. */
+  const creating = new Map<string, WorktreeCreation>()
+  /** Sessions this plugin already gave a checkout, mirrored from the store. */
+  const checkouts = new Set<string>()
+  /** Whether the store has been read, so the mirrors above can be trusted. */
+  let stateReady = false
+
+  void store.load().then((value) => {
+    for (const [sessionId, request] of Object.entries(value.worktreeRequests ?? {})) {
+      if (request !== null && typeof request === 'object') requests.set(sessionId, request)
+    }
+    for (const sessionId of Object.keys(value.worktrees ?? {})) checkouts.add(sessionId)
+    stateReady = true
+  }).catch(() => {
+    stateReady = true
+  })
 
   /** The live Agent of one Session, when that Session is open. */
   function agentFor(sessionId: string): { session?: SessionLike } | undefined {
@@ -439,6 +480,302 @@ function mountRoutes(
       }).catch(() => undefined)
     } finally {
       naming.delete(sessionId)
+    }
+  }
+
+  /**
+   * Whether one Session already ran a turn.
+   *
+   * An automatic checkout belongs to a Session's first message: a chat that is
+   * already under way must not be moved into a fresh checkout behind the
+   * user's back. A Session that cannot answer the question counts as new,
+   * which is what the New Session screen shows anyway.
+   *
+   * @param session the Session the message belongs to.
+   */
+  function hasStartedTurn(session: SessionLike | undefined): boolean {
+    const reader = session?.snapshotEvents
+    if (typeof reader !== 'function') return false
+    try {
+      return reader.call(session).some((event) => event?.type === 'turn/start')
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Whether one Session is a subagent child rather than a chat the user opens.
+   *
+   * A child runs inside the checkout its parent already works in, so giving it
+   * a checkout of its own would move it out from under the delegation.
+   *
+   * @param session the Session the message belongs to.
+   */
+  function isSubagentSession(session: SessionLike | undefined): boolean {
+    const header = session?.header
+    if (header?.origin === 'subagent') return true
+    return typeof header?.delegationDepth === 'number' && header.delegationDepth > 0
+  }
+
+  /**
+   * What the next message of one Session should do about its own checkout.
+   *
+   * Synchronous by contract: the caller must claim the Agent before the
+   * delivery wakes it, so nothing here may wait for the disk or Git.
+   *
+   * @param sessionId owning Session.
+   * @param session the Session, read to tell a new chat from one under way.
+   * @returns `explicit` for a request the user made, `auto` for the configured
+   *   default, or null when this message needs no checkout.
+   */
+  function worktreeIntent(sessionId: string, session: SessionLike | undefined): 'explicit' | 'auto' | null {
+    if (config.worktree.enabled !== true) return null
+    if (isSubagentSession(session)) return null
+    if (creating.has(sessionId)) return null
+    if (checkouts.has(sessionId)) return null
+    if (stateReady && store.state.worktrees?.[sessionId] !== undefined) return null
+    const request = requests.get(sessionId)
+    // A recorded failure holds creation until the panel retries: a checkout
+    // that cannot be made must not delay every message after it.
+    if (request !== undefined && request.error !== null) return null
+    if (request?.enabled === true) return 'explicit'
+    if (request?.enabled === false) return null
+    if (config.worktree.auto !== true) return null
+    return hasStartedTurn(session) ? null : 'auto'
+  }
+
+  /**
+   * Keep one Session's checkout request in memory and on disk.
+   * @param sessionId owning Session.
+   * @param request the request to keep, or null to forget it.
+   */
+  async function rememberRequest(sessionId: string, request: WorktreeRequest | null): Promise<void> {
+    if (request === null) {
+      requests.delete(sessionId)
+      await store.update((current) => {
+        if (current.worktreeRequests !== undefined) delete current.worktreeRequests[sessionId]
+      }).catch(() => undefined)
+      return
+    }
+    requests.set(sessionId, request)
+    await store.update((current) => {
+      current.worktreeRequests ??= {}
+      current.worktreeRequests[sessionId] = request
+    }).catch(() => undefined)
+  }
+
+  /**
+   * Record why a checkout could not be made, so the panel can report it and the
+   * next message is not delayed by the same attempt.
+   * @param sessionId owning Session.
+   * @param code the failure code.
+   * @param reason the sentence to show.
+   */
+  async function failRequest(sessionId: string, code: string, reason: string): Promise<void> {
+    const previous = requests.get(sessionId)
+    const now = Date.now()
+    await rememberRequest(sessionId, {
+      enabled: previous?.enabled ?? true,
+      base: previous?.base ?? '',
+      source: previous?.source ?? config.worktree.source,
+      explicit: previous?.explicit === true,
+      error: `${code}: ${reason}`,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+    })
+  }
+
+  /**
+   * Whether one inserted message is a prompt the user sent, rather than a
+   * notice another feature injected into the inbox.
+   *
+   * Only a prompt may bounce a Session into a new checkout: a notice that
+   * arrives first is not a reason to move the chat.
+   *
+   * @param message the message that entered the inbox.
+   */
+  function isUserPrompt(message: unknown): boolean {
+    const source = (message as { source?: { kind?: unknown } } | null | undefined)?.source
+    // A producer that records no source is taken at face value.
+    if (source === undefined || source === null) return true
+    return source.kind === 'user'
+  }
+
+  /**
+   * Hold one message's turn while its checkout is created, when this Session
+   * wants one.
+   *
+   * The hold is maintenance of the Agent that starts while the message enters
+   * the inbox, before the delivery wakes the Agent: the wake is latched and the
+   * turn starts once the hold ends, so its first step already runs in the new
+   * folder. A Session that already has a checkout, one with a recorded failure,
+   * and a build without `runMaintenance` all simply get no hold.
+   *
+   * @param agent the live Agent.
+   * @param sessionId owning Session.
+   * @param message the user message that entered the inbox.
+   * @returns whether the message's turn is held for a checkout.
+   */
+  function holdForWorktree(agent: MaintenanceAgent, sessionId: string, message: unknown): boolean {
+    const intent = worktreeIntent(sessionId, agent.session)
+    if (intent === null) return false
+    // The configured default waits for the user's own prompt; a request the
+    // user made explicitly is honored for whichever message arrives next.
+    if (intent === 'auto' && !isUserPrompt(message)) return false
+    if (typeof agent.runMaintenance !== 'function') return false
+    let task: Promise<unknown>
+    try {
+      task = agent.runMaintenance(async (signal) => {
+        // Leave the inbox mutation that announced the message before the hold
+        // touches the Session.
+        await Promise.resolve()
+        await createCheckoutForMessage(agent, sessionId, message, signal)
+      })
+    } catch (error) {
+      // A running turn or another maintenance task owns the Agent, so this
+      // message takes its usual path.
+      logger.info('git: no checkout is prepared for %s now: %s', sessionId, messageOf(error))
+      return false
+    }
+    void task.catch((error: unknown) => {
+      logger.warn('git: preparing the checkout for %s failed: %s', sessionId, messageOf(error))
+    })
+    return true
+  }
+
+  /**
+   * Create the checkout one message waits for and move its Session into it.
+   *
+   * The checkout starts from the configured base after fetching it, so "the
+   * latest main" means what the code host has rather than what this computer
+   * last fetched. A failure is recorded instead of thrown: the message then
+   * goes on in the project directory, and the panel offers a retry.
+   *
+   * @param agent the live Agent whose message waits.
+   * @param sessionId owning Session.
+   * @param message the user message that triggered the creation.
+   * @param signal cancellation, which the Agent's own cancel also triggers.
+   */
+  async function createCheckoutForMessage(
+    agent: MaintenanceAgent,
+    sessionId: string,
+    message: unknown,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const request = requests.get(sessionId)
+    // An empty request base means "the configured base, else the default".
+    const requestedBase = (request?.base ?? '').trim()
+    const configuredBase = requestedBase.length > 0 ? requestedBase : config.worktree.base.trim()
+    const configuredSource = request?.source ?? config.worktree.source
+
+    const workingDirectory = ctx.get<{
+      get(session: SessionLike): string | undefined
+      set(agent: AgentLike, directory: string, signal?: AbortSignal): Promise<unknown>
+    }>('workingDirectory')
+    let directory: string | undefined
+    try {
+      directory = workingDirectory?.get(agent.session as SessionLike) ?? agent.session?.header?.cwd
+    } catch {
+      directory = agent.session?.header?.cwd
+    }
+    if (directory === undefined || directory.length === 0) {
+      await rememberRequest(sessionId, null)
+      return
+    }
+
+    const root = await locateRepository(runner, directory, signal)
+    if (root === null) {
+      // Not a repository: this request did not belong to this plugin anyway.
+      await rememberRequest(sessionId, null)
+      return
+    }
+    const mainRoot = await mainWorktreeRoot(root, signal)
+    if (isInside(poolDirectory(mainRoot, config.worktree), directory)) {
+      // The Session already works in a checkout of this repository.
+      await rememberRequest(sessionId, null)
+      return
+    }
+    const kind = await readCheckoutKind(runner, { path: mainRoot, signal })
+    if (kind.linked) {
+      await failRequest(sessionId, 'worktree/linked-project', 'The project is itself a linked worktree')
+      return
+    }
+
+    const remote = await preferredRemote(mainRoot, signal)
+    const base = configuredBase.length > 0
+      ? configuredBase
+      : await resolveDefaultBase(runner, { root: mainRoot, remote, signal })
+    if (base === null) {
+      await failRequest(sessionId, 'worktree/no-base', 'Cannot determine the base branch for the worktree')
+      return
+    }
+    // Without a remote there is nothing to fetch, and the base is local.
+    const source = configuredSource === 'remote' && remote.length > 0 ? 'remote' : 'local'
+    const name = generatedWorktreeName(sessionId, config.worktree.namePrefix)
+    const startedAt = Date.now()
+    const remoteLabel = source === 'remote' ? remote : null
+    creating.set(sessionId, { phase: 'prepare', branch: name, base, remote: remoteLabel, source, startedAt })
+    let created: Awaited<ReturnType<typeof createWorktree>> | undefined
+    try {
+      const checkout = await createWorktree(runner, {
+        repoRoot: mainRoot,
+        name,
+        base,
+        source,
+        remote: source === 'remote' ? remote : '',
+        config: config.worktree,
+        timeoutMs: config.worktreeTimeoutMs,
+        signal,
+      })
+      created = checkout
+      creating.set(sessionId, { phase: 'enter', branch: name, base, remote: remoteLabel, source, startedAt })
+      if (typeof workingDirectory?.set !== 'function') {
+        throw new CommandError('worktree/no-working-directory', 'This build cannot change a Session folder')
+      }
+      await workingDirectory.set(agent, checkout.path, signal)
+      if (signal.aborted) throw new CommandError('worktree/aborted', 'The checkout was abandoned')
+      await store.update((current) => {
+        current.worktrees ??= {}
+        current.worktrees[sessionId] = {
+          ...checkout,
+          base,
+          source,
+          remote: source === 'remote' ? remote : null,
+          sessionId,
+          createdAt: Date.now(),
+        }
+        if (current.worktreeRequests !== undefined) delete current.worktreeRequests[sessionId]
+      })
+      checkouts.add(sessionId)
+      requests.delete(sessionId)
+      logger.info('git: %s now works in %s, created from %s', sessionId, created.branch, `${source}:${base}`)
+    } catch (error) {
+      // A checkout that never received the Session is not left behind.
+      if (created !== undefined) {
+        await removeWorktree(runner, {
+          repoRoot: mainRoot,
+          path: created.path,
+          branch: created.branch,
+          deleteBranch: true,
+          timeoutMs: config.worktreeTimeoutMs,
+        }).catch(() => undefined)
+      }
+      if (signal.aborted) return
+      logger.warn('git: could not prepare a checkout for %s: %s', sessionId, messageOf(error))
+      await failRequest(
+        sessionId,
+        error instanceof CommandError ? error.code : 'worktree/failed',
+        messageOf(error),
+      )
+      return
+    } finally {
+      creating.delete(sessionId)
+    }
+
+    // The new branch may now be named after the task, exactly as a checkout
+    // created from the option is.
+    if (config.worktree.naming === 'semantic') {
+      void nameWorktreeFromMessage(sessionId, message).catch(() => undefined)
     }
   }
 
@@ -1521,6 +1858,8 @@ function mountRoutes(
      */
     async worktreeState(payload, signal): Promise<WorktreeState> {
       const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      const session = agentFor(sessionId)?.session
+        ?? ctx.get<{ get(sessionId: string): SessionLike | undefined }>('sessions')?.get(sessionId)
       const base: WorktreeState = {
         enabled: config.worktree.enabled === true,
         supported: false,
@@ -1529,6 +1868,10 @@ function mountRoutes(
         current: null,
         bases: null,
         project: null,
+        auto: config.worktree.auto === true,
+        request: sessionId.length > 0 ? requests.get(sessionId) ?? null : null,
+        creating: sessionId.length > 0 ? creating.get(sessionId) ?? null : null,
+        started: hasStartedTurn(session),
       }
       let directory: string
       try {
@@ -1539,15 +1882,30 @@ function mountRoutes(
       const root = await locateRepository(runner, directory, signal)
       if (root === null) return { ...base, reason: 'not-a-repository' }
       const mainRoot = await mainWorktreeRoot(root, signal)
+      const value = await state()
+      const current = sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null
+
+      // The status card polls this answer while a first message waits, so the
+      // branch listing and the checkout kind are only read when they are asked
+      // for: they cost several Git calls this caller has no use for.
+      if (payload.lite === true) {
+        return {
+          ...base,
+          supported: config.worktree.enabled === true,
+          reason: config.worktree.enabled === true ? null : 'disabled',
+          repositoryRoot: mainRoot,
+          project: { directory, linked: false },
+          current,
+        }
+      }
 
       const kind = await readCheckoutKind(runner, { path: mainRoot, signal })
       const remote = await preferredRemote(mainRoot, signal)
       const bases = await readBases(runner, { root: mainRoot, remote, signal })
       if (config.worktree.base.length > 0) bases.defaultBase = config.worktree.base
-      const value = await state()
       if (payload.probe === true) {
-        await store.update((current) => {
-          current.probe = { at: Date.now(), sessionId, directory, root: mainRoot, supported: true }
+        await store.update((stored) => {
+          stored.probe = { at: Date.now(), sessionId, directory, root: mainRoot, supported: true }
         })
       }
       return {
@@ -1561,8 +1919,41 @@ function mountRoutes(
         sourceDefault: resolveSourceDefault(config.worktree.source, bases),
         project: { directory, linked: kind.linked === true },
         bases,
-        current: sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null,
+        current,
       }
+    },
+
+    /**
+     * Record what the next message of a Session should do about its own
+     * checkout. Nothing is created here: the checkout is made when that message
+     * arrives, so a chat that is never sent leaves nothing behind, and the
+     * first step already runs in the new folder.
+     */
+    async worktreeRequest(payload) {
+      const sessionId = requiredString(payload.sessionId, 'sessionId')
+      const previous = requests.get(sessionId)
+      const now = Date.now()
+      const enabled = payload.enabled === true
+      const base = typeof payload.base === 'string' ? payload.base.trim() : previous?.base ?? ''
+      const source = payload.source === 'local' || payload.source === 'remote'
+        ? payload.source
+        : previous?.source ?? config.worktree.source
+      if (creating.has(sessionId)) {
+        throw new CommandError('worktree/busy', 'A checkout is already being created for this chat')
+      }
+      // The record is kept even for `enabled: false`: without one the next
+      // message would simply take the configured default again.
+      const request: WorktreeRequest = {
+        enabled,
+        base,
+        source,
+        explicit: true,
+        error: payload.retry === true ? null : previous?.error ?? null,
+        createdAt: previous?.createdAt ?? now,
+        updatedAt: now,
+      }
+      await rememberRequest(sessionId, request)
+      return { request, auto: config.worktree.auto === true }
     },
 
     /**
@@ -2098,16 +2489,21 @@ function mountRoutes(
   watcher.start()
   cleanup.start()
 
-  // Branch naming rides the first message: the checkout exists before the
-  // prompt does, and this is the earliest point the plugin can read it.
-  let stopNaming: (() => void) | undefined
-  if (typeof ctx.on === 'function' && config.worktree.naming === 'semantic') {
+  // The first message both prepares the Session's checkout and lets its branch
+  // be named after the task. The hold has to be claimed synchronously, so this
+  // listener starts no work of its own before `holdForWorktree` decides.
+  let stopWorktrees: (() => void) | undefined
+  if (typeof ctx.on === 'function' && (config.worktree.enabled === true || config.worktree.naming === 'semantic')) {
     try {
-      stopNaming = ctx.on('agent/inbox/inserted', (payload: never) => {
-        const inserted = payload as { agent?: { session?: { id?: string } }; message?: unknown }
-        const sessionId = inserted?.agent?.session?.id
-        if (typeof sessionId !== 'string' || sessionId.length === 0) return
-        void nameWorktreeFromMessage(sessionId, inserted.message).catch(() => undefined)
+      stopWorktrees = ctx.on('agent/inbox/inserted', (payload: never) => {
+        const inserted = payload as { agent?: MaintenanceAgent; message?: unknown }
+        const agent = inserted?.agent
+        const sessionId = agent?.session?.id
+        if (agent === undefined || typeof sessionId !== 'string' || sessionId.length === 0) return
+        if (holdForWorktree(agent, sessionId, inserted.message)) return
+        if (config.worktree.naming === 'semantic') {
+          void nameWorktreeFromMessage(sessionId, inserted.message).catch(() => undefined)
+        }
       })
     } catch (error) {
       logger.warn('git: cannot watch for the first message: %s', messageOf(error))
@@ -2130,9 +2526,9 @@ function mountRoutes(
       }
     }
     actions.clear()
-    if (typeof stopNaming === 'function') {
+    if (typeof stopWorktrees === 'function') {
       try {
-        stopNaming()
+        stopWorktrees()
       } catch {
         // The listener already went away with its context.
       }

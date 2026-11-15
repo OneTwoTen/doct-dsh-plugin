@@ -17,7 +17,7 @@ import { Icon } from './icons.tsx'
 import { TelegramCard, createController } from './telegram.tsx'
 import { WebRemoteCard, WebRemoteForm, countdownText, draftOf, emptyCardState, relayLooksValid, stateLabel, stateTone } from './web-remote.tsx'
 import { MergeSettingsCard, MergeSettingsForm } from './git/settings.tsx'
-import { WorktreeHero, WorktreeOption } from './worktree.tsx'
+import { WorktreeHero, WorktreeOption, WorktreeDock, WorktreeDockCard } from './worktree.tsx'
 import { GitPanel, GitHeaderButton } from './git/panel.tsx'
 import { GitActions } from './git/actions.tsx'
 import { DiffFileSection } from './git/diff-view.tsx'
@@ -56,6 +56,8 @@ export function createClient(): ClientModule {
       MergeSettingsCard,
       WorktreeHero,
       WorktreeOption,
+      WorktreeDock,
+      WorktreeDockCard,
       GitPanel,
       GitHeaderButton,
       GitActions,
@@ -126,11 +128,26 @@ export function createClient(): ClientModule {
           name: 'conversation.hero.options',
           id: 'personal-hub-worktree',
           order: 20,
-          label: () => t('wtOption'),
+          label: () => t('wtAuto'),
           locale: NS,
           inject: () => ({ api, t }),
         }, WorktreeHero)),
         'personal-hub: worktree option',
+      )
+
+      // The checkout is created while the first message waits, which is after
+      // the New Session row has gone: this card reports it above the composer
+      // and stays out of the way when no checkout is in flight.
+      ctx.effect(
+        () => ctx.slots.inject('conversation.input.dock', () => registerSlot(ctx, {
+          name: 'conversation.input.dock',
+          id: 'personal-hub-worktree-status',
+          order: 20,
+          label: () => t('wtDockLabel'),
+          locale: NS,
+          inject: () => ({ api, t }),
+        }, WorktreeDock)),
+        'personal-hub: worktree status',
       )
 
       // The Git panel needs the right Sidebar. It is an optional service: the

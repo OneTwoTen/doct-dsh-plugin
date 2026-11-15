@@ -99,6 +99,12 @@ var GIT_DEFAULTS = Object.freeze({
   /** New Session worktrees. */
   worktree: Object.freeze({
     enabled: true,
+    /**
+     * A checkout is created when the first message arrives, so a chat never
+     * has to be told where to work first. The New Session row still lets one
+     * chat opt out, and nothing happens outside a repository.
+     */
+    auto: true,
     /** Directory inside the repository that holds created checkouts. */
     directory: ".agents/worktrees",
     /** Branch and directory name prefix. */
@@ -282,6 +288,7 @@ function normalizeConfig(raw) {
       },
       worktree: {
         enabled: asBoolean(worktree.enabled, GIT_DEFAULTS.worktree.enabled),
+        auto: asBoolean(worktree.auto, GIT_DEFAULTS.worktree.auto),
         directory: asString(worktree.directory, GIT_DEFAULTS.worktree.directory).trim() || GIT_DEFAULTS.worktree.directory,
         namePrefix: asString(worktree.namePrefix, GIT_DEFAULTS.worktree.namePrefix).trim(),
         naming: asChoice(worktree.naming, ["id", "semantic"], GIT_DEFAULTS.worktree.naming),
@@ -4535,6 +4542,19 @@ function mountRoutes(ctx, connection, config, deps) {
     await store.load();
     return store.state;
   }
+  const requests = /* @__PURE__ */ new Map();
+  const creating = /* @__PURE__ */ new Map();
+  const checkouts = /* @__PURE__ */ new Set();
+  let stateReady = false;
+  void store.load().then((value) => {
+    for (const [sessionId, request] of Object.entries(value.worktreeRequests ?? {})) {
+      if (request !== null && typeof request === "object") requests.set(sessionId, request);
+    }
+    for (const sessionId of Object.keys(value.worktrees ?? {})) checkouts.add(sessionId);
+    stateReady = true;
+  }).catch(() => {
+    stateReady = true;
+  });
   function agentFor(sessionId) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
     const agents = ctx.get("agents");
@@ -4675,6 +4695,186 @@ function mountRoutes(ctx, connection, config, deps) {
       }).catch(() => void 0);
     } finally {
       naming.delete(sessionId);
+    }
+  }
+  function hasStartedTurn(session) {
+    const reader = session?.snapshotEvents;
+    if (typeof reader !== "function") return false;
+    try {
+      return reader.call(session).some((event) => event?.type === "turn/start");
+    } catch {
+      return false;
+    }
+  }
+  function isSubagentSession(session) {
+    const header = session?.header;
+    if (header?.origin === "subagent") return true;
+    return typeof header?.delegationDepth === "number" && header.delegationDepth > 0;
+  }
+  function worktreeIntent(sessionId, session) {
+    if (config.worktree.enabled !== true) return null;
+    if (isSubagentSession(session)) return null;
+    if (creating.has(sessionId)) return null;
+    if (checkouts.has(sessionId)) return null;
+    if (stateReady && store.state.worktrees?.[sessionId] !== void 0) return null;
+    const request = requests.get(sessionId);
+    if (request !== void 0 && request.error !== null) return null;
+    if (request?.enabled === true) return "explicit";
+    if (request?.enabled === false) return null;
+    if (config.worktree.auto !== true) return null;
+    return hasStartedTurn(session) ? null : "auto";
+  }
+  async function rememberRequest(sessionId, request) {
+    if (request === null) {
+      requests.delete(sessionId);
+      await store.update((current) => {
+        if (current.worktreeRequests !== void 0) delete current.worktreeRequests[sessionId];
+      }).catch(() => void 0);
+      return;
+    }
+    requests.set(sessionId, request);
+    await store.update((current) => {
+      current.worktreeRequests ??= {};
+      current.worktreeRequests[sessionId] = request;
+    }).catch(() => void 0);
+  }
+  async function failRequest(sessionId, code, reason) {
+    const previous = requests.get(sessionId);
+    const now = Date.now();
+    await rememberRequest(sessionId, {
+      enabled: previous?.enabled ?? true,
+      base: previous?.base ?? "",
+      source: previous?.source ?? config.worktree.source,
+      explicit: previous?.explicit === true,
+      error: `${code}: ${reason}`,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now
+    });
+  }
+  function isUserPrompt(message3) {
+    const source = message3?.source;
+    if (source === void 0 || source === null) return true;
+    return source.kind === "user";
+  }
+  function holdForWorktree(agent, sessionId, message3) {
+    const intent = worktreeIntent(sessionId, agent.session);
+    if (intent === null) return false;
+    if (intent === "auto" && !isUserPrompt(message3)) return false;
+    if (typeof agent.runMaintenance !== "function") return false;
+    let task;
+    try {
+      task = agent.runMaintenance(async (signal) => {
+        await Promise.resolve();
+        await createCheckoutForMessage(agent, sessionId, message3, signal);
+      });
+    } catch (error) {
+      logger.info("git: no checkout is prepared for %s now: %s", sessionId, messageOf5(error));
+      return false;
+    }
+    void task.catch((error) => {
+      logger.warn("git: preparing the checkout for %s failed: %s", sessionId, messageOf5(error));
+    });
+    return true;
+  }
+  async function createCheckoutForMessage(agent, sessionId, message3, signal) {
+    const request = requests.get(sessionId);
+    const requestedBase = (request?.base ?? "").trim();
+    const configuredBase = requestedBase.length > 0 ? requestedBase : config.worktree.base.trim();
+    const configuredSource = request?.source ?? config.worktree.source;
+    const workingDirectory = ctx.get("workingDirectory");
+    let directory;
+    try {
+      directory = workingDirectory?.get(agent.session) ?? agent.session?.header?.cwd;
+    } catch {
+      directory = agent.session?.header?.cwd;
+    }
+    if (directory === void 0 || directory.length === 0) {
+      await rememberRequest(sessionId, null);
+      return;
+    }
+    const root = await locateRepository(runner, directory, signal);
+    if (root === null) {
+      await rememberRequest(sessionId, null);
+      return;
+    }
+    const mainRoot = await mainWorktreeRoot(root, signal);
+    if (isInside(poolDirectory(mainRoot, config.worktree), directory)) {
+      await rememberRequest(sessionId, null);
+      return;
+    }
+    const kind = await readCheckoutKind(runner, { path: mainRoot, signal });
+    if (kind.linked) {
+      await failRequest(sessionId, "worktree/linked-project", "The project is itself a linked worktree");
+      return;
+    }
+    const remote = await preferredRemote(mainRoot, signal);
+    const base = configuredBase.length > 0 ? configuredBase : await resolveDefaultBase(runner, { root: mainRoot, remote, signal });
+    if (base === null) {
+      await failRequest(sessionId, "worktree/no-base", "Cannot determine the base branch for the worktree");
+      return;
+    }
+    const source = configuredSource === "remote" && remote.length > 0 ? "remote" : "local";
+    const name2 = generatedWorktreeName(sessionId, config.worktree.namePrefix);
+    const startedAt = Date.now();
+    const remoteLabel = source === "remote" ? remote : null;
+    creating.set(sessionId, { phase: "prepare", branch: name2, base, remote: remoteLabel, source, startedAt });
+    let created;
+    try {
+      const checkout = await createWorktree(runner, {
+        repoRoot: mainRoot,
+        name: name2,
+        base,
+        source,
+        remote: source === "remote" ? remote : "",
+        config: config.worktree,
+        timeoutMs: config.worktreeTimeoutMs,
+        signal
+      });
+      created = checkout;
+      creating.set(sessionId, { phase: "enter", branch: name2, base, remote: remoteLabel, source, startedAt });
+      if (typeof workingDirectory?.set !== "function") {
+        throw new CommandError("worktree/no-working-directory", "This build cannot change a Session folder");
+      }
+      await workingDirectory.set(agent, checkout.path, signal);
+      if (signal.aborted) throw new CommandError("worktree/aborted", "The checkout was abandoned");
+      await store.update((current) => {
+        current.worktrees ??= {};
+        current.worktrees[sessionId] = {
+          ...checkout,
+          base,
+          source,
+          remote: source === "remote" ? remote : null,
+          sessionId,
+          createdAt: Date.now()
+        };
+        if (current.worktreeRequests !== void 0) delete current.worktreeRequests[sessionId];
+      });
+      checkouts.add(sessionId);
+      requests.delete(sessionId);
+      logger.info("git: %s now works in %s, created from %s", sessionId, created.branch, `${source}:${base}`);
+    } catch (error) {
+      if (created !== void 0) {
+        await removeWorktree(runner, {
+          repoRoot: mainRoot,
+          path: created.path,
+          branch: created.branch,
+          deleteBranch: true,
+          timeoutMs: config.worktreeTimeoutMs
+        }).catch(() => void 0);
+      }
+      if (signal.aborted) return;
+      logger.warn("git: could not prepare a checkout for %s: %s", sessionId, messageOf5(error));
+      await failRequest(
+        sessionId,
+        error instanceof CommandError ? error.code : "worktree/failed",
+        messageOf5(error)
+      );
+      return;
+    } finally {
+      creating.delete(sessionId);
+    }
+    if (config.worktree.naming === "semantic") {
+      void nameWorktreeFromMessage(sessionId, message3).catch(() => void 0);
     }
   }
   async function draftChangeRequest2(options) {
@@ -5612,6 +5812,7 @@ function mountRoutes(ctx, connection, config, deps) {
      */
     async worktreeState(payload, signal) {
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const session = agentFor(sessionId)?.session ?? ctx.get("sessions")?.get(sessionId);
       const base = {
         enabled: config.worktree.enabled === true,
         supported: false,
@@ -5619,7 +5820,11 @@ function mountRoutes(ctx, connection, config, deps) {
         sessionId,
         current: null,
         bases: null,
-        project: null
+        project: null,
+        auto: config.worktree.auto === true,
+        request: sessionId.length > 0 ? requests.get(sessionId) ?? null : null,
+        creating: sessionId.length > 0 ? creating.get(sessionId) ?? null : null,
+        started: hasStartedTurn(session)
       };
       let directory;
       try {
@@ -5630,14 +5835,25 @@ function mountRoutes(ctx, connection, config, deps) {
       const root = await locateRepository(runner, directory, signal);
       if (root === null) return { ...base, reason: "not-a-repository" };
       const mainRoot = await mainWorktreeRoot(root, signal);
+      const value = await state();
+      const current = sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null;
+      if (payload.lite === true) {
+        return {
+          ...base,
+          supported: config.worktree.enabled === true,
+          reason: config.worktree.enabled === true ? null : "disabled",
+          repositoryRoot: mainRoot,
+          project: { directory, linked: false },
+          current
+        };
+      }
       const kind = await readCheckoutKind(runner, { path: mainRoot, signal });
       const remote = await preferredRemote(mainRoot, signal);
       const bases = await readBases(runner, { root: mainRoot, remote, signal });
       if (config.worktree.base.length > 0) bases.defaultBase = config.worktree.base;
-      const value = await state();
       if (payload.probe === true) {
-        await store.update((current) => {
-          current.probe = { at: Date.now(), sessionId, directory, root: mainRoot, supported: true };
+        await store.update((stored) => {
+          stored.probe = { at: Date.now(), sessionId, directory, root: mainRoot, supported: true };
         });
       }
       return {
@@ -5649,8 +5865,36 @@ function mountRoutes(ctx, connection, config, deps) {
         sourceDefault: resolveSourceDefault(config.worktree.source, bases),
         project: { directory, linked: kind.linked === true },
         bases,
-        current: sessionId.length > 0 ? value.worktrees?.[sessionId] ?? null : null
+        current
       };
+    },
+    /**
+     * Record what the next message of a Session should do about its own
+     * checkout. Nothing is created here: the checkout is made when that message
+     * arrives, so a chat that is never sent leaves nothing behind, and the
+     * first step already runs in the new folder.
+     */
+    async worktreeRequest(payload) {
+      const sessionId = requiredString(payload.sessionId, "sessionId");
+      const previous = requests.get(sessionId);
+      const now = Date.now();
+      const enabled = payload.enabled === true;
+      const base = typeof payload.base === "string" ? payload.base.trim() : previous?.base ?? "";
+      const source = payload.source === "local" || payload.source === "remote" ? payload.source : previous?.source ?? config.worktree.source;
+      if (creating.has(sessionId)) {
+        throw new CommandError("worktree/busy", "A checkout is already being created for this chat");
+      }
+      const request = {
+        enabled,
+        base,
+        source,
+        explicit: true,
+        error: payload.retry === true ? null : previous?.error ?? null,
+        createdAt: previous?.createdAt ?? now,
+        updatedAt: now
+      };
+      await rememberRequest(sessionId, request);
+      return { request, auto: config.worktree.auto === true };
     },
     /**
      * Every checkout of this repository, with the facts the manager needs:
@@ -6117,14 +6361,18 @@ ${result.stderr ?? ""}`;
   }
   watcher.start();
   cleanup.start();
-  let stopNaming;
-  if (typeof ctx.on === "function" && config.worktree.naming === "semantic") {
+  let stopWorktrees;
+  if (typeof ctx.on === "function" && (config.worktree.enabled === true || config.worktree.naming === "semantic")) {
     try {
-      stopNaming = ctx.on("agent/inbox/inserted", (payload) => {
+      stopWorktrees = ctx.on("agent/inbox/inserted", (payload) => {
         const inserted = payload;
-        const sessionId = inserted?.agent?.session?.id;
-        if (typeof sessionId !== "string" || sessionId.length === 0) return;
-        void nameWorktreeFromMessage(sessionId, inserted.message).catch(() => void 0);
+        const agent = inserted?.agent;
+        const sessionId = agent?.session?.id;
+        if (agent === void 0 || typeof sessionId !== "string" || sessionId.length === 0) return;
+        if (holdForWorktree(agent, sessionId, inserted.message)) return;
+        if (config.worktree.naming === "semantic") {
+          void nameWorktreeFromMessage(sessionId, inserted.message).catch(() => void 0);
+        }
       });
     } catch (error) {
       logger.warn("git: cannot watch for the first message: %s", messageOf5(error));
@@ -6143,9 +6391,9 @@ ${result.stderr ?? ""}`;
       }
     }
     actions.clear();
-    if (typeof stopNaming === "function") {
+    if (typeof stopWorktrees === "function") {
       try {
-        stopNaming();
+        stopWorktrees();
       } catch {
       }
     }
