@@ -98,7 +98,16 @@ export interface AgentLike {
 /** The header a Session carries. */
 export interface SessionLike {
   id?: string
-  header?: { cwd?: string; [key: string]: unknown }
+  header?: {
+    cwd?: string
+    /** `subagent` on a child a delegating Agent created. */
+    origin?: string
+    /** Delegation depth; absent or zero on a top-level Session. */
+    delegationDepth?: number
+    [key: string]: unknown
+  }
+  /** The Session log, when this build exposes the synchronous reader. */
+  snapshotEvents?(): readonly { type?: string }[]
   [key: string]: unknown
 }
 

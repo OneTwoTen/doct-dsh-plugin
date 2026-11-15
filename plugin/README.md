@@ -5,7 +5,8 @@ thanh bên phải với trải nghiệm theo T3 Code: một nút thao tác thôn
 PR, publish), hộp commit chọn tệp với thông điệp do model viết, diff xếp chồng có header dính,
 đổi nhánh, lịch sử commit, pull request kèm trạng thái, và issue.
 Bảng Git còn **tạo pull request bằng model của phiên** (effort thấp nhất), **worktree riêng cho
-phiên mới** (bắt đầu từ nhánh local hoặc nhánh remote đã fetch), và **dọn dẹp sau khi PR được gộp**.
+phiên mới — tự tạo khi bạn gửi tin nhắn đầu tiên, bắt đầu từ nhánh remote mới nhất** (không cần bấm
+gì), và **dọn dẹp sau khi PR được gộp**.
 
 Toàn bộ mã là TypeScript trong `src/`; `npm run build` tạo `dist/` mà Host và trình duyệt nạp.
 
@@ -290,34 +291,41 @@ Xoá checkout đang dùng sẽ đưa chat về checkout chính trước, nên kh
 
 ### Worktree cho phiên mới
 
-Ở màn hình **New Session**, cạnh bộ chọn workspace có một hàng giống T3 Code: nút **Worktree mới**,
-ông chọn **nhánh nền** (mặc định là nhánh mặc định của kho, hoặc `git.worktree.base`), và hai nút
-**Nhánh local** / **Nhánh remote**.
+Chat mới **không cần bấm tạo worktree**. Hàng **Worktree** trên màn hình **New Session** chỉ ghi lại
+điều bạn muốn; checkout thật sự được tạo **lúc bạn gửi tin nhắn đầu tiên**, giống trải nghiệm của
+T3 Code.
 
-Mặc định hàng này mở sẵn ở **Nhánh remote** (`git.worktree.source: remote`), và nút **Worktree mới**
-vẫn là thứ tạo checkout — plugin không tự tạo khi bạn chưa bấm. Kho chưa có nhánh remote nào (dự án
-local mới, hoặc clone chưa fetch) thì hàng tự chuyển về **Nhánh local** để nút không bị khoá.
+Hàng này gồm ô chọn **Worktree** (bật sẵn theo `git.worktree.auto`), ô **nhánh nền** (mặc định là
+nhánh mặc định của kho, hoặc `git.worktree.base`), và hai nút **Nhánh local** / **Nhánh remote**
+(mặc định remote qua `git.worktree.source`). Kho chưa có nhánh remote nào thì hàng tự chuyển về
+**Nhánh local** để ô chọn không bị khoá.
 
-- Bấm **Worktree mới** là checkout được tạo ngay: `<kho>/.agents/worktrees/dsh-<8 ký tự id>-<4 ký
-  tự>` trên nhánh mới cùng tên, rồi **thư mục làm việc của phiên** chuyển sang đó. Hàng đổi thành
-  chip tên nhánh kèm ✕ để xoá và quay về dự án.
-- Đổi nhánh nền (hoặc nguồn local/remote) khi đã tạo thì checkout được tạo lại từ nhánh mới — an
-  toàn vì phiên chưa chạy lượt nào.
-- Với nguồn remote, plugin chạy `git fetch <remote> <nhánh>` trước, nên worktree bắt đầu từ đúng
-  commit trên máy chủ mã nguồn, không phải bản fetch cũ trên máy.
+- **Gửi tin nhắn đầu tiên** là Host giữ lượt của tin đó (`agent.runMaintenance`), chạy
+  `git fetch <remote> <nhánh>` rồi `git worktree add` tại `<kho>/.agents/worktrees/dsh-<8 ký tự
+  id>-<4 ký tự>` trên nhánh mới cùng tên, sau đó chuyển **thư mục làm việc của phiên** sang đó.
+  Lượt chỉ bắt đầu khi checkout xong, nên bước đầu tiên của model đã chạy trong thư mục mới.
+- Với nguồn remote, `git fetch` chạy trước nên worktree bắt đầu từ đúng commit trên máy chủ mã
+  nguồn ("main mới nhất"), không phải bản fetch cũ trên máy.
+- Trong lúc chờ, một **thẻ trạng thái** hiện ngay trên ô soạn tin: đang tạo worktree (kèm nhánh nền
+  và remote), rồi *Worktree ready*, hoặc lỗi kèm **Thử lại** / **Tiếp tục ở đây**.
+- Tạo lỗi thì tin nhắn vẫn chạy tiếp trong thư mục dự án; lỗi được ghi lại nên các tin sau không bị
+  giữ nữa, cho tới khi bạn bấm **Thử lại**.
+- Tắt ô **Worktree** thì chat đó ở lại thư mục dự án; lựa chọn được nhớ theo phiên.
+- Chat đã chạy lượt nào rồi thì không bị chuyển tự động nữa — chỉ lựa chọn rõ ràng của bạn mới áp
+  dụng.
+- Ngoài kho mã, hoặc khi dự án đã là một worktree liên kết, hàng này ẩn đi.
 - Thư mục `.agents/worktrees/` tự sinh `.gitignore` chứa `*` nên checkout không hiện trong
   `git status` của dự án.
 
-Tính năng cần một git checkout thường (không phải worktree liên kết), phiên đã mở, và
-`git.worktree.enabled: true`. Các lý do từ chối đều có mã riêng: `worktree/no-agent`,
-`worktree/already`, `worktree/linked-project`, `worktree/unknown-base`, `worktree/fetch-failed`,
-`worktree/dirty` (xoá khi còn thay đổi chưa commit).
+Tính năng cần một git checkout thường (không phải worktree liên kết) và `git.worktree.enabled: true`.
+Các lý do từ chối đều có mã riêng: `worktree/no-agent`, `worktree/already`, `worktree/linked-project`,
+`worktree/unknown-base`, `worktree/fetch-failed`, `worktree/dirty` (xoá khi còn thay đổi chưa commit).
 
-**Vì sao tạo ngay khi bật, không phải lúc gửi tin nhắn:** T3 Code tạo worktree khi bạn gửi tin đầu
-tiên và giữ tin đó lại cho tới khi xong. Trên DSH, prompt của một bước được lắp (`systemPrompt.assemble`)
-**trước** hook `agent/pre-step` — hook duy nhất mà plugin có thể `await` — nên nếu tạo lúc gửi thì
-bước đầu tiên vẫn được mô tả thư mục cũ. Vì vậy plugin tạo ngay khi bạn bật, để thư mục đúng trước
-khi model chạy.
+**Vì sao tạo lúc gửi, không phải lúc bật:** DSH lắp prompt của một bước trước khi plugin kịp chen
+vào, nên muốn tạo checkout "đúng lúc gửi" thì phải giữ lượt của tin nhắn ngay khi nó vào inbox —
+trước tín hiệu đánh thức Agent. Plugin làm đúng vậy: khi `agent/inbox/inserted` bắn ra, nó nhận
+lượt bằng `agent.runMaintenance`, tạo checkout và đổi thư mục, rồi mới nhả cho lượt chạy. Nhờ thế
+một chat bạn đóng mà không gửi gì sẽ không để lại nhánh hay thư mục thừa.
 
 #### Đặt tên nhánh theo việc đang làm
 
@@ -393,15 +401,15 @@ với `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` (xem mục **GitHub, GitLab và GitLab
 ### Cầu nối với Host (lưu ý khi nâng cấp DSH)
 
 Giao diện gọi Host qua **route Fetch chính xác** dưới kênh dùng chung của Connection:
-`POST /api/personal-hub-git/<thao-tác>` cho 37 thao tác — đọc (`overview`, `diff`, `diffAll`,
+`POST /api/personal-hub-git/<thao-tác>` cho 38 thao tác — đọc (`overview`, `diff`, `diffAll`,
 `commits`, `commit`, `branches`, `forge`, `pulls`, `pullRequest`, `branchPull`, `issues`, `issue`,
 `draftMessage`, `actionState`, `mergeSettings`, `cleanupState`), ghi (`stage`, `unstage`, `discard`,
 `commitChanges`, `push`, `pull`, `switchBranch`, `createBranch`, `createPull`, `publish`,
 `mergeSettingsSet`, `cleanupRun`, `startAction`) và worktree (`worktrees`, `worktreeState`,
-`worktreeAdd`, `worktreeSwitch`, `worktreeCreate`, `worktreeRemovePath`, `worktreeRemove`,
-`worktreePrune`) — đăng ký bằng `connection.fetch.register()`. Mọi route đi qua hàng rào Host/Origin
-và bước xác thực Peer của Connection, nên chỉ trang loopback đã đăng nhập mới đọc được kho mã trên
-máy này.
+`worktreeRequest`, `worktreeAdd`, `worktreeSwitch`, `worktreeCreate`, `worktreeRemovePath`,
+`worktreeRemove`, `worktreePrune`) — đăng ký bằng `connection.fetch.register()`. Mọi route đi qua
+hàng rào Host/Origin và bước xác thực Peer của Connection, nên chỉ trang loopback đã đăng nhập mới
+đọc được kho mã trên máy này.
 
 Một thao tác chuỗi (`startAction`) trả về `actionId` ngay rồi chạy nền; giao diện hỏi
 `actionState` mỗi 300 ms để lấy pha, nhãn, output và kết quả. Nhờ vậy một commit + push + tạo PR
@@ -456,6 +464,7 @@ git:
 
   worktree:              # worktree cho phiên mới
     enabled: true
+    auto: true           # tạo checkout ngay khi gửi tin nhắn đầu tiên, không cần bấm
     directory: .agents/worktrees
     namePrefix: dsh
     base: ''             # nhánh bắt đầu; rỗng = nhánh mặc định của kho

@@ -13,8 +13,9 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 - **Pull request bằng AI** — một bước trong chuỗi thao tác: model hiện tại của phiên (effort thấp nhất)
   viết tiêu đề/mô tả, bạn **xem và sửa trong hộp thoại** (hoặc bấm Viết lại) rồi mới đẩy nhánh và mở PR.
   Mô tả mơ hồ được hỏi lại một lần; ngôn ngữ bám theo UI (vi/en).
-- **Worktree cho phiên mới** — chọn ở màn hình New Session: worktree riêng, bắt đầu từ nhánh local
-  hoặc nhánh remote đã fetch.
+- **Worktree cho phiên mới** — không cần bấm: gửi tin nhắn đầu tiên là plugin fetch nhánh nền mới
+  nhất rồi tạo checkout riêng cho chat; lượt chỉ chạy sau khi thư mục đã đổi. Ô **Worktree** trên màn
+  hình New Session chỉ để tắt cho một chat cụ thể.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
 - **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
   mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH), dev

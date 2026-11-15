@@ -30,6 +30,41 @@ async function makeRepository() {
 }
 
 /**
+ * A repository whose `origin/main` is one commit ahead of its own `main`, so a
+ * checkout that starts "from the latest main" can be told from one that starts
+ * from what this clone happens to have.
+ */
+async function makeRepositoryWithOrigin() {
+  const root = await makeRepository()
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const origin = await mkdtemp(join(tmpdir(), 'personal-hub-origin-'))
+  execFileSync('git', ['init', '--bare', '-q'], { cwd: origin, stdio: ['ignore', 'pipe', 'pipe'] })
+  const peer = await mkdtemp(join(tmpdir(), 'personal-hub-peer-'))
+  const peerGit = (...args) => execFileSync('git', args, { cwd: peer, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  peerGit('clone', '-q', origin, '.')
+  peerGit('config', 'user.email', 'peer@example.com')
+  peerGit('config', 'user.name', 'Peer Contributor')
+  peerGit('config', 'commit.gpgsign', 'false')
+  await writeFile(join(peer, 'b.txt'), 'two\n', 'utf8')
+  peerGit('add', '-A')
+  peerGit('commit', '-qm', 'second commit')
+  peerGit('push', '-q', 'origin', 'main')
+  const newest = peerGit('rev-parse', 'HEAD').trim()
+  git('remote', 'add', 'origin', origin)
+  return { root, origin, peer, newest }
+}
+
+/** Give the fake Agent the maintenance face the feature holds a message with. */
+function withMaintenance(agent, seen) {
+  agent.runMaintenance = async (job) => {
+    seen.holds += 1
+    const controller = new AbortController()
+    return await job(controller.signal)
+  }
+  return agent
+}
+
+/**
  * Mount the feature over a fake Connection registry and a fake Host context.
  * @param {{ root: string, services?: Record<string, unknown>, config?: Record<string, unknown> }} options
  */
@@ -563,6 +598,155 @@ test('switching a checkout needs an open Session', async () => {
     })
     assert.equal(answer.ok, false)
     assert.equal(answer.error.code, 'worktree/no-agent')
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the first message creates a checkout from the latest base and moves the chat into it', async () => {
+  const { root, origin, peer, newest } = await makeRepositoryWithOrigin()
+  const moves = []
+  let current = root
+  const seen = { holds: 0 }
+  const feature = await mountFeature({
+    root,
+    services: {
+      workingDirectory: {
+        get: () => current,
+        set: async (_agent, path) => {
+          moves.push(path)
+          current = path
+          return path
+        },
+      },
+    },
+    on: () => {},
+  })
+  const agent = withMaintenance(feature.agent, seen)
+  try {
+    const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+    assert.ok(listener, 'the feature watches for the first message')
+
+    listener.listener({ agent, message: { content: [{ type: 'text', text: 'add a page' }] } })
+
+    const record = await waitFor(async () => {
+      const answer = await feature.call('worktreeState', { sessionId: SESSION })
+      return answer.value.current ?? null
+    })
+    assert.match(record.branch, /^dsh-ad0ab5d0-[0-9a-f]{4}$/)
+    assert.equal(record.base, 'main')
+    assert.equal(record.source, 'remote')
+    assert.equal(record.sessionId, SESSION)
+    // The Session was moved before its turn could start, which is what makes
+    // the first step run in the new folder.
+    assert.deepEqual(moves, [record.path])
+
+    // "Latest" means what the code host has, not what this clone last fetched.
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: record.path,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    assert.equal(head, newest)
+
+    // A second message finds the checkout already there and creates nothing.
+    listener.listener({ agent, message: { content: [{ type: 'text', text: 'and another page' }] } })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    assert.equal(seen.holds, 1)
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+    await rm(origin, { recursive: true, force: true })
+    await rm(peer, { recursive: true, force: true })
+  }
+})
+
+test('an opted-out chat, a started chat, and a failing checkout stay in the project', async () => {
+  const root = await makeRepository()
+  const moves = []
+  let current = root
+  const seen = { holds: 0 }
+  // A base that does not exist is the cheapest way to make the creation fail
+  // after the feature decided to try.
+  const feature = await mountFeature({
+    root,
+    config: { worktree: { base: 'nope' } },
+    services: {
+      workingDirectory: {
+        get: () => current,
+        set: async (_agent, path) => {
+          moves.push(path)
+          current = path
+          return path
+        },
+      },
+    },
+    on: () => {},
+  })
+  const agent = withMaintenance(feature.agent, seen)
+  try {
+    const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+    const message = { content: [{ type: 'text', text: 'do the thing' }] }
+
+    // Opting out is remembered, so the configured default does not apply.
+    const off = await feature.call('worktreeRequest', { sessionId: SESSION, enabled: false })
+    assert.equal(off.ok, true, JSON.stringify(off))
+    listener.listener({ agent, message })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(seen.holds, 0)
+    assert.deepEqual(moves, [])
+
+    // A request the user made is tried, and its failure is kept.
+    const on = await feature.call('worktreeRequest', { sessionId: SESSION, enabled: true })
+    assert.equal(on.ok, true, JSON.stringify(on))
+    listener.listener({ agent, message })
+    const failed = await waitFor(async () => {
+      const answer = await feature.call('worktreeState', { sessionId: SESSION })
+      return answer.value.request?.error ? answer.value : null
+    })
+    assert.match(failed.request.error, /worktree\/unknown-base/)
+    assert.deepEqual(moves, [])
+
+    // Retrying clears the error, so the next message tries again.
+    const retried = await feature.call('worktreeRequest', { sessionId: SESSION, enabled: true, retry: true })
+    assert.equal(retried.ok, true, JSON.stringify(retried))
+    assert.equal(retried.value.request.error, null)
+
+    // A chat that already ran a turn is never moved automatically: the default
+    // applies to a first message only.
+    const started = withMaintenance(
+      { session: { id: 'session-11111111-2222-4333-8444-555555555555', header: { cwd: root }, snapshotEvents: () => [{ type: 'turn/start' }] } },
+      seen,
+    )
+    const recorded = seen.holds
+    listener.listener({ agent: started, message })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(seen.holds, recorded)
+    assert.deepEqual(moves, [])
+
+    // A subagent child runs in its parent's checkout and gets none of its own.
+    const child = withMaintenance(
+      { session: { id: 'session-66666666-7777-4888-8999-aaaaaaaaaaaa', header: { cwd: root, origin: 'subagent', delegationDepth: 1 } } },
+      seen,
+    )
+    listener.listener({ agent: child, message })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(seen.holds, recorded)
+    assert.deepEqual(moves, [])
+
+    // A notice another feature injected into the inbox is not a first prompt.
+    const notice = withMaintenance(
+      { session: { id: 'session-bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', header: { cwd: root } } },
+      seen,
+    )
+    listener.listener({
+      agent: notice,
+      message: { content: [{ type: 'text', text: 'The working directory changed to /tmp' }], source: { kind: 'working-directory' } },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(seen.holds, recorded)
+    assert.deepEqual(moves, [])
   } finally {
     await feature.dispose()
     await rm(root, { recursive: true, force: true })

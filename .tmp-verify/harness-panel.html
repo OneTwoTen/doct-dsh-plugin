@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>personal-hub panel check</title>
+<link id="sheet" rel="stylesheet" href="git.css">
+<style>
+  /* Stand-ins for the Harness theme tokens the panel reads. */
+  :root{
+    --dsw-alias-bg-base:#ffffff;
+    --dsw-alias-bg-layer-1:#f5f5f5;
+    --dsw-alias-bg-layer-2:#ebebeb;
+    --dsw-alias-label-primary:#161616;
+    --dsw-alias-label-secondary:#5b5b5b;
+    --dsw-alias-label-tertiary:#8b8b8b;
+    --dsw-alias-label-primary-inverted:#ffffff;
+    --dsw-alias-label-on-color:#ffffff;
+    --dsw-alias-border-l1:#d8d8d8;
+    --dsw-alias-border-l3:#e4e4e4;
+    --dsw-alias-brand-primary:#0d0d0d;
+    --dsw-alias-state-success-primary:#1a7f37;
+    --dsw-alias-state-warn-primary:#9a6700;
+    --dsw-alias-state-error-primary:#cf222e;
+  }
+  html[data-theme=dark]{
+    --dsw-alias-bg-base:#15171a;
+    --dsw-alias-bg-layer-1:#1e2126;
+    --dsw-alias-bg-layer-2:#262a30;
+    --dsw-alias-label-primary:#f2f4f7;
+    --dsw-alias-label-secondary:#a8b0bd;
+    --dsw-alias-label-tertiary:#7d8794;
+    --dsw-alias-label-primary-inverted:#2b3038;
+    --dsw-alias-label-on-color:#ffffff;
+    --dsw-alias-border-l1:#ffffff1f;
+    --dsw-alias-border-l3:#ffffff29;
+    --dsw-alias-brand-primary:#f2f4f7;
+    --dsw-alias-state-success-primary:#3fb950;
+    --dsw-alias-state-warn-primary:#d29922;
+    --dsw-alias-state-error-primary:#f85149;
+  }
+  body{margin:0;background:var(--dsw-alias-bg-base);font-family:ui-sans-serif,system-ui,sans-serif}
+  #stage{display:flex;gap:16px;padding:14px;align-items:flex-start}
+  .frame{width:430px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden}
+  .caption{font:11px monospace;color:var(--dsw-alias-label-tertiary);padding:4px 2px}
+  #metrics{font:11px monospace;color:var(--dsw-alias-label-secondary);padding:0 2px 6px}
+  .hintline{font:11px var(--font, monospace);color:var(--dsw-alias-label-tertiary)}
+</style>
+<script>
+  const q = new URLSearchParams(location.search)
+  document.documentElement.dataset.theme = q.get('theme') || 'light'
+  if (q.get('css')) document.getElementById('sheet').href = q.get('css')
+  addEventListener('load', () => {
+    const body = document.querySelector('.ph-detail-body')
+    const metrics = document.getElementById('metrics')
+    if (body && metrics) metrics.textContent = `detail scrollHeight ${body.scrollHeight}px / clientHeight ${body.clientHeight}px`
+    if (body && q.get('scroll') === 'bottom') body.scrollTop = body.scrollHeight
+  })
+  // A dark check: the dock and the option must stay readable in both themes.
+</script>
+</head>
+<body>
+<div id="stage">
+  <div>
+    <div class="caption" id="metrics">detail scroll</div>
+    <div class="frame">
+      <div class="ph-git" style="height:430px">
+        <div class="ph-head">
+          <div class="ph-repo-row">
+            <span style="display:flex;color:var(--dsw-alias-label-tertiary)">◆</span>
+            <span class="ph-repo">doct-dsh-plugin</span>
+            <span class="ph-spacer"></span>
+            <button class="ph-icon-button" title="Refresh">⟳</button>
+          </div>
+          <div class="ph-branch-row">
+            <button class="ph-branch-button"><span>feature/record-a-commit-with-no-file-changes</span></button>
+            <span class="ph-spacer"></span>
+            <span class="ph-chip" data-tone="success"><span class="ph-dot" data-state="open"></span>#5 Open</span>
+          </div>
+          <div class="ph-actions">
+            <button class="ph-action-primary">Create pull request</button>
+            <button class="ph-action-caret">▾</button>
+          </div>
+        </div>
+        <div class="ph-tabs" role="tablist">
+          <button class="ph-tab"><span>Changes</span></button>
+          <button class="ph-tab"><span>Worktrees</span><span class="ph-tab-count">1</span></button>
+          <button class="ph-tab" aria-selected="true"><span>Pull requests</span></button>
+          <button class="ph-tab"><span>Issues</span></button>
+          <button class="ph-tab"><span>Commits</span><span class="ph-tab-count">29</span></button>
+        </div>
+        <div style="display:flex;flex-direction:column;min-height:0;flex:1 1 auto;overflow:hidden;height:calc(100% - 186px)">
+          <div class="ph-detail-body" data-personal-hub-detail-body>
+            <div>
+              <div class="ph-toolbar">
+                <button class="ph-icon-button">←</button>
+                <span class="ph-file-path"><span class="ph-file-name">#5</span></span>
+                <span class="ph-spacer"></span>
+                <a class="ph-icon-button">↗</a>
+              </div>
+              <div class="ph-detail">
+                <div class="ph-detail-title">Fix invisible button labels in the Git panel</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <span class="ph-chip" data-tone="success"><span class="ph-dot" data-state="open"></span>Open</span>
+                  <span class="ph-chip ph-mono">from feature/record-a-commit-with-no-file-changes</span>
+                  <span class="ph-chip ph-mono">→ main</span>
+                </div>
+                <div class="ph-card ph-merge">
+                  <div class="ph-card-title">◆ Merge pull request #5</div>
+                  <p class="ph-hint">Merge feature/record-a-commit-with-no-file-changes into main?</p>
+                  <div class="ph-merge-actions">
+                    <button class="ph-primary">Merge</button>
+                    <button class="ph-button">Squash &amp; merge</button>
+                    <button class="ph-button">Rebase &amp; merge</button>
+                  </div>
+                </div>
+                <div class="ph-detail-meta">
+                  <div class="ph-detail-row"><span class="ph-detail-label">Author</span><span class="ph-detail-value">OneTwoTen</span></div>
+                  <div class="ph-detail-row"><span class="ph-detail-label">updated (when)</span><span class="ph-detail-value">9 seconds ago</span></div>
+                  <div class="ph-detail-row"><span class="ph-detail-label">Review</span><span class="ph-detail-value">No review yet</span></div>
+                  <div class="ph-detail-row"><span class="ph-detail-label">Mergeable</span><span class="ph-detail-value">Mergeable</span></div>
+                  <div class="ph-detail-row"><span class="ph-detail-label">Files</span><span class="ph-detail-value">11 changed +709 −10</span></div>
+                </div>
+                <div class="ph-card">
+                  <div class="ph-card-title">✓ Checks</div>
+                  <div class="ph-dim ph-tiny">No checks reported</div>
+                </div>
+                <div class="ph-card">
+                  <div class="ph-card-title">▤ Description</div>
+                  <p class="ph-prose">The Git panel's base rule `.ph-git button{color:inherit}` out-ranked every single-class rule below it, so branded controls such as `.ph-primary` kept their brand-coloured fill while their label was repainted with the theme's body colour, producing apparently empty buttons. The rule now uses `:where()` to drop the specificity, letting `.ph-primary`, `.ph-chip`, `.ph-filter` and the rest apply their own colours.
+
+## Testing
+- `shoot.mjs` extracts the `GIT_CSS` block from `HEAD:plugin/dist/client.js` (before) and the working-tree `plugin/dist/client.js` (after).
+- Screenshots were captured with headless Chrome.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px;width:420px">
+    <div class="caption">New Session worktree option (chat not sent yet)</div>
+    <div class="ph-git" style="height:auto;padding:10px">
+      <span class="ph-wrap" data-personal-hub-worktree>
+        <label class="ph-check-inline ph-wt-toggle" title="When you send the first message, this chat gets its own checkout">
+          <input type="checkbox" checked>
+          <span>◆</span>
+          <span>Worktree</span>
+        </label>
+        <select class="ph-select" style="width:auto;max-width:168px"><option>main</option></select>
+        <div style="display:inline-flex;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;overflow:hidden">
+          <button class="ph-filter" style="border:0;border-radius:0">Local branch</button>
+          <button class="ph-filter" style="border:0;border-radius:0" aria-pressed="true">Remote branch</button>
+        </div>
+      </span>
+    </div>
+
+    <div class="caption">Status card: creating, ready, failed</div>
+    <div class="ph-git" style="height:auto;padding:10px;display:flex;flex-direction:column;gap:8px">
+      <div class="ph-dock" data-tone="busy">
+        <span class="ph-dock-icon"><span class="ph-spinner"></span></span>
+        <span class="ph-dock-text">
+          <span class="ph-dock-title">Creating worktree dsh-d138a1d3-7f5a</span>
+          <span class="ph-dock-detail">From the latest origin/main; the message starts once the checkout is ready.</span>
+        </span>
+        <span class="ph-spacer"></span>
+        <button class="ph-icon-button">✕</button>
+      </div>
+      <div class="ph-dock" data-tone="success" role="status">
+        <span class="ph-dock-icon">✓</span>
+        <span class="ph-dock-text">
+          <span class="ph-dock-title">Worktree ready: feat/fix-invisible-labels</span>
+          <span class="ph-dock-detail">This chat now works in its own checkout.</span>
+        </span>
+        <span class="ph-spacer"></span>
+        <button class="ph-icon-button">✕</button>
+      </div>
+      <div class="ph-dock" data-tone="error">
+        <span class="ph-dock-icon">!</span>
+        <span class="ph-dock-text">
+          <span class="ph-dock-title">Could not create the worktree</span>
+          <span class="ph-dock-detail">The message continues in the project folder. Retry creates main for the next message.</span>
+        </span>
+        <span class="ph-spacer"></span>
+        <button class="ph-button">Continue here</button>
+        <button class="ph-primary">Retry</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

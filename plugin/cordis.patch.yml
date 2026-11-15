@@ -31,10 +31,13 @@
             enabled: true
             provider: ''
             model: ''
-          # Worktree riêng cho phiên mới: mặc định tạo checkout mới từ nhánh
-          # remote đã fetch (repo không có nhánh remote thì tự lùi về local).
+          # Worktree riêng cho chat mới: tin nhắn đầu tiên tự tạo checkout từ nhánh
+          # remote mới nhất (repo không có nhánh remote thì tự lùi về local).
           worktree:
             enabled: true
+            # Gửi tin nhắn đầu tiên là tạo checkout, không cần bấm gì; ô Worktree
+            # trên màn hình New Session chỉ để tắt cho một chat cụ thể.
+            auto: true
             source: remote
             # Nhánh bắt đầu mặc định; để trống = nhánh mặc định của kho mã.
             base: ''

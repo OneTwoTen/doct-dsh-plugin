@@ -82,6 +82,11 @@ export interface WorktreeCleanupConfig {
 /** Per-Session worktrees. */
 export interface WorktreeConfig {
   enabled: boolean
+  /**
+   * Create the checkout for a Session's first message, without the user having
+   * to ask for one on the New Session row.
+   */
+  auto: boolean
   directory: string
   namePrefix: string
   naming: 'id' | 'semantic'
@@ -242,6 +247,12 @@ export const GIT_DEFAULTS = Object.freeze({  enabled: true,
   /** New Session worktrees. */
   worktree: Object.freeze({
     enabled: true,
+    /**
+     * A checkout is created when the first message arrives, so a chat never
+     * has to be told where to work first. The New Session row still lets one
+     * chat opt out, and nothing happens outside a repository.
+     */
+    auto: true,
     /** Directory inside the repository that holds created checkouts. */
     directory: '.agents/worktrees',
     /** Branch and directory name prefix. */
@@ -456,6 +467,7 @@ export function normalizeConfig(raw: unknown): HubConfig {
       },
       worktree: {
         enabled: asBoolean(worktree.enabled, GIT_DEFAULTS.worktree.enabled),
+        auto: asBoolean(worktree.auto, GIT_DEFAULTS.worktree.auto),
         directory: asString(worktree.directory, GIT_DEFAULTS.worktree.directory).trim() || GIT_DEFAULTS.worktree.directory,
         namePrefix: asString(worktree.namePrefix, GIT_DEFAULTS.worktree.namePrefix).trim(),
         naming: asChoice(worktree.naming, ['id', 'semantic'] as const, GIT_DEFAULTS.worktree.naming),
