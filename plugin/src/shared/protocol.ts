@@ -391,6 +391,34 @@ export interface WorktreeRecord {
   namingError?: string
 }
 
+/** A Session's wish to start its next message in a fresh checkout of its own. */
+export interface WorktreeRequest {
+  /** Whether the next message should create a checkout. */
+  enabled: boolean
+  /** The branch the checkout starts from; empty asks the repository for its default. */
+  base: string
+  /** Where the base comes from: a local branch or a fetched remote one. */
+  source: 'local' | 'remote'
+  /** Whether the user chose this, or it is simply the configured default. */
+  explicit: boolean
+  /** Why the last attempt failed; a set error holds creation until a retry. */
+  error: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** One checkout creation in flight for a Session. */
+export interface WorktreeCreation {
+  /** What the Host is doing right now. */
+  phase: 'prepare' | 'create' | 'enter'
+  branch: string
+  base: string | null
+  /** The remote the base is fetched from, when it comes from one. */
+  remote: string | null
+  source: 'local' | 'remote'
+  startedAt: number
+}
+
 /** One checkout of the repository, as the worktree manager lists it. */
 export interface WorktreeInfo {
   path: string
@@ -434,6 +462,14 @@ export interface WorktreeState {
   repositoryRoot?: string
   remote?: string
   sourceDefault?: 'local' | 'remote'
+  /** Whether a first message creates a checkout without the user asking. */
+  auto?: boolean
+  /** What the next message will do for this Session. */
+  request?: WorktreeRequest | null
+  /** The creation in flight, when a message of this Session is waiting for it. */
+  creating?: WorktreeCreation | null
+  /** Whether the Session already ran a turn, so only an explicit request applies. */
+  started?: boolean
 }
 
 /** The overview the header and the changes view read. */
@@ -772,6 +808,17 @@ export interface WorktreeAddRequest extends GitTarget {
   switch?: boolean
 }
 
+/** A request to record what the next message of a Session should do about a checkout. */
+export interface WorktreeRequestPayload extends GitTarget {
+  sessionId: string
+  enabled: boolean
+  /** The base branch the checkout should start from; empty keeps the configured default. */
+  base?: string
+  source?: 'local' | 'remote'
+  /** Clear a recorded failure, so the next message tries again. */
+  retry?: boolean
+}
+
 /** A request to move a Session into an existing checkout, or back to the project. */
 export interface WorktreeSwitchRequest extends GitTarget {
   sessionId: string
@@ -856,7 +903,12 @@ export interface GitApi {
   /** Merge one change request with the chosen strategy. */
   mergePull(payload: MergePullRequest): Promise<MergePullResult>
   publish(payload: PublishRequest): Promise<{ remote: string; url: string | null; pushed: boolean }>
-  worktreeState(payload: GitTarget & { probe?: boolean }): Promise<WorktreeState>
+  worktreeState(payload: GitTarget & { probe?: boolean; lite?: boolean }): Promise<WorktreeState>
+  /** Record what the next message of a Session should do about its own checkout. */
+  worktreeRequest(payload: WorktreeRequestPayload): Promise<{
+    request: WorktreeRequest | null
+    auto: boolean
+  }>
   worktrees(payload: GitTarget): Promise<WorktreeListResult>
   worktreeAdd(payload: WorktreeAddRequest): Promise<{ worktree: WorktreeRecord; switched: boolean }>
   worktreeSwitch(payload: WorktreeSwitchRequest): Promise<{ directory: string; branch: string | null }>

@@ -204,6 +204,23 @@
     wtFailed: "Could not create the worktree",
     wtNoBase: "No branch to start from yet",
     wtHint: "The checkout lives under the repository and starts from the branch you pick.",
+    wtAuto: "Worktree",
+    wtAutoHint: "When you send the first message, this chat gets its own checkout of the repository, so the project folder stays untouched.",
+    wtNextMessage: "The next message starts in a new worktree from {branch}",
+    wtOff: "This chat stays in the project folder",
+    wtDefaultBranch: "the default branch",
+    wtLinkedProject: "This project is itself a linked worktree, so no second checkout is offered.",
+    wtCreatingBranch: "Creating {branch}\u2026",
+    wtDockLabel: "Worktree status",
+    wtDockCreating: "Creating worktree {branch}",
+    wtDockHint: "From the latest {base}; the message starts once the checkout is ready.",
+    wtDockCreated: "Worktree ready: {branch}",
+    wtDockCreatedHint: "This chat now works in its own checkout.",
+    wtDockFailed: "Could not create the worktree",
+    wtDockFailedHint: "The message continues in the project folder. Retry creates {base} for the next message.",
+    wtDockRetry: "Retry",
+    wtDockContinue: "Continue here",
+    wtDockDismiss: "Dismiss",
     gitSettingsTitle: "Worktrees and merged pull requests",
     gitSettingsSummary: "Clean up after a chat\u2019s pull request merges",
     gitSettingsMerged: "When the pull request of a chat is merged",
@@ -646,6 +663,23 @@
     wtFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c worktree",
     wtNoBase: "Ch\u01B0a c\xF3 nh\xE1nh n\xE0o \u0111\u1EC3 b\u1EAFt \u0111\u1EA7u",
     wtHint: "Checkout n\u1EB1m trong kho m\xE3 v\xE0 b\u1EAFt \u0111\u1EA7u t\u1EEB nh\xE1nh b\u1EA1n ch\u1ECDn.",
+    wtAuto: "Worktree",
+    wtAutoHint: "Khi b\u1EA1n g\u1EEDi tin nh\u1EAFn \u0111\u1EA7u ti\xEAn, chat n\xE0y c\xF3 checkout ri\xEAng c\u1EE7a kho m\xE3, n\xEAn th\u01B0 m\u1EE5c d\u1EF1 \xE1n kh\xF4ng b\u1ECB \u0111\u1EE5ng t\u1EDBi.",
+    wtNextMessage: "Tin nh\u1EAFn ti\u1EBFp theo b\u1EAFt \u0111\u1EA7u trong worktree m\u1EDBi t\u1EEB {branch}",
+    wtOff: "Chat n\xE0y \u1EDF l\u1EA1i th\u01B0 m\u1EE5c d\u1EF1 \xE1n",
+    wtDefaultBranch: "nh\xE1nh m\u1EB7c \u0111\u1ECBnh",
+    wtLinkedProject: "D\u1EF1 \xE1n n\xE0y v\u1ED1n l\xE0 m\u1ED9t worktree li\xEAn k\u1EBFt n\xEAn kh\xF4ng t\u1EA1o th\xEAm checkout.",
+    wtCreatingBranch: "\u0110ang t\u1EA1o {branch}\u2026",
+    wtDockLabel: "Tr\u1EA1ng th\xE1i worktree",
+    wtDockCreating: "\u0110ang t\u1EA1o worktree {branch}",
+    wtDockHint: "T\u1EEB {base} m\u1EDBi nh\u1EA5t; tin nh\u1EAFn b\u1EAFt \u0111\u1EA7u khi checkout s\u1EB5n s\xE0ng.",
+    wtDockCreated: "Worktree s\u1EB5n s\xE0ng: {branch}",
+    wtDockCreatedHint: "Chat n\xE0y gi\u1EDD l\xE0m vi\u1EC7c trong checkout ri\xEAng.",
+    wtDockFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c worktree",
+    wtDockFailedHint: "Tin nh\u1EAFn ti\u1EBFp t\u1EE5c trong th\u01B0 m\u1EE5c d\u1EF1 \xE1n. B\u1EA5m th\u1EED l\u1EA1i \u0111\u1EC3 t\u1EA1o {base} cho tin nh\u1EAFn sau.",
+    wtDockRetry: "Th\u1EED l\u1EA1i",
+    wtDockContinue: "Ti\u1EBFp t\u1EE5c \u1EDF \u0111\xE2y",
+    wtDockDismiss: "\u0110\xF3ng",
     gitSettingsTitle: "Worktree v\xE0 pull request \u0111\xE3 g\u1ED9p",
     gitSettingsSummary: "D\u1ECDn d\u1EB9p sau khi pull request c\u1EE7a phi\xEAn \u0111\u01B0\u1EE3c g\u1ED9p",
     gitSettingsMerged: "Khi pull request c\u1EE7a phi\xEAn \u0111\u01B0\u1EE3c g\u1ED9p",
@@ -1015,6 +1049,7 @@
       mergePull: route("mergePull"),
       publish: route("publish"),
       worktreeState: route("worktreeState"),
+      worktreeRequest: route("worktreeRequest"),
       worktrees: route("worktrees"),
       worktreeAdd: route("worktreeAdd"),
       worktreeSwitch: route("worktreeSwitch"),
@@ -1125,6 +1160,10 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 
 /* Body */
 .ph-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
+/* A detail pane scrolls on its own, so the back bar stays put and everything
+   below the fold stays readable in a panel of any height. */
+.ph-detail-body{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.ph-detail-body .ph-toolbar{position:sticky;top:0;z-index:6;background:var(--dsw-alias-bg-base)}
 .ph-toolbar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l3);flex:none;flex-wrap:wrap}
 .ph-toolbar .ph-spacer{flex:1 1 auto}
 .ph-toolbar-title{font-weight:600;font-size:12px}
@@ -1299,6 +1338,21 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 
 /* Settings card (plugin row) */
 .ph-wrap{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ph-wt-toggle{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:11.5px;cursor:pointer}
+.ph-wt-toggle input{flex:none;margin:0;cursor:pointer}
+.ph-wt-toggle input:disabled{cursor:default}
+
+/* Worktree status above the composer: creation, success, and failure */
+.ph-dock{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);font-size:11.5px;min-width:0}
+.ph-dock[data-tone=busy]{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l1))}
+.ph-dock[data-tone=success]{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 8%,var(--dsw-alias-bg-layer-1))}
+.ph-dock[data-tone=error]{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 7%,var(--dsw-alias-bg-layer-1))}
+.ph-dock-icon{display:flex;flex:none;color:var(--dsw-alias-label-secondary)}
+.ph-dock[data-tone=success] .ph-dock-icon{color:var(--dsw-alias-state-success-primary)}
+.ph-dock[data-tone=error] .ph-dock-icon{color:var(--dsw-alias-state-error-primary)}
+.ph-dock-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.ph-dock-title{font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ph-dock-detail{color:var(--dsw-alias-label-tertiary);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ph-setting{display:flex;flex-direction:column;gap:7px;padding:9px 0}
 .ph-setting-head{font-size:12.5px;font-weight:500}
 .ph-check-row{display:flex;align-items:center;gap:7px;font-size:12px}
@@ -2535,10 +2589,15 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
   }
 
   // src/client/worktree.tsx
+  var DOCK_POLL_MS = 1200;
+  var DOCK_SUCCESS_MS = 8e3;
   function WorktreeOption(props) {
     const { t, info } = props;
-    const current = info?.current ?? null;
-    const bases = props.source === "remote" ? info?.bases?.remote ?? [] : info?.bases?.local ?? [];
+    if (info.enabled !== true || info.supported !== true) {
+      return info.reason === "linked-project" ? h("span", { className: "ph-hint ph-tiny", "data-personal-hub-worktree": true }, t("wtLinkedProject")) : null;
+    }
+    const current = info.current ?? null;
+    const bases = props.source === "remote" ? info.bases?.remote ?? [] : info.bases?.local ?? [];
     const options = bases.map((item) => ({
       value: props.source === "remote" ? item.branch : item.name,
       label: item.name
@@ -2546,41 +2605,40 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     if (props.base.length > 0 && !options.some((option) => option.value === props.base)) {
       options.unshift({ value: props.base, label: props.base });
     }
+    const creating = info.creating ?? null;
     return h(
       "span",
       { className: "ph-wrap", "data-personal-hub-worktree": true },
-      current === null ? h("button", {
-        type: "button",
-        className: "ph-button",
-        "aria-pressed": props.busy ? "true" : "false",
-        title: t("wtHint"),
-        disabled: props.busy || options.length === 0,
-        onClick: props.onEnable
-      }, h(Icon, { name: "folder", size: 11 }), props.busy ? t("wtBusy") : t("wtOption")) : h(
+      current === null ? h(
+        "label",
+        {
+          className: "ph-check-inline ph-wt-toggle",
+          title: t("wtAutoHint")
+        },
+        h("input", {
+          type: "checkbox",
+          checked: props.wanted,
+          disabled: props.busy,
+          onChange: (event) => props.onToggle(event.target.checked)
+        }),
+        h(Icon, { name: "branch", size: 11 }),
+        h("span", null, t("wtAuto"))
+      ) : h(
         "span",
         { className: "ph-chip ph-mono", title: String(current.path ?? "") },
         h(Icon, { name: "branch", size: 11 }),
-        h("span", { className: "ph-ellipsis" }, String(current.branch ?? "")),
-        h("button", {
-          type: "button",
-          className: "ph-icon-button",
-          style: { width: "16px", height: "16px" },
-          title: t("wtRemove"),
-          "aria-label": t("wtRemove"),
-          disabled: props.busy,
-          onClick: props.onRemove
-        }, h(Icon, { name: "cross", size: 10 }))
+        h("span", { className: "ph-ellipsis" }, String(current.branch ?? ""))
       ),
-      h("select", {
+      props.wanted || current !== null ? h("select", {
         className: "ph-select",
         style: { width: "auto", maxWidth: "168px" },
         value: props.base,
-        disabled: props.busy || options.length === 0,
+        disabled: props.busy || options.length === 0 || current !== null,
         "aria-label": t("wtBase"),
         title: t("wtBase"),
         onChange: (event) => props.onBase(event.target.value)
-      }, options.length === 0 ? h("option", { value: "" }, t("wtNoBase")) : options.map((option) => h("option", { key: option.value, value: option.value }, option.label))),
-      current === null ? h(
+      }, options.length === 0 ? h("option", { value: "" }, t("wtNoBase")) : options.map((option) => h("option", { key: option.value, value: option.value }, option.label))) : null,
+      props.wanted || current !== null ? h(
         "div",
         { style: { display: "inline-flex", border: "1px solid var(--dsw-alias-border-l1)", borderRadius: "7px", overflow: "hidden" } },
         ["local", "remote"].map((kind) => h("button", {
@@ -2589,10 +2647,16 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           className: "ph-filter",
           style: { border: 0, borderRadius: 0 },
           "aria-pressed": props.source === kind ? "true" : "false",
-          disabled: props.busy,
+          disabled: props.busy || current !== null,
           onClick: () => props.onSource(kind)
         }, kind === "remote" ? t("wtRemote") : t("wtLocal")))
       ) : null,
+      creating === null ? null : h(
+        "span",
+        { className: "ph-chip", "data-tone": "business" },
+        h("span", { className: "ph-spinner" }),
+        t("wtCreatingBranch", { branch: creating.branch })
+      ),
       props.error.length > 0 ? h("span", { className: "ph-error-text" }, props.error) : null,
       current !== null && props.notice.length > 0 ? h("span", { className: "ph-ok ph-tiny" }, props.notice) : null
     );
@@ -2602,6 +2666,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const sessionId = typeof props.sessionId === "string" ? props.sessionId : typeof props.session?.id === "string" ? props.session.id : "";
     const cwd = typeof props.useSessions === "function" ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? "") : "";
     const [info, setInfo] = useState(void 0);
+    const [wanted, setWanted] = useState(false);
     const [source, setSource] = useState("local");
     const [base, setBase] = useState("");
     const [busy, setBusy] = useState(false);
@@ -2613,74 +2678,199 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       api.worktreeState({ sessionId, cwd: cwd || void 0, probe: true }).then((value) => {
         if (!alive) return;
         setInfo(value);
-        setSource(value?.sourceDefault === "remote" ? "remote" : "local");
-        setBase(value?.bases?.defaultBase ?? "");
+        setSource(value.request?.source ?? value.sourceDefault ?? "local");
+        setBase(value.request?.base ?? value.bases?.defaultBase ?? "");
+        setWanted(value.request === null || value.request === void 0 ? value.auto !== false : value.request.enabled);
       }).catch(() => {
-        if (alive) setInfo({ enabled: false, supported: false, reason: null, sessionId, current: null, bases: null, project: null });
+        if (alive) setInfo(void 0);
       });
       return () => {
         alive = false;
       };
     }, [api, sessionId, cwd]);
-    const create = useCallback(async (nextBase, nextSource) => {
+    const apply = useCallback(async (next) => {
+      if (sessionId.length === 0) return;
       setBusy(true);
       setError("");
       setNotice("");
       try {
-        if ((info?.current ?? null) !== null) {
-          await api.worktreeRemove({ sessionId, deleteBranch: true });
-          setInfo((previous) => previous === void 0 ? previous : { ...previous, current: null });
-        }
-        const answer = await api.worktreeCreate({ sessionId, cwd: cwd || void 0, base: nextBase, source: nextSource });
-        setBase(nextBase);
-        setSource(nextSource);
-        setInfo((previous) => previous === void 0 ? previous : { ...previous, current: answer.worktree });
-        setNotice(t("wtCreated", { branch: String(answer.worktree?.branch ?? "") }));
+        await api.worktreeRequest({
+          sessionId,
+          cwd: cwd || void 0,
+          enabled: next.wanted,
+          base: next.base,
+          source: next.source
+        });
+        setWanted(next.wanted);
+        setBase(next.base);
+        setSource(next.source);
+        setNotice(next.wanted ? t("wtNextMessage", { branch: next.base.length > 0 ? next.base : t("wtDefaultBranch") }) : t("wtOff"));
       } catch (failure) {
         setError(`${t("wtFailed")}: ${messageOf(failure)}`);
       } finally {
         setBusy(false);
       }
-    }, [api, sessionId, cwd, info, t]);
-    const remove = useCallback(async () => {
-      setBusy(true);
-      setError("");
-      setNotice("");
-      try {
-        await api.worktreeRemove({ sessionId, deleteBranch: false });
-        setInfo((previous) => previous === void 0 ? previous : { ...previous, current: null });
-        setNotice(t("wtRemoved"));
-      } catch (failure) {
-        setError(`${t("wtFailed")}: ${messageOf(failure)}`);
-      } finally {
-        setBusy(false);
-      }
-    }, [api, sessionId, t]);
+    }, [api, sessionId, cwd, t]);
     if (sessionId.length === 0 || info === void 0) return null;
-    const current = info.current ?? null;
     return h(WorktreeOption, {
       t,
       info,
       source,
       base,
+      wanted,
       busy,
       error,
       notice,
-      onEnable: () => void create(base, source),
-      onRemove: () => void remove(),
-      onBase: (value) => {
-        setBase(value);
-        if (current !== null) void create(value, source);
-      },
+      onToggle: (next) => void apply({ wanted: next, base, source }),
+      onBase: (value) => void apply({ wanted, base: value, source }),
       onSource: (kind) => {
         const list = kind === "remote" ? info.bases?.remote ?? [] : info.bases?.local ?? [];
         const preferred = info.bases?.defaultBase ?? "";
         const names = list.map((item) => kind === "remote" ? item.branch : item.name);
         const next = names.includes(preferred) ? preferred : names[0] ?? "";
-        setSource(kind);
-        setBase(next);
-        if (current !== null) void create(next, kind);
+        void apply({ wanted, base: next, source: kind });
       }
+    });
+  }
+  function WorktreeDockCard(props) {
+    const { t } = props;
+    const failed = props.request !== null && props.request.error !== null && props.request.error !== void 0;
+    if (!failed && props.creating === null && props.created.length === 0) return null;
+    const detail = props.creating === null ? failed ? t("wtDockFailedHint", { base: props.request?.base.length === 0 ? t("wtDefaultBranch") : String(props.request?.base) }) : t("wtDockCreatedHint") : t("wtDockHint", {
+      base: props.creating.remote ? `${props.creating.remote}/${props.creating.base ?? ""}` : String(props.creating.base ?? "")
+    });
+    const title = props.creating === null ? failed ? t("wtDockFailed") : t("wtDockCreated", { branch: props.created }) : t("wtDockCreating", { branch: props.creating.branch });
+    return h(
+      "div",
+      {
+        className: "ph-dock",
+        "data-tone": failed ? "error" : props.creating === null ? "success" : "busy",
+        role: props.creating === null && !failed ? "status" : void 0
+      },
+      h(
+        "span",
+        { className: "ph-dock-icon" },
+        props.creating === null ? h(Icon, { name: failed ? "alert" : "check", size: 13 }) : h("span", { className: "ph-spinner" })
+      ),
+      h(
+        "span",
+        { className: "ph-dock-text" },
+        h("span", { className: "ph-dock-title" }, title),
+        h("span", { className: "ph-dock-detail" }, detail)
+      ),
+      props.error.length > 0 ? h("span", { className: "ph-error-text" }, props.error) : null,
+      h("span", { className: "ph-spacer" }),
+      failed ? h("button", {
+        type: "button",
+        className: "ph-button",
+        disabled: props.busy,
+        onClick: props.onContinue
+      }, t("wtDockContinue")) : null,
+      failed ? h("button", {
+        type: "button",
+        className: "ph-primary",
+        disabled: props.busy,
+        onClick: props.onRetry
+      }, t("wtDockRetry")) : h("button", {
+        type: "button",
+        className: "ph-icon-button",
+        title: t("wtDockDismiss"),
+        "aria-label": t("wtDockDismiss"),
+        onClick: props.onDismiss
+      }, h(Icon, { name: "cross", size: 11 }))
+    );
+  }
+  function WorktreeDock(props) {
+    const { t, api } = props;
+    const sessionId = typeof props.sessionId === "string" ? props.sessionId : typeof props.session?.id === "string" ? props.session.id : "";
+    const cwd = typeof props.useSessions === "function" ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? "") : "";
+    const [info, setInfo] = useState(void 0);
+    const [created, setCreated] = useState("");
+    const [hidden, setHidden] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const creating = info?.creating ?? null;
+    const request = info?.request ?? null;
+    const waiting = info !== void 0 && info.current === null && (creating !== null || request !== null && request.enabled && request.error === null);
+    const fresh = info !== void 0 && info.current === null && info.started !== true && info.supported === true;
+    const poll = waiting || fresh;
+    useEffect(() => {
+      if (sessionId.length === 0 || !poll) return void 0;
+      let alive = true;
+      let stopped = false;
+      const load = async () => {
+        try {
+          const value = await api.worktreeState({ sessionId, cwd: cwd || void 0, lite: true });
+          if (!alive) return;
+          setInfo(value);
+          if (value.current !== null && value.current !== void 0) {
+            setCreated(value.current.branch);
+            stopped = true;
+          }
+        } catch {
+        }
+      };
+      void load();
+      const timer = setInterval(() => {
+        if (stopped) return;
+        void load();
+      }, DOCK_POLL_MS);
+      return () => {
+        alive = false;
+        clearInterval(timer);
+      };
+    }, [api, sessionId, cwd, poll]);
+    useEffect(() => {
+      if (created.length === 0) return void 0;
+      const timer = setTimeout(() => setCreated(""), DOCK_SUCCESS_MS);
+      return () => clearTimeout(timer);
+    }, [created]);
+    useEffect(() => {
+      if (sessionId.length === 0 || info !== void 0) return void 0;
+      let alive = true;
+      api.worktreeState({ sessionId, cwd: cwd || void 0, lite: true }).then((value) => {
+        if (alive) setInfo(value);
+      }).catch(() => void 0);
+      return () => {
+        alive = false;
+      };
+    }, [api, sessionId, cwd, info]);
+    const retry = async () => {
+      setBusy(true);
+      setError("");
+      try {
+        const answer = await api.worktreeRequest({ sessionId, cwd: cwd || void 0, enabled: true, retry: true });
+        setInfo((previous) => previous === void 0 ? previous : { ...previous, request: answer.request });
+        setHidden(false);
+      } catch (failure) {
+        setError(messageOf(failure));
+      } finally {
+        setBusy(false);
+      }
+    };
+    const continueHere = async () => {
+      setBusy(true);
+      try {
+        const answer = await api.worktreeRequest({ sessionId, cwd: cwd || void 0, enabled: false });
+        setInfo((previous) => previous === void 0 ? previous : { ...previous, request: answer.request });
+        setHidden(true);
+      } catch (failure) {
+        setError(messageOf(failure));
+      } finally {
+        setBusy(false);
+      }
+    };
+    if (hidden || sessionId.length === 0 || info === void 0) return null;
+    return h(WorktreeDockCard, {
+      t,
+      creating,
+      request,
+      created,
+      busy,
+      error,
+      onRetry: () => void retry(),
+      onContinue: () => void continueHere(),
+      onDismiss: () => setHidden(true)
     });
   }
 
@@ -5701,10 +5891,14 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           setSelection(null);
         }
       }),
+      // The list views scroll as a whole, so their toolbars travel with the
+      // content. The Changes and Worktrees views and every detail pane own their
+      // scroller instead: a detail that is merely clipped cannot be read below
+      // the fold, which is what this wrapper used to do.
       h(
         "div",
         { style: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto", overflow: isDetail || view === "changes" || view === "worktrees" ? "hidden" : "auto" } },
-        body2
+        isDetail ? h("div", { className: "ph-detail-body", "data-personal-hub-detail-body": true }, body2) : body2
       ),
       pending === null ? null : h(DefaultBranchDialog, {
         t,
@@ -5917,6 +6111,8 @@ ${repo.root}` }, repo.name),
         MergeSettingsCard,
         WorktreeHero,
         WorktreeOption,
+        WorktreeDock,
+        WorktreeDockCard,
         GitPanel,
         GitHeaderButton,
         GitActions,
@@ -5975,11 +6171,22 @@ ${repo.root}` }, repo.name),
             name: "conversation.hero.options",
             id: "personal-hub-worktree",
             order: 20,
-            label: () => t("wtOption"),
+            label: () => t("wtAuto"),
             locale: NS,
             inject: () => ({ api, t })
           }, WorktreeHero)),
           "personal-hub: worktree option"
+        );
+        ctx.effect(
+          () => ctx.slots.inject("conversation.input.dock", () => registerSlot(ctx, {
+            name: "conversation.input.dock",
+            id: "personal-hub-worktree-status",
+            order: 20,
+            label: () => t("wtDockLabel"),
+            locale: NS,
+            inject: () => ({ api, t })
+          }, WorktreeDock)),
+          "personal-hub: worktree status"
         );
         if (typeof ctx.inject !== "function") return;
         ctx.inject(["sidebarRightTabs", "sidebarRight"], (scoped) => {

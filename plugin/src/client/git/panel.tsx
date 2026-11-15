@@ -502,8 +502,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         setSelection(null)
       },
     }),
+    // The list views scroll as a whole, so their toolbars travel with the
+    // content. The Changes and Worktrees views and every detail pane own their
+    // scroller instead: a detail that is merely clipped cannot be read below
+    // the fold, which is what this wrapper used to do.
     h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto', overflow: isDetail || view === 'changes' || view === 'worktrees' ? 'hidden' : 'auto' } },
-      body),
+      isDetail ? h('div', { className: 'ph-detail-body', 'data-personal-hub-detail-body': true }, body) : body),
 
     pending === null
       ? null

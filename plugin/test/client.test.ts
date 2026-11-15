@@ -153,6 +153,15 @@ test('the client module registers the row card, the Git tab type, its body, and 
   assert.ok(button, 'registered the header button')
   ;(button.options.inject as () => { open(): void })().open()
   assert.deepEqual(opened, ['personal-hub-git'])
+
+  // The New Session row records what the first message should do, and the
+  // status card above the composer reports the creation it starts.
+  const option = registrations.find((entry) => entry.options.name === 'conversation.hero.options')
+  assert.ok(option, 'registered the New Session worktree option')
+  assert.equal(typeof (option.options.inject as () => Record<string, unknown>)().api, 'object')
+  const dock = registrations.find((entry) => entry.options.name === 'conversation.input.dock')
+  assert.ok(dock, 'registered the worktree status card')
+  assert.equal(typeof (dock.options.inject as () => Record<string, unknown>)().api, 'object')
 })
 
 test('the caller posts to the Host route and unwraps the envelope', async () => {
@@ -441,7 +450,88 @@ test('the commit box shows the selection, the placeholder, and both commit actio
   assert.match(textOf(composer), /gitCommitOnNewBranch/)
 })
 
-test('the worktree option shows the current checkout and the base picker', async () => {
+test('the worktree option asks for a checkout on send instead of making one now', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WorktreeOption = view.WorktreeOption as (props: Record<string, unknown>) => unknown
+  const toggles: boolean[] = []
+  const option = WorktreeOption({
+    t: (key: string) => key,
+    info: {
+      enabled: true,
+      supported: true,
+      reason: null,
+      sessionId: 's1',
+      current: null,
+      bases: {
+        local: [{ name: 'main', short: 'main', date: '', subject: 'first', current: true, remote: null }],
+        remote: [{ name: 'origin/main', remote: 'origin', branch: 'main', short: 'main', date: '' }],
+        defaultBase: 'main',
+        current: 'main',
+      },
+      project: { directory: '/repo', linked: false },
+      auto: true,
+      request: null,
+      creating: null,
+      started: false,
+    },
+    source: 'remote',
+    base: 'main',
+    wanted: true,
+    busy: false,
+    error: '',
+    notice: '',
+    onToggle: (next: boolean) => toggles.push(next),
+    onBase: () => {},
+    onSource: () => {},
+  })
+  assert.match(textOf(option), /wtAuto/)
+  assert.match(textOf(option), /main/)
+  const box = findAll(option, (element) => element.type === 'input')[0]
+  assert.equal(box?.props?.checked, true)
+  ;(box?.props?.onChange as (event: { target: { checked: boolean } }) => void)({ target: { checked: false } })
+  assert.deepEqual(toggles, [false])
+  // Nothing is created while the chat is being written: the row has no create button.
+  assert.equal(findAll(option, (element) => /wtOption|wtBusy/.test(textOf(element))).length, 0)
+})
+
+test('the worktree status card reports a creation, its success, and its failure', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WorktreeDockCard = view.WorktreeDockCard as (props: Record<string, unknown>) => unknown
+  const t = (key: string, values?: Record<string, string | number>) => values === undefined ? key : `${key}:${Object.values(values).join(',')}`
+  const shared = { t, busy: false, error: '', onRetry: () => {}, onContinue: () => {}, onDismiss: () => {} }
+
+  // A message waits while the checkout is created.
+  const creating = WorktreeDockCard({
+    ...shared,
+    creating: { phase: 'create', branch: 'dsh-ab12-cd34', base: 'main', remote: 'origin', source: 'remote', startedAt: 1 },
+    request: { enabled: true, base: 'main', source: 'remote', explicit: false, error: null, createdAt: 1, updatedAt: 1 },
+    created: '',
+  })
+  assert.match(textOf(creating), /wtDockCreating:dsh-ab12-cd34/)
+  assert.match(textOf(creating), /wtDockHint:origin\/main/)
+  assert.equal((creating as { props: Record<string, unknown> }).props['data-tone'], 'busy')
+
+  // A failure keeps the message in the project and offers the two ways out.
+  const failed = WorktreeDockCard({
+    ...shared,
+    creating: null,
+    request: { enabled: true, base: 'main', source: 'remote', explicit: true, error: 'worktree/no-remote: no remote', createdAt: 1, updatedAt: 2 },
+    created: '',
+  })
+  assert.match(textOf(failed), /wtDockFailed/)
+  assert.match(textOf(failed), /wtDockRetry/)
+  assert.match(textOf(failed), /wtDockContinue/)
+  assert.equal((failed as { props: Record<string, unknown> }).props['data-tone'], 'error')
+
+  // The success names the branch, and the card then stays out of the way.
+  const done = WorktreeDockCard({ ...shared, creating: null, request: null, created: 'feat/page' })
+  assert.match(textOf(done), /wtDockCreated:feat\/page/)
+  assert.equal(WorktreeDockCard({ ...shared, creating: null, request: null, created: '' }), null)
+})
+
+test('the worktree option shows the checkout a chat already has', async () => {
   const module = await loadClient()
   const view = module.__internal as Record<string, unknown>
   const WorktreeOption = view.WorktreeOption as (props: Record<string, unknown>) => unknown
@@ -452,27 +542,76 @@ test('the worktree option shows the current checkout and the base picker', async
       supported: true,
       reason: null,
       sessionId: 's1',
-      current: { path: '/repo/.agents/worktrees/dsh-1', branch: 'dsh-1', name: 'dsh-1', repositoryRoot: '/repo', sessionId: 's1', createdAt: 1 },
-      bases: {
-        local: [{ name: 'main', short: 'main', date: '', subject: 'first', current: true, remote: null }],
-        remote: [],
-        defaultBase: 'main',
-        current: 'main',
-      },
+      current: { path: '/repo/.agents/worktrees/dsh-1', branch: 'feat/x', name: 'dsh-1', repositoryRoot: '/repo', sessionId: 's1', createdAt: 1 },
+      bases: null,
       project: { directory: '/repo', linked: false },
+      auto: true,
+      request: null,
+      creating: null,
+      started: false,
     },
     source: 'local',
     base: 'main',
+    wanted: true,
     busy: false,
     error: '',
     notice: '',
-    onEnable: () => {},
-    onRemove: () => {},
+    onToggle: () => {},
     onBase: () => {},
     onSource: () => {},
   })
-  assert.match(textOf(option), /dsh-1/)
-  assert.match(textOf(option), /main/)
+  assert.match(textOf(option), /feat\/x/)
+})
+
+test('the worktree option stays out of a project that cannot host one', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WorktreeOption = view.WorktreeOption as (props: Record<string, unknown>) => unknown
+  const linked = WorktreeOption({
+    t: (key: string) => key,
+    info: {
+      enabled: true,
+      supported: false,
+      reason: 'linked-project',
+      sessionId: 's1',
+      current: null,
+      bases: null,
+      project: { directory: '/repo/wt', linked: true },
+    },
+    source: 'local',
+    base: '',
+    wanted: true,
+    busy: false,
+    error: '',
+    notice: '',
+    onToggle: () => {},
+    onBase: () => {},
+    onSource: () => {},
+  })
+  assert.match(textOf(linked), /wtLinkedProject/)
+
+  const outside = WorktreeOption({
+    t: (key: string) => key,
+    info: {
+      enabled: true,
+      supported: false,
+      reason: 'not-a-repository',
+      sessionId: 's1',
+      current: null,
+      bases: null,
+      project: null,
+    },
+    source: 'local',
+    base: '',
+    wanted: true,
+    busy: false,
+    error: '',
+    notice: '',
+    onToggle: () => {},
+    onBase: () => {},
+    onSource: () => {},
+  })
+  assert.equal(outside, null)
 })
 
 test('the settings form draws every switch it can save', async () => {
