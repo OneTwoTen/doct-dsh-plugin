@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="vi" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>personal-hub diff scroll check</title>
+<link id="sheet" rel="stylesheet" href="git.css">
+<style>
+  /* Stand-ins for the Harness theme tokens the panel reads. */
+  :root{
+    --dsw-alias-bg-base:#ffffff;
+    --dsw-alias-bg-layer-1:#f5f5f5;
+    --dsw-alias-bg-layer-2:#ebebeb;
+    --dsw-alias-label-primary:#161616;
+    --dsw-alias-label-secondary:#5b5b5b;
+    --dsw-alias-label-tertiary:#8b8b8b;
+    --dsw-alias-label-primary-inverted:#ffffff;
+    --dsw-alias-label-on-color:#ffffff;
+    --dsw-alias-border-l1:#d8d8d8;
+    --dsw-alias-border-l3:#e4e4e4;
+    --dsw-alias-brand-primary:#0d0d0d;
+    --dsw-alias-state-success-primary:#1a7f37;
+    --dsw-alias-state-warn-primary:#9a6700;
+    --dsw-alias-state-error-primary:#cf222e;
+  }
+  html,body{margin:0;background:#eceef1;font-family:ui-sans-serif,system-ui,sans-serif}
+  .frame{width:594px;height:560px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);box-sizing:border-box}
+</style>
+<script>
+  // The harness shows the state the bug report captured: the user scrolled a
+  // long diff sideways, so the hunk is wider than the visible panel.
+  const q = new URLSearchParams(location.search)
+  if (q.get('css')) document.getElementById('sheet').href = q.get('css')
+  addEventListener('load', () => {
+    const diff = document.getElementById('diff')
+    if (diff) diff.scrollLeft = q.get('scroll') === 'max' ? diff.scrollWidth : Number(q.get('scroll') || 0)
+  })
+</script>
+</head>
+<body>
+<div class="frame">
+  <div class="ph-git" style="height:100%">
+    <div class="ph-stack-toolbar">
+      <span class="ph-dim ph-tiny">9 files</span>
+      <span class="ph-counts"><span class="ph-add">+21</span><span class="ph-del">−71</span></span>
+      <span class="ph-spacer"></span>
+    </div>
+    <div class="ph-body" style="flex:1 1 auto">
+      <section class="ph-file">
+        <div class="ph-file-head" data-expanded="true">
+          <input type="checkbox" class="ph-file-check" checked>
+          <span class="ph-badge" data-tone="warn">M</span>
+          <span class="ph-file-path"><span class="ph-file-dir">apps/web/src/app/(public)/</span><span class="ph-file-sep">/</span><span class="ph-file-name">PublicChrome.test.tsx</span></span>
+          <span class="ph-counts"><span class="ph-add">+10</span><span class="ph-del">−4</span></span>
+        </div>
+      </section>
+      <section class="ph-file">
+        <div class="ph-file-head" data-expanded="true">
+          <input type="checkbox" class="ph-file-check" checked>
+          <span class="ph-badge" data-tone="error">D</span>
+          <span class="ph-file-path"><span class="ph-file-dir">apps/web/src/app/(public)/</span><span class="ph-file-sep">/</span><span class="ph-file-name">PublicChrome.tsx</span></span>
+          <span class="ph-counts"><span class="ph-del">−12</span></span>
+        </div>
+        <div class="ph-file-body">
+          <div class="ph-diff" data-wrap="false" id="diff">
+            <div>
+              <div class="ph-hunk-head">@@ -118,12 +118,0 @@ export function PublicHeader()</div>
+              <div class="ph-line" data-kind="ctx"><span class="ph-num">240</span><span class="ph-num">200</span><span class="ph-sign"> </span><span class="ph-code">function PublicHeader({</span></div>
+              <div class="ph-line" data-kind="ctx"><span class="ph-num">241</span><span class="ph-num">200</span><span class="ph-sign"> </span><span class="ph-code">  &lt;BrandLogo /&gt;</span></div>
+              <div class="ph-line" data-kind="ctx"><span class="ph-num">242</span><span class="ph-num">200</span><span class="ph-sign"> </span><span class="ph-code">  &lt;nav aria-label="Điều hướng chính" className="public-nav"&gt;</span></div>
+              <div class="ph-line" data-kind="ctx"><span class="ph-num">243</span><span class="ph-num">200</span><span class="ph-sign"> </span><span class="ph-code">    {publicNavigation.map((item) =&gt; {</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">119</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">      if (item.href === null) {</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">120</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">        return (</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">121</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">          &lt;span</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">122</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">            aria-disabled="true"</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">123</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">            className="public-nav__planned public-nav__planned--highlighted public-nav__planned--wide"</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">124</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">            key={item.key}</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">125</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">          &gt;</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">126</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">            {item.label}</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">127</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">          &lt;/span&gt;</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">128</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">        );</span></div>
+              <div class="ph-line" data-kind="del"><span class="ph-num">129</span><span class="ph-num"></span><span class="ph-sign">−</span><span class="ph-code">      }</span></div>
+              <div class="ph-line" data-kind="ctx"><span class="ph-num">255</span><span class="ph-num">200</span><span class="ph-sign"> </span><span class="ph-code">      const submenu = getPublicSubmenu(item.key, featureLinks);</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="ph-file">
+        <div class="ph-file-head">
+          <input type="checkbox" class="ph-file-check" checked>
+          <span class="ph-badge" data-tone="warn">M</span>
+          <span class="ph-file-path"><span class="ph-file-name">PublicMobileNav.test.tsx</span></span>
+          <span class="ph-counts"><span class="ph-add">+6</span><span class="ph-del">−4</span></span>
+        </div>
+      </section>
+    </div>
+    <div class="ph-commit" style="flex:none;padding:8px 12px">
+      <div class="ph-commit-head"><span>Commit changes</span><span class="ph-spacer"></span><span>9 files</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
