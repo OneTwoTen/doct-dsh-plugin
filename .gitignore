@@ -1,5 +1,6 @@
 # Bỏ qua phụ thuộc và tệp tạm
 node_modules/
+.tmp-verify/
 *.log
 *.tmp
 Thumbs.db
