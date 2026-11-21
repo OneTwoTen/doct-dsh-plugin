@@ -167,11 +167,22 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-hunk-head{padding:3px 11px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:11px;white-space:pre;position:sticky;left:0}
 .ph-line{display:flex;align-items:flex-start;min-width:0;white-space:pre}
 .ph-diff[data-wrap=true] .ph-line{white-space:pre-wrap;word-break:break-word}
+/* A hunk is as wide as its longest line, so a tinted row covers the whole
+   scrollable width instead of ending where the visible panel does. */
+.ph-diff[data-wrap=false] > div:not(.ph-split){width:max-content;min-width:100%}
 .ph-line[data-kind=add]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent)}
 .ph-line[data-kind=del]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}
 .ph-line[data-kind=meta]{color:var(--dsw-alias-label-tertiary);font-style:italic}
 .ph-num{flex:none;width:38px;padding:0 7px;text-align:right;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;user-select:none}
 .ph-sign{flex:none;width:15px;text-align:center;color:var(--dsw-alias-label-tertiary);user-select:none}
+/* The numbers and the +/− sit still while a long line scrolls sideways, so the
+   gutter never slides off the left edge. Their opaque tint matches the row. */
+.ph-line > .ph-num,.ph-line > .ph-sign{position:sticky;z-index:1;background:var(--dsw-alias-bg-base)}
+.ph-line > .ph-num{left:0}
+.ph-line > .ph-num:nth-child(2){left:38px}
+.ph-line > .ph-sign{left:76px}
+.ph-line[data-kind=add] > .ph-num,.ph-line[data-kind=add] > .ph-sign{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,var(--dsw-alias-bg-base))}
+.ph-line[data-kind=del] > .ph-num,.ph-line[data-kind=del] > .ph-sign{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,var(--dsw-alias-bg-base))}
 .ph-code{flex:1 1 auto;min-width:0;padding-right:10px}
 .ph-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0}
 .ph-split .ph-side{display:flex;align-items:flex-start;min-width:0;border-right:1px solid var(--dsw-alias-border-l3);white-space:pre}
