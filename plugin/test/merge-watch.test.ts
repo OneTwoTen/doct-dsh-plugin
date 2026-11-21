@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { createMergeWatcher, mergedCleanup } from '../src/lib/merge-watch.ts'
+import { createMergeWatcher, mayAdoptBranchPull, mergedCleanup } from '../src/lib/merge-watch.ts'
 
 const quietLogger = { info: () => {}, warn: () => {}, error: () => {} }
 
@@ -58,14 +58,15 @@ test('every cleanup switch is independent and off means off', () => {
 })
 
 /** One watcher over a fixed code-host answer. */
-function makeWatcher({ state, worktrees = {}, config = merged, pullState }: {
+function makeWatcher({ state, worktrees = {}, config = merged, active = false, pullState }: {
   state: string
   worktrees?: Record<string, unknown>
   config?: typeof merged
+  active?: boolean
   pullState?: () => Promise<{ number?: number; state?: string; url?: string }>
 }) {
   const store = fakeStore({
-    pulls: { 'session-a': { root: 'C:/repo', remote: { slug: 'o/r' }, number: 7, url: 'u', branch: 'b', done: false } },
+    pulls: { 'session-a': { root: 'C:/repo/.agents/worktrees/x', remote: { slug: 'o/r' }, number: 7, url: 'u', branch: 'b', done: false } },
     worktrees: { ...worktrees },
   })
   const effects: { removed: Array<{ record: unknown; sessionId: string }>; archived: string[] } = { removed: [], archived: [] }
@@ -75,6 +76,7 @@ function makeWatcher({ state, worktrees = {}, config = merged, pullState }: {
     store,
     forge: { pullState: pullState ?? (async () => ({ number: 7, state, url: 'https://host/pr/7' })) },
     runtime: {
+      isSessionActive: () => active,
       async removeSessionWorktree(record, sessionId) {
         effects.removed.push({ record, sessionId })
         return { removed: true, branchDeleted: false }
@@ -91,7 +93,7 @@ function makeWatcher({ state, worktrees = {}, config = merged, pullState }: {
 test('a merged change request removes the worktree and archives the chat', async () => {
   const { watcher, store, effects } = makeWatcher({
     state: 'merged',
-    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'x', repositoryRoot: 'C:/repo' } },
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'b', repositoryRoot: 'C:/repo' } },
   })
   await watcher.runOnce()
   assert.equal(effects.removed.length, 1)
@@ -101,6 +103,34 @@ test('a merged change request removes the worktree and archives the chat', async
   assert.equal(store.state.pulls['session-a'].state, 'merged')
   assert.equal(store.state.pulls['session-a'].worktreeRemoved, true)
   assert.equal(store.state.pulls['session-a'].archived, true)
+})
+
+test('a merged request for another branch never touches the Session checkout', async () => {
+  const { watcher, store, effects } = makeWatcher({
+    state: 'merged',
+    // The stale PR of the main checkout's integration branch, bound by the old
+    // panel to a Session whose own checkout is this worktree.
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'dsh-abc-1234', repositoryRoot: 'C:/repo' } },
+  })
+  await watcher.runOnce()
+  assert.equal(effects.removed.length, 0)
+  assert.equal(effects.archived.length, 0)
+  assert.equal(store.state.pulls['session-a'].done, true)
+  assert.equal(store.state.pulls['session-a'].skipped, 'checkout-mismatch')
+  assert.equal(store.state.pulls['session-a'].state, 'merged')
+})
+
+test('a merged request waits while its Session still stands in the checkout', async () => {
+  const { watcher, store, effects } = makeWatcher({
+    state: 'merged',
+    active: true,
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'b', repositoryRoot: 'C:/repo' } },
+  })
+  await watcher.runOnce()
+  assert.equal(effects.removed.length, 0)
+  assert.equal(effects.archived.length, 0)
+  assert.equal(store.state.pulls['session-a'].done, false)
+  assert.equal(store.state.pulls['session-a'].deferred, 'session-active')
 })
 
 test('a merged change request without a worktree only archives', async () => {
@@ -172,4 +202,38 @@ test('a binding without a number is ignored', async () => {
   const { watcher, store } = makeWatcher({ state: 'open' })
   await watcher.track('session-b', { root: 'C:/repo', number: 0 })
   assert.equal(store.state.pulls['session-b'], undefined)
+})
+
+test('tracking refuses a change request that names another branch', async () => {
+  const { watcher, store } = makeWatcher({
+    state: 'open',
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'dsh-abc-1234', repositoryRoot: 'C:/repo' } },
+  })
+  await watcher.track('session-a', {
+    root: 'C:/repo',
+    remote: { slug: 'o/r' },
+    number: 852,
+    url: 'u',
+    branch: 't3/better-auth-cutover',
+    base: 'main',
+  })
+  assert.equal(store.state.pulls['session-a'].number, 7)
+  assert.equal(store.state.pulls['session-a'].branch, 'b')
+})
+
+test('only an open request of the Session own checkout is adopted', () => {
+  const checkout = { path: 'C:/repo/.agents/worktrees/x', repositoryRoot: 'C:/repo', branch: 'dsh-abc-1234' }
+  const base = { root: 'C:/repo/.agents/worktrees/x', branch: 'dsh-abc-1234', checkout }
+
+  // Already merged history is never adopted: that is what marked a live Session done.
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'merged' } }), false)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'closed' } }), false)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: null }), false)
+
+  // An open request is adoptable only from the Session's own branch and checkout.
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' } }), true)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'draft' } }), true)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, branch: 't3/better-auth-cutover' }), false)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, root: 'C:/elsewhere' }), false)
+  assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, checkout: null }), false)
 })

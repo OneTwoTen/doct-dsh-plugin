@@ -264,6 +264,47 @@ test('a Session moves into its own worktree and back', async () => {
   }
 })
 
+test('an idle Session still reads its worktree instead of the main checkout', async () => {
+  const root = await makeRepository()
+  const agent = { session: { id: SESSION, header: { cwd: root } } }
+  // Mutable handles: the test makes the Session idle the way the Harness does,
+  // by taking away the live working-directory answer.
+  const agents = { get: (id) => (id === SESSION ? agent : undefined) }
+  const workingDirectory = {
+    get: (session) => session.header.cwd,
+    set: async (_agent, path) => path,
+  }
+  const feature = await mountFeature({
+    root,
+    services: { agents, workingDirectory },
+  })
+  try {
+    const created = await feature.call('worktreeCreate', { sessionId: SESSION })
+    assert.equal(created.ok, true, JSON.stringify(created))
+    const record = created.value.worktree
+
+    // Idle: no live answer, and the Session header still names the folder the
+    // chat started in — the main checkout, not the worktree it moved into.
+    agents.get = () => undefined
+    workingDirectory.get = undefined
+
+    const overview = await feature.call('overview', { sessionId: SESSION, cwd: root })
+    assert.equal(overview.ok, true, JSON.stringify(overview))
+    assert.equal(overview.value.repo.root, record.path)
+    assert.equal(overview.value.repo.branch, record.branch)
+    assert.equal(overview.value.worktree.branch, record.branch)
+
+    // A checkout whose registration is gone must not masquerade as the main one.
+    await rm(join(record.path, '.git'), { force: true })
+    const broken = await feature.call('overview', { sessionId: SESSION, cwd: root })
+    assert.equal(broken.ok, true, JSON.stringify(broken))
+    assert.equal(broken.value.repo.root, root)
+  } finally {
+    await feature.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a worktree needs an open Session and an enabled feature', async () => {
   const root = await makeRepository()
   const feature = await mountFeature({ root })

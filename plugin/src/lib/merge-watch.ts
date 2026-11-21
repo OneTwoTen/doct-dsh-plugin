@@ -7,6 +7,8 @@
  * decision is testable without a network or a clock.
  */
 
+import { resolve } from 'node:path'
+
 import type { MergedConfig } from './config.ts'
 import type { Logger } from '../host/dsh.ts'
 import type { MergeSettings } from '../shared/protocol.ts'
@@ -53,6 +55,20 @@ export interface PullBinding {
   worktreeError?: string
   archived?: boolean
   archiveError?: string
+  /**
+   * Why a settled binding did not touch its Session: the tracked change request
+   * belongs to another checkout, so nothing may be removed or archived.
+   */
+  skipped?: string
+  /** Why a merged binding waits: its Session is still standing in the checkout. */
+  deferred?: string
+}
+
+/** The plugin's recorded checkout of one Session, as the matching rules read it. */
+export interface CheckoutFacts {
+  path?: string
+  repositoryRoot?: string
+  branch?: string
 }
 
 /** The durable state the watcher reads and writes. */
@@ -98,6 +114,8 @@ export interface WorktreeRemovalOutcome {
 export interface MergeWatchRuntime {
   removeSessionWorktree(record: unknown, sessionId: string): Promise<WorktreeRemovalOutcome>
   archiveSession(sessionId: string): Promise<boolean>
+  /** Whether the Session is standing in that checkout right now, so cleanup waits. */
+  isSessionActive?(sessionId: string, record: unknown): boolean
 }
 
 /** The configuration the watcher reads. */
@@ -149,6 +167,59 @@ export function mergedCleanup(config: Partial<MergeSettings> | undefined, facts:
   }
 }
 
+/** Whether two absolute paths name the same directory; Windows ignores case. */
+function samePath(left: string, right: string): boolean {
+  if (left.length === 0 || right.length === 0) return false
+  const one = resolve(left)
+  const other = resolve(right)
+  return process.platform === 'win32' ? one.toLowerCase() === other.toLowerCase() : one === other
+}
+
+/**
+ * Whether one tracked change request belongs to a Session's recorded checkout.
+ *
+ * A binding that names a different branch or a different checkout describes some
+ * other work. Acting on it would remove a branch and archive a conversation the
+ * request never belonged to, so every destructive step is gated on this answer.
+ *
+ * @param binding tracked change request, carrying the branch and root it was seen in.
+ * @param checkout the plugin's record of the Session's own checkout, if any.
+ */
+export function checkoutOwnsBinding(
+  binding: { root?: string; branch?: string } | null | undefined,
+  checkout: CheckoutFacts | null | undefined,
+): boolean {
+  if (checkout === null || checkout === undefined) return false
+  const path = String(checkout.path ?? '')
+  if (path.length === 0) return false
+  const branch = String(checkout.branch ?? '')
+  const bound = String(binding?.branch ?? '')
+  if (branch.length > 0 && bound !== branch) return false
+  const repositoryRoot = String(checkout.repositoryRoot ?? '')
+  const root = String(binding?.root ?? '')
+  return samePath(root, path) || (repositoryRoot.length > 0 && samePath(root, repositoryRoot))
+}
+
+/**
+ * Whether an automatically discovered change request may be tracked.
+ *
+ * Only an open or draft change request that belongs to the Session's own
+ * checkout qualifies. A merged or closed one is history: adopting it would mark
+ * the Session done and clean up work that never reached that request.
+ *
+ * @param facts what the panel read about the branch and the Session's checkout.
+ */
+export function mayAdoptBranchPull(facts: {
+  pull?: { state?: string } | null
+  root?: string
+  branch?: string
+  checkout?: CheckoutFacts | null
+}): boolean {
+  const state = String(facts.pull?.state ?? '')
+  if (state !== 'open' && state !== 'draft') return false
+  return checkoutOwnsBinding(facts, facts.checkout)
+}
+
 /**
  * Track change requests and settle each one once.
  *
@@ -174,6 +245,19 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
     const number = Number(record.number)
     if (!Number.isFinite(number) || number <= 0) return
     await store.load()
+    // Never bind a change request that names another checkout: settling it would
+    // remove this Session's branch for work it never pushed.
+    const checkout = store.state.worktrees?.[sessionId] as CheckoutFacts | undefined
+    if (checkout !== undefined && !checkoutOwnsBinding(record as { root?: string; branch?: string }, checkout)) {
+      logger.warn(
+        'git: ignoring change request %d for %s: branch %s is not its checkout branch %s',
+        number,
+        sessionId,
+        String(record.branch ?? ''),
+        String(checkout.branch ?? ''),
+      )
+      return
+    }
     const existing = store.state.pulls?.[sessionId]
     // The same binding needs no rewrite: a settled one must stay settled, and an
     // open one is already polled, so only a different change request is new.
@@ -229,7 +313,47 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
     const next = String(state.state ?? '')
     if (next === 'merged') {
       const worktrees = store.state.worktrees ?? {}
-      const action = mergedCleanup(merged, { hasWorktree: worktrees[sessionId] !== undefined })
+      const checkout = worktrees[sessionId] as CheckoutFacts | undefined
+      // A merged change request only settles the Session whose checkout it came
+      // from. Anything else is a mis-binding (another branch, another checkout):
+      // stop watching it instead of deleting work this Session still owns.
+      if (checkout !== undefined && !checkoutOwnsBinding(record, checkout)) {
+        logger.warn(
+          'git: %s merged but belongs to branch %s, not the checkout of %s (%s); leaving it alone',
+          String(state.url ?? record.url ?? record.number ?? ''),
+          String(record.branch ?? ''),
+          sessionId,
+          String(checkout.branch ?? ''),
+        )
+        await store.update((value) => {
+          value.pulls ??= {}
+          value.pulls[sessionId] = {
+            ...value.pulls[sessionId],
+            state: 'merged',
+            done: true,
+            skipped: 'checkout-mismatch',
+            checkedAt: now(),
+          }
+        })
+        return
+      }
+      if (checkout !== undefined && runtime.isSessionActive?.(sessionId, checkout) === true) {
+        // Removing the checkout under a live Session is exactly the damage this
+        // watcher must not do; the next pass retries once the chat has left it.
+        logger.info('git: %s merged but its Session is still in the checkout; cleanup waits', sessionId)
+        await store.update((value) => {
+          value.pulls ??= {}
+          value.pulls[sessionId] = {
+            ...value.pulls[sessionId],
+            state: 'merged',
+            done: false,
+            deferred: 'session-active',
+            checkedAt: now(),
+          }
+        })
+        return
+      }
+      const action = mergedCleanup(merged, { hasWorktree: checkout !== undefined })
       const outcome: PullBinding = { cleanedAt: now(), mergedUrl: state.url ?? record.url ?? '' }
       if (action.removeWorktree) {
         try {

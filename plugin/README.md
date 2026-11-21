@@ -389,6 +389,10 @@ danh sách đang hoạt động nhưng vẫn khôi phục được. PR **đã đ
 Mỗi liên kết chỉ xử lý một lần, nên khởi động lại DSH không lặp lại thao tác. Nếu worktree còn thay
 đổi chưa commit, plugin **không** xoá: nó ghi lý do vào `git.json` và để bạn quyết định.
 
+Việc dọn chỉ áp dụng cho **PR đúng nhánh checkout của phiên**, và chỉ khi phiên không còn đứng
+trong checkout đó: một PR đã gộp của nhánh khác (ví dụ nhánh của repo chính mà bảng Git đọc khi
+phiên đang đóng) không bao giờ được gắn vào phiên, nên không thể xoá worktree hay lưu trữ phiên.
+
 ### Nguồn dữ liệu
 
 Git chạy qua dịch vụ `subprocess` của DSH (có dự phòng `child_process`), với timeout và giới hạn
