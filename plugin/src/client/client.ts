@@ -23,6 +23,7 @@ import { GitActions } from './git/actions.tsx'
 import { DiffFileSection } from './git/diff-view.tsx'
 import { CommitComposer } from './git/commit-composer.tsx'
 import { WorktreesView, WorktreeRow } from './git/worktrees.tsx'
+import { Markdown } from './git/markdown.tsx'
 
 /** The `plugins.row.config` key: bundle package name and row id. */
 const ROW_KEY = '@local/personal-hub#personal-hub'
@@ -66,6 +67,7 @@ export function createClient(): ClientModule {
       WorktreesView,
       WorktreeRow,
       MergeSettingsForm,
+      Markdown,
       stateLabel,
       stateTone,
       countdownText,

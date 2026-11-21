@@ -201,6 +201,10 @@ Lỗi checkout (cây bẩn, nhánh đã bị checkout ở worktree khác) hiện
 - Trang chi tiết PR: mô tả, danh sách kiểm tra có thời lượng và liên kết, đánh giá, danh sách tệp,
   bình luận, và nút mở trên web.
 - Issue: danh sách lọc Đang mở / Đã đóng / Tất cả; chi tiết có nhãn, mô tả và bình luận.
+- **Mô tả và bình luận được render Markdown** như trên web của code host: tiêu đề, danh sách
+  (kể cả `- [ ]`), bảng có căn cột, khối mã có nhãn ngôn ngữ, trích dẫn, đậm/nghiêng/gạch ngang,
+  liên kết, ảnh và URL trần. Renderer tự viết trong `src/client/git/markdown.tsx` (không thêm phụ
+  thuộc), dựng phần tử React chứ không dựng chuỗi HTML, và chỉ mở liên kết `http`/`https`/`mailto`.
 - Tab **Commit**: lịch sử gần nhất; bấm một commit để xem mô tả, tệp thay đổi và toàn bộ patch.
 
 ### Gộp pull request
@@ -645,6 +649,7 @@ Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
 | `src/lib/` | Phần thuần: đọc Git, forge, soạn PR/commit, worktree, text, state store |
 | `src/shared/protocol.ts` | Kiểu dữ liệu dùng chung giữa Host và trình duyệt |
 | `src/client/` | Giao diện: panel Git, hành động, diff, worktree, thẻ cấu hình |
+| `src/client/git/markdown.tsx` | Renderer Markdown cho mô tả/bình luận PR và issue (không phụ thuộc) |
 | `src/host/dsh.ts` | Kiểu structural của API Harness mà plugin gọi |
 | `dist/index.js`, `dist/client.js` | Sản phẩm build (Host ESM và bundle trình duyệt) |
 | `test/*.test.ts` | Test chạy bằng `node --test` (Node 24 strip types) |
@@ -675,7 +680,9 @@ trên một Connection giả rồi gọi thẳng các route `/api/personal-hub-g
 `startAction`/`actionState` với một remote `--bare` cục bộ. Test giao diện nạp `dist/client.js`
 bằng một React giả nên kiểm được cây render mà không cần trình duyệt. Phần logic thuần (chọn hành
 động, diff hai cột, ẩn khoảng trắng) có test riêng trong `test/action-logic.test.ts` và
-`test/diff-model.test.ts`.
+`test/diff-model.test.ts`; renderer Markdown của mô tả PR/issue có test riêng trong
+`test/markdown.test.ts` (đậm/nghiêng/mã/bảng/khối mã, liên kết `javascript:` bị từ chối, HTML thô
+bị bỏ, danh sách lồng nhau).
 
 Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký Ed25519, pairing qua
 `fetch` giả, transport trên WebSocket giả (hello, heartbeat, backoff, stream), và bridge với
@@ -700,6 +707,9 @@ thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
 - Dọn dẹp sau khi gộp chỉ chạy khi PR đó đã được plugin nhìn thấy (do chính nó tạo, hoặc đọc được ở
   chip PR của nhánh lúc bảng làm mới) và khi `git.merged.enabled` bật.
 - Diff dừng sau 4000 dòng và bị cắt theo `maxDiffBytes` để giao diện giữ được nhịp.
+- Renderer Markdown là tập con GFM: chưa có setext heading, HTML thô (bị bỏ thay vì chạy), link
+  dạng tham chiếu `[x][ref]`, chú thích chân trang hay tô màu cú pháp trong khối mã; tiêu đề mục
+  không có neo để cuộn tới.
 - PR/issue cần remote GitHub/GitLab và `gh` (hoặc `glab`); thiếu CLI thì GitHub đọc được bằng REST
   công khai (không có chi tiết kiểm tra), còn GitLab đọc được bằng REST khi có token. GitLab tự host
   phải có host trong `git.gitlabHosts` (hoặc `git.forge: gitlab`) và `glab` đăng nhập đúng host, hoặc
