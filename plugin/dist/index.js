@@ -320,7 +320,7 @@ function normalizeConfig(raw) {
 // src/features/git.ts
 import { randomUUID } from "node:crypto";
 import { stat as stat4 } from "node:fs/promises";
-import { isAbsolute as isAbsolute3, join as join4, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join4, resolve as resolve5 } from "node:path";
 
 // src/lib/git-run.ts
 import { execFile } from "node:child_process";
@@ -3966,6 +3966,7 @@ function messageOf3(error) {
 }
 
 // src/lib/merge-watch.ts
+import { resolve as resolve3 } from "node:path";
 var MIN_CHECK_MS = 15e3;
 function mergedCleanup(config, facts = {}) {
   const settings = config ?? {};
@@ -3977,6 +3978,28 @@ function mergedCleanup(config, facts = {}) {
     archiveSession: active && settings.archiveSession !== false,
     active
   };
+}
+function samePath(left, right) {
+  if (left.length === 0 || right.length === 0) return false;
+  const one = resolve3(left);
+  const other = resolve3(right);
+  return process.platform === "win32" ? one.toLowerCase() === other.toLowerCase() : one === other;
+}
+function checkoutOwnsBinding(binding, checkout) {
+  if (checkout === null || checkout === void 0) return false;
+  const path = String(checkout.path ?? "");
+  if (path.length === 0) return false;
+  const branch = String(checkout.branch ?? "");
+  const bound = String(binding?.branch ?? "");
+  if (branch.length > 0 && bound !== branch) return false;
+  const repositoryRoot = String(checkout.repositoryRoot ?? "");
+  const root = String(binding?.root ?? "");
+  return samePath(root, path) || repositoryRoot.length > 0 && samePath(root, repositoryRoot);
+}
+function mayAdoptBranchPull(facts) {
+  const state = String(facts.pull?.state ?? "");
+  if (state !== "open" && state !== "draft") return false;
+  return checkoutOwnsBinding(facts, facts.checkout);
 }
 function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.now }) {
   const merged = config.merged ?? {};
@@ -3990,6 +4013,17 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     const number = Number(record2.number);
     if (!Number.isFinite(number) || number <= 0) return;
     await store.load();
+    const checkout = store.state.worktrees?.[sessionId];
+    if (checkout !== void 0 && !checkoutOwnsBinding(record2, checkout)) {
+      logger.warn(
+        "git: ignoring change request %d for %s: branch %s is not its checkout branch %s",
+        number,
+        sessionId,
+        String(record2.branch ?? ""),
+        String(checkout.branch ?? "")
+      );
+      return;
+    }
     const existing = store.state.pulls?.[sessionId];
     if (existing !== void 0 && existing.number === number) return;
     await store.update((state) => {
@@ -4035,7 +4069,42 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     const next = String(state.state ?? "");
     if (next === "merged") {
       const worktrees = store.state.worktrees ?? {};
-      const action = mergedCleanup(merged, { hasWorktree: worktrees[sessionId] !== void 0 });
+      const checkout = worktrees[sessionId];
+      if (checkout !== void 0 && !checkoutOwnsBinding(record2, checkout)) {
+        logger.warn(
+          "git: %s merged but belongs to branch %s, not the checkout of %s (%s); leaving it alone",
+          String(state.url ?? record2.url ?? record2.number ?? ""),
+          String(record2.branch ?? ""),
+          sessionId,
+          String(checkout.branch ?? "")
+        );
+        await store.update((value) => {
+          value.pulls ??= {};
+          value.pulls[sessionId] = {
+            ...value.pulls[sessionId],
+            state: "merged",
+            done: true,
+            skipped: "checkout-mismatch",
+            checkedAt: now()
+          };
+        });
+        return;
+      }
+      if (checkout !== void 0 && runtime.isSessionActive?.(sessionId, checkout) === true) {
+        logger.info("git: %s merged but its Session is still in the checkout; cleanup waits", sessionId);
+        await store.update((value) => {
+          value.pulls ??= {};
+          value.pulls[sessionId] = {
+            ...value.pulls[sessionId],
+            state: "merged",
+            done: false,
+            deferred: "session-active",
+            checkedAt: now()
+          };
+        });
+        return;
+      }
+      const action = mergedCleanup(merged, { hasWorktree: checkout !== void 0 });
       const outcome = { cleanedAt: now(), mergedUrl: state.url ?? record2.url ?? "" };
       if (action.removeWorktree) {
         try {
@@ -4102,7 +4171,7 @@ function messageOf4(error) {
 
 // src/lib/paths.ts
 import { homedir } from "node:os";
-import { join as join3, resolve as resolve3 } from "node:path";
+import { join as join3, resolve as resolve4 } from "node:path";
 function expandHome(input) {
   if (typeof input !== "string" || input.length === 0) return input;
   const value = input.trim();
@@ -4112,7 +4181,7 @@ function expandHome(input) {
 }
 function dshHome(env = process.env) {
   const fromEnv = env.DSH_HOME;
-  if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return resolve3(expandHome(fromEnv));
+  if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return resolve4(expandHome(fromEnv));
   return join3(homedir(), ".dsh");
 }
 function pluginDataDir(name2, env = process.env) {
@@ -4147,8 +4216,8 @@ import { mkdir as mkdir2, readFile as readFile2, rename, writeFile as writeFile2
 import { dirname as dirname2 } from "node:path";
 var RETRYABLE_WRITE = /* @__PURE__ */ new Set(["EBUSY", "EPERM", "EACCES"]);
 function delay(ms) {
-  return new Promise((resolve5) => {
-    setTimeout(resolve5, ms).unref?.();
+  return new Promise((resolve6) => {
+    setTimeout(resolve6, ms).unref?.();
   });
 }
 async function writeJsonFile(file, value, attempts = 6) {
@@ -4569,12 +4638,12 @@ function mountRoutes(ctx, connection, config, deps) {
     return names[0] ?? "";
   }
   function pathKey(value) {
-    const normalized = resolve4(String(value ?? ""));
+    const normalized = resolve5(String(value ?? ""));
     return process.platform === "win32" ? normalized.toLowerCase() : normalized;
   }
   async function mainWorktreeRoot(root, signal) {
     const entries = await readWorktrees(runner, { root, signal }).catch(() => []);
-    return resolve4(entries[0]?.path ?? root);
+    return resolve5(entries[0]?.path ?? root);
   }
   async function countChangedFiles(path, signal) {
     const result = await runner.run("git", ["status", "--porcelain", "-z", "--untracked-files=normal"], {
@@ -4624,6 +4693,19 @@ function mountRoutes(ctx, connection, config, deps) {
         if (typeof registry?.archiveSession !== "function") return false;
         await registry.archiveSession(sessionId);
         return true;
+      },
+      /**
+       * Whether the Session is standing inside the checkout right now.
+       *
+       * The live working directory is the only truthful source: a header cwd is
+       * where the chat started, which for every worktree Session is the main
+       * checkout. When no live directory answers, the Session is idle and
+       * cleanup may proceed (the checkout match is checked separately).
+       */
+      isSessionActive(sessionId, record2) {
+        const live = liveSessionDirectory(ctx, sessionId);
+        const target = typeof record2?.path === "string" ? String(record2.path) : "";
+        return live !== void 0 && target.length > 0 && isInside(target, live);
       }
     }
   });
@@ -5261,7 +5343,12 @@ function mountRoutes(ctx, connection, config, deps) {
             signal
           });
           value.branchPull = found.pull ?? null;
-          if (sessionId.length > 0 && typeof found.pull?.number === "number") {
+          if (sessionId.length > 0 && typeof found.pull?.number === "number" && mayAdoptBranchPull({
+            pull: found.pull,
+            root,
+            branch: read.repo.branch,
+            checkout: stored
+          })) {
             await watcher.track(sessionId, {
               root,
               remote: read.repo.remote,
@@ -5828,7 +5915,7 @@ function mountRoutes(ctx, connection, config, deps) {
       };
       let directory;
       try {
-        directory = sessionDirectory(ctx, sessionId) ?? await directoryFromPayload(payload.cwd);
+        directory = await sessionCheckout(ctx, sessionId, payload.cwd);
       } catch {
         return { ...base, reason: "no-directory" };
       }
@@ -5902,14 +5989,13 @@ function mountRoutes(ctx, connection, config, deps) {
      * holds uncommitted work.
      */
     async worktrees(payload, signal) {
-      const { root } = await repository(payload, signal);
-      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
-      const currentPath = sessionDirectory(ctx, sessionId) ?? root;
+      const { directory, root } = await repository(payload, signal);
+      const currentPath = directory;
       const [entries, value] = await Promise.all([
         readWorktrees(runner, { root, signal }),
         state()
       ]);
-      const mainRoot = resolve4(entries[0]?.path ?? root);
+      const mainRoot = resolve5(entries[0]?.path ?? root);
       const records = /* @__PURE__ */ new Map();
       for (const record2 of Object.values(value.worktrees ?? {})) {
         if (typeof record2?.path === "string") records.set(pathKey(record2.path), record2);
@@ -5917,7 +6003,7 @@ function mountRoutes(ctx, connection, config, deps) {
       const pool = poolDirectory(mainRoot, config.worktree);
       const worktrees = await Promise.all(entries.map(async (entry) => {
         const record2 = records.get(pathKey(entry.path));
-        const entryPath = resolve4(entry.path);
+        const entryPath = resolve5(entry.path);
         const changedFiles = entry.bare || entry.prunable ? null : await countChangedFiles(entryPath, signal);
         return {
           path: entryPath,
@@ -6026,7 +6112,7 @@ function mountRoutes(ctx, connection, config, deps) {
         throw new CommandError("worktree/unknown-path", "That folder is not a worktree of this repository", { path: target });
       }
       if (match.bare) throw new CommandError("worktree/bare", "A bare repository cannot hold a Session");
-      const matchPath = resolve4(match.path);
+      const matchPath = resolve5(match.path);
       await setSessionDirectory(sessionId, matchPath, signal);
       await store.update((current) => {
         current.worktrees ??= {};
@@ -6076,7 +6162,7 @@ function mountRoutes(ctx, connection, config, deps) {
           if (typeof record2?.path === "string" && pathKey(record2.path) === pathKey(match.path)) delete current.worktrees[id];
         }
       });
-      return { removed: result.removed, branchDeleted: result.branchDeleted, directory: resolve4(match.path) };
+      return { removed: result.removed, branchDeleted: result.branchDeleted, directory: resolve5(match.path) };
     },
     /** Forget registrations whose checkout directory disappeared. */
     async worktreePrune(payload, signal) {
@@ -6313,8 +6399,31 @@ ${result.stderr ?? ""}`;
       return failure("system/failed", messageOf5(error));
     }
   }
+  async function sessionCheckout(ctx2, sessionId, fallbackCwd) {
+    const live = liveSessionDirectory(ctx2, sessionId);
+    if (live !== void 0) return live;
+    const id = typeof sessionId === "string" ? sessionId.trim() : "";
+    if (id.length > 0) {
+      const value = await state();
+      const record2 = value.worktrees?.[id];
+      const path = typeof record2?.path === "string" ? record2.path : "";
+      if (path.length > 0) {
+        const marker = await stat4(join4(path, ".git")).catch(() => void 0);
+        if (marker !== void 0) return path;
+      }
+    }
+    let payloadError;
+    try {
+      return await directoryFromPayload(fallbackCwd);
+    } catch (error) {
+      payloadError = error;
+    }
+    const header = sessionDirectory(ctx2, sessionId);
+    if (header !== void 0) return header;
+    throw payloadError;
+  }
   async function repository(payload, signal) {
-    const directory = sessionDirectory(ctx, payload.sessionId) ?? await directoryFromPayload(payload.cwd);
+    const directory = await sessionCheckout(ctx, payload.sessionId, payload.cwd);
     const root = await locateRepository(runner, directory, signal);
     if (root === null) {
       throw new CommandError("git/not-a-repository", `The folder ${directory} is not inside a Git repository`, { cwd: directory });
@@ -6421,20 +6530,30 @@ function firstUrl2(text2) {
 function firstLine4(text2) {
   return String(text2 ?? "").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
 }
-function sessionDirectory(ctx, sessionId) {
+function liveSessionDirectory(ctx, sessionId) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
   const agents = ctx.get("agents");
   const agent = typeof agents?.get === "function" ? agents.get(sessionId) : void 0;
   const sessions = ctx.get("sessions");
   const session = agent?.session ?? (typeof sessions?.get === "function" ? sessions.get(sessionId) : void 0);
+  if (session === void 0) return void 0;
   const workingDirectory = ctx.get("workingDirectory");
-  if (session !== void 0 && typeof workingDirectory?.get === "function") {
-    try {
-      const effective = workingDirectory.get(session);
-      if (typeof effective === "string" && effective.length > 0) return effective;
-    } catch {
-    }
+  if (typeof workingDirectory?.get !== "function") return void 0;
+  try {
+    const effective = workingDirectory.get(session);
+    return typeof effective === "string" && effective.length > 0 ? effective : void 0;
+  } catch {
+    return void 0;
   }
+}
+function sessionDirectory(ctx, sessionId) {
+  const live = liveSessionDirectory(ctx, sessionId);
+  if (live !== void 0) return live;
+  if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
+  const agents = ctx.get("agents");
+  const agent = typeof agents?.get === "function" ? agents.get(sessionId) : void 0;
+  const sessions = ctx.get("sessions");
+  const session = agent?.session ?? (typeof sessions?.get === "function" ? sessions.get(sessionId) : void 0);
   const fromAgent = agent?.session?.header?.cwd;
   if (typeof fromAgent === "string" && fromAgent.length > 0) return fromAgent;
   const fromSession = session?.header?.cwd;
@@ -7121,12 +7240,12 @@ function mountTelegramRemote(ctx, config, deps) {
     }
   }
   function sleep2(ms) {
-    return new Promise((resolve5) => {
+    return new Promise((resolve6) => {
       const timer = setTimeout(done, ms);
       function done() {
         clearTimeout(timer);
         controller.signal.removeEventListener("abort", done);
-        resolve5();
+        resolve6();
       }
       controller.signal.addEventListener("abort", done, { once: true });
     });
@@ -8615,7 +8734,7 @@ async function requestJson(url, options = {}) {
   return { status: response.status, body: await readBody(response) };
 }
 function sleep(ms, signal) {
-  return new Promise((resolve5, reject) => {
+  return new Promise((resolve6, reject) => {
     if (signal?.aborted) {
       reject(new PairingError("pair/aborted", "pairing was cancelled"));
       return;
@@ -8623,7 +8742,7 @@ function sleep(ms, signal) {
     const timer = setTimeout(done, Math.max(0, ms));
     function done() {
       cleanup();
-      resolve5();
+      resolve6();
     }
     function onAbort() {
       cleanup();
@@ -9166,7 +9285,7 @@ var RemoteTransport = class {
     const id = `d_${randomUUID3()}`;
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
     const signal = options.signal;
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const settle = (action) => {
         if (!this.#pending.has(id)) return;
         this.#pending.delete(id);
@@ -9184,7 +9303,7 @@ var RemoteTransport = class {
       signal?.addEventListener("abort", onAbort, { once: true });
       this.#pending.set(id, {
         op,
-        resolve: (value) => settle(() => resolve5(value)),
+        resolve: (value) => settle(() => resolve6(value)),
         reject: (error) => settle(() => reject(error))
       });
       try {

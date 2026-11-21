@@ -57,7 +57,7 @@ import type { ForgeRemote } from '../lib/forge.ts'
 import { draftCommitMessage } from '../lib/commit-draft.ts'
 import { draftChangeRequest as draftModelChangeRequest, offlineDraft } from '../lib/pr-draft.ts'
 import type { ChangeRequestFacts } from '../lib/pr-draft.ts'
-import { createMergeWatcher } from '../lib/merge-watch.ts'
+import { createMergeWatcher, mayAdoptBranchPull } from '../lib/merge-watch.ts'
 import type { MergeStoreState } from '../lib/merge-watch.ts'
 import { pluginDataDir } from '../lib/paths.ts'
 import { jsonResponse, readJsonPayload } from '../lib/host-http.ts'
@@ -384,6 +384,21 @@ function mountRoutes(
         if (typeof registry?.archiveSession !== 'function') return false
         await registry.archiveSession(sessionId)
         return true
+      },
+      /**
+       * Whether the Session is standing inside the checkout right now.
+       *
+       * The live working directory is the only truthful source: a header cwd is
+       * where the chat started, which for every worktree Session is the main
+       * checkout. When no live directory answers, the Session is idle and
+       * cleanup may proceed (the checkout match is checked separately).
+       */
+      isSessionActive(sessionId: string, record: unknown) {
+        const live = liveSessionDirectory(ctx, sessionId)
+        const target = typeof (record as { path?: unknown } | undefined)?.path === 'string'
+          ? String((record as { path: string }).path)
+          : ''
+        return live !== undefined && target.length > 0 && isInside(target, live)
       },
     },
   })
@@ -1266,7 +1281,19 @@ function mountRoutes(
             signal,
           })
           value.branchPull = found.pull ?? null
-          if (sessionId.length > 0 && typeof found.pull?.number === 'number') {
+          // Adopt a change request only when it is still open and belongs to the
+          // Session's own checkout. A merged request found for the branch of the
+          // main checkout must never mark this Session done and delete its work.
+          if (
+            sessionId.length > 0
+            && typeof found.pull?.number === 'number'
+            && mayAdoptBranchPull({
+              pull: found.pull,
+              root,
+              branch: read.repo.branch,
+              checkout: stored,
+            })
+          ) {
             await watcher.track(sessionId, {
               root,
               remote: read.repo.remote as unknown as ForgeRemote,
@@ -1875,7 +1902,7 @@ function mountRoutes(
       }
       let directory: string
       try {
-        directory = sessionDirectory(ctx, sessionId) ?? await directoryFromPayload(payload.cwd)
+        directory = await sessionCheckout(ctx, sessionId, payload.cwd)
       } catch {
         return { ...base, reason: 'no-directory' }
       }
@@ -1962,9 +1989,8 @@ function mountRoutes(
      * holds uncommitted work.
      */
     async worktrees(payload, signal) {
-      const { root } = await repository(payload, signal)
-      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
-      const currentPath = sessionDirectory(ctx, sessionId) ?? root
+      const { directory, root } = await repository(payload, signal)
+      const currentPath = directory
       const [entries, value] = await Promise.all([
         readWorktrees(runner, { root, signal }),
         state(),
@@ -2422,12 +2448,52 @@ function mountRoutes(
   }
 
   /**
+   * The checkout a Session's Git panel should read.
+   *
+   * A live Session answers through the working-directory service. An idle one
+   * has no live service, and its header cwd is where the chat started — for a
+   * moved Session that is the main checkout, not the worktree it works in. The
+   * plugin's own record of the checkout is the next source, but only while the
+   * directory is still a checkout; otherwise the caller's folder wins, so a
+   * removed worktree never masquerades as the main repository.
+   *
+   * @param ctx plugin context.
+   * @param sessionId owning Session, when the call names one.
+   * @param fallbackCwd the folder the browser reported.
+   */
+  async function sessionCheckout(ctx: DshContext, sessionId: unknown, fallbackCwd: unknown): Promise<string> {
+    const live = liveSessionDirectory(ctx, sessionId)
+    if (live !== undefined) return live
+    const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (id.length > 0) {
+      const value = await state()
+      const record = value.worktrees?.[id]
+      const path = typeof record?.path === 'string' ? record.path : ''
+      if (path.length > 0) {
+        const marker = await stat(join(path, '.git')).catch(() => undefined)
+        if (marker !== undefined) return path
+      }
+    }
+    let payloadError: unknown
+    try {
+      return await directoryFromPayload(fallbackCwd)
+    } catch (error) {
+      payloadError = error
+    }
+    // The browser may not have sent a folder (a route called without one); the
+    // Session's own start folder is the last answer this build has.
+    const header = sessionDirectory(ctx, sessionId)
+    if (header !== undefined) return header
+    throw payloadError
+  }
+
+  /**
    * Resolve the repository a call addresses.
    * @param payload call arguments.
    * @param signal call cancellation.
    */
   async function repository(payload: GitTarget, signal?: AbortSignal): Promise<{ directory: string; root: string }> {
-    const directory = sessionDirectory(ctx, payload.sessionId) ?? await directoryFromPayload(payload.cwd)
+    const directory = await sessionCheckout(ctx, payload.sessionId, payload.cwd)
     const root = await locateRepository(runner, directory, signal)
     if (root === null) {
       throw new CommandError('git/not-a-repository', `The folder ${directory} is not inside a Git repository`, { cwd: directory })
@@ -2565,29 +2631,48 @@ function firstLine(text: string | null | undefined): string {
 }
 
 /**
- * The working directory a Session reports, which is the repository the panel
- * inspects: an attached Agent's Session header first, then the Session store.
+ * The effective directory a live Session answers with, if any.
+ *
+ * The header cwd is where the Session started; a worktree switch is a
+ * `working-directory/change`, so the service is the only truthful source. An
+ * idle Session has no live answer, and callers must not mistake its header for
+ * the folder it is working in.
+ *
  * @param ctx plugin context.
  * @param sessionId session identity from the browser.
  */
-function sessionDirectory(ctx: DshContext, sessionId: unknown): string | undefined {
+function liveSessionDirectory(ctx: DshContext, sessionId: unknown): string | undefined {
   if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
   const agents = ctx.get<{ get(sessionId: string): { session?: SessionLike } | undefined }>('agents')
   const agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
   const sessions = ctx.get<{ get(sessionId: string): SessionLike | undefined }>('sessions')
   const session = agent?.session ?? (typeof sessions?.get === 'function' ? sessions.get(sessionId) : undefined)
-
-  // The header cwd is where the Session started; a worktree switch is a
-  // `working-directory/change`, so the service is the only truthful source.
+  if (session === undefined) return undefined
   const workingDirectory = ctx.get<{ get(session: SessionLike): string | undefined }>('workingDirectory')
-  if (session !== undefined && typeof workingDirectory?.get === 'function') {
-    try {
-      const effective = workingDirectory.get(session)
-      if (typeof effective === 'string' && effective.length > 0) return effective
-    } catch {
-      // A service that cannot answer falls back to the recorded header.
-    }
+  if (typeof workingDirectory?.get !== 'function') return undefined
+  try {
+    const effective = workingDirectory.get(session)
+    return typeof effective === 'string' && effective.length > 0 ? effective : undefined
+  } catch {
+    // A service that cannot answer is not a live answer.
+    return undefined
   }
+}
+
+/**
+ * The working directory a Session reports, which is the repository the panel
+ * inspects: the live working directory first, then the recorded Session header.
+ * @param ctx plugin context.
+ * @param sessionId session identity from the browser.
+ */
+function sessionDirectory(ctx: DshContext, sessionId: unknown): string | undefined {
+  const live = liveSessionDirectory(ctx, sessionId)
+  if (live !== undefined) return live
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
+  const agents = ctx.get<{ get(sessionId: string): { session?: SessionLike } | undefined }>('agents')
+  const agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
+  const sessions = ctx.get<{ get(sessionId: string): SessionLike | undefined }>('sessions')
+  const session = agent?.session ?? (typeof sessions?.get === 'function' ? sessions.get(sessionId) : undefined)
   const fromAgent = agent?.session?.header?.cwd
   if (typeof fromAgent === 'string' && fromAgent.length > 0) return fromAgent
   const fromSession = session?.header?.cwd
