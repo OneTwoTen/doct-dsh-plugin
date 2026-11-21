@@ -1326,6 +1326,40 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-merge-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ph-merge-methods{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
 .ph-prose{margin:0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}
+/* Markdown prose: a code host's description, at the sidebar's size */
+.ph-md{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:11.5px;line-height:1.6;color:var(--dsw-alias-label-secondary);word-break:break-word}
+.ph-md>*{margin:0;max-width:100%}
+.ph-md-h{margin:2px 0 0;font-weight:650;line-height:1.35;color:var(--dsw-alias-label-primary)}
+.ph-md-h1{font-size:14.5px}
+.ph-md-h2{font-size:13.5px}
+.ph-md-h3{font-size:12.5px}
+.ph-md-h4,.ph-md-h5,.ph-md-h6{font-size:12px;color:var(--dsw-alias-label-secondary)}
+.ph-md-p{margin:0}
+.ph-md strong{font-weight:650;color:var(--dsw-alias-label-primary)}
+.ph-md del{opacity:.72}
+.ph-md-a{color:var(--dsw-alias-brand-primary);text-decoration:none}
+.ph-md-a:hover{text-decoration:underline}
+a.ph-md-a{word-break:break-word}
+.ph-md-code{padding:1px 4px;border-radius:4px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-primary)}
+.ph-md-code-block{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:var(--dsw-alias-bg-base);overflow:hidden}
+.ph-md-code-info{padding:3px 8px;border-bottom:1px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,monospace;font-size:10px}
+.ph-md-pre{margin:0;padding:7px 9px;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;line-height:1.55;color:var(--dsw-alias-label-primary);white-space:pre}
+.ph-md-quote{margin:0;padding:1px 0 1px 8px;border-left:2px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary)}
+.ph-md-list{margin:0;padding-left:17px}
+.ph-md-ul{list-style:disc}
+.ph-md-ol{list-style:decimal}
+.ph-md-li{margin:2px 0}
+.ph-md-li-task{position:relative;margin-left:-14px;padding-left:14px;list-style:none}
+.ph-md-task{position:absolute;left:0;top:2px;display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;border:1.4px solid var(--dsw-alias-border-l1);border-radius:3px;color:transparent}
+.ph-md-task[data-done=true]{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}
+.ph-md-table-wrap{overflow-x:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:7px}
+.ph-md-table{border-collapse:collapse;width:100%;font-size:11px}
+.ph-md-th,.ph-md-td{padding:4px 8px;border-right:1px solid var(--dsw-alias-border-l3);border-bottom:1px solid var(--dsw-alias-border-l3);text-align:left;vertical-align:top;word-break:normal;overflow-wrap:break-word}
+.ph-md-th{background:var(--dsw-alias-bg-layer-1);font-weight:600;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.ph-md-th:last-child,.ph-md-td:last-child{border-right:0}
+.ph-md-table tbody tr:last-child .ph-md-td{border-bottom:0}
+.ph-md-img{display:block;max-width:100%;height:auto;border-radius:6px}
+.ph-md-rule{margin:2px 0;border:0;border-top:1px solid var(--dsw-alias-border-l3)}
 .ph-comment{display:flex;flex-direction:column;gap:3px;padding:6px 0;border-top:1px solid var(--dsw-alias-border-l3)}
 .ph-comment:first-of-type{border-top:0}
 .ph-comment-head{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary);font-size:10.5px}
@@ -4542,6 +4576,494 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     );
   }
 
+  // src/client/git/markdown.tsx
+  var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*(\S*)/;
+  var FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+  var HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
+  var RULE = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+  var QUOTE = /^ {0,3}>[ \t]?(.*)$/;
+  var ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/;
+  var DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]+\S/;
+  var TASK = /^\[([ xX])\](?:[ \t]+([\s\S]*))?$/;
+  var ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~>]/;
+  function Markdown(props) {
+    const text = typeof props.text === "string" ? props.text : "";
+    const blocks = parseBlocks(text.replace(/\r\n?/g, "\n").split("\n"));
+    const className = props.className === void 0 || props.className.length === 0 ? "ph-md" : `ph-md ${props.className}`;
+    return h(
+      "div",
+      { className, "data-personal-hub-markdown": true },
+      blocks.map((block, index) => renderBlock(block, `md-${index}`))
+    );
+  }
+  function parseBlocks(lines) {
+    const blocks = [];
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index];
+      if (line.trim().length === 0) {
+        index += 1;
+        continue;
+      }
+      const fence = FENCE_OPEN.exec(line);
+      if (fence !== null) {
+        index = readFence(blocks, lines, index, fence[1], (fence[2] ?? "").trim());
+        continue;
+      }
+      const heading = HEADING.exec(line);
+      if (heading !== null) {
+        const text = (heading[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+        blocks.push({ kind: "heading", level: heading[1].length, text });
+        index += 1;
+        continue;
+      }
+      if (RULE.test(line)) {
+        blocks.push({ kind: "rule" });
+        index += 1;
+        continue;
+      }
+      if (DEFINITION.test(line)) {
+        index += 1;
+        continue;
+      }
+      if (QUOTE.test(line)) {
+        const inner = [];
+        while (index < lines.length) {
+          const quoted = QUOTE.exec(lines[index]);
+          if (quoted === null) break;
+          inner.push(quoted[1]);
+          index += 1;
+        }
+        blocks.push({ kind: "quote", blocks: parseBlocks(inner) });
+        continue;
+      }
+      if (isTableStart(lines, index)) {
+        index = readTable(blocks, lines, index);
+        continue;
+      }
+      if (ITEM.test(line)) {
+        index = readList(blocks, lines, index);
+        continue;
+      }
+      const paragraph = [];
+      while (index < lines.length) {
+        if (lines[index].trim().length === 0) break;
+        if (startsBlock(lines, index)) break;
+        paragraph.push(lines[index].replace(/^ {0,3}/, ""));
+        index += 1;
+      }
+      blocks.push({ kind: "paragraph", text: paragraph.join("\n").trimEnd() });
+    }
+    return blocks;
+  }
+  function readFence(blocks, lines, start, marker, info) {
+    const body2 = [];
+    const character = marker[0];
+    let index = start + 1;
+    while (index < lines.length) {
+      const close = FENCE_CLOSE.exec(lines[index]);
+      if (close !== null && close[1][0] === character && close[1].length >= marker.length) break;
+      body2.push(lines[index]);
+      index += 1;
+    }
+    blocks.push({ kind: "code", info, text: body2.join("\n") });
+    return index + 1;
+  }
+  function readTable(blocks, lines, start) {
+    const header = splitRow(lines[start]);
+    const align = splitRow(lines[start + 1]).map(alignOf);
+    const rows = [];
+    let index = start + 2;
+    while (index < lines.length) {
+      const line = lines[index];
+      if (line.trim().length === 0 || !line.includes("|")) break;
+      rows.push(splitRow(line));
+      index += 1;
+    }
+    blocks.push({ kind: "table", align, header, rows });
+    return index;
+  }
+  function readList(blocks, lines, start) {
+    const first = ITEM.exec(lines[start]);
+    const ordered = !isBullet(first[2]);
+    const items = [];
+    let index = start;
+    while (index < lines.length) {
+      const match = ITEM.exec(lines[index]);
+      if (match === null) break;
+      if (isBullet(match[2]) === ordered) break;
+      const contentIndent = match[1].length + match[2].length + Math.max(1, (match[3] ?? " ").length);
+      const content = [match[4] ?? ""];
+      index += 1;
+      while (index < lines.length) {
+        const next = lines[index];
+        if (next.trim().length === 0) {
+          let look = index + 1;
+          while (look < lines.length && lines[look].trim().length === 0) look += 1;
+          if (look < lines.length && leadingSpaces(lines[look]) >= contentIndent) {
+            while (index < look) {
+              content.push("");
+              index += 1;
+            }
+            continue;
+          }
+          index = look;
+          break;
+        }
+        if (leadingSpaces(next) >= contentIndent) {
+          content.push(next.slice(contentIndent));
+          index += 1;
+          continue;
+        }
+        if (startsBlock(lines, index)) break;
+        content.push(next.trim());
+        index += 1;
+      }
+      let task = null;
+      const checked = TASK.exec(content[0]);
+      if (checked !== null) {
+        task = checked[1] !== " ";
+        content[0] = checked[2] ?? "";
+      }
+      items.push({ task, blocks: parseBlocks(content) });
+    }
+    blocks.push({ kind: "list", ordered, start: ordered ? Number.parseInt(first[2], 10) : 1, items });
+    return index;
+  }
+  function startsBlock(lines, index) {
+    const line = lines[index];
+    return FENCE_OPEN.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line) || DEFINITION.test(line) || isTableStart(lines, index);
+  }
+  function isTableStart(lines, index) {
+    if (index + 1 >= lines.length) return false;
+    if (!lines[index].includes("|")) return false;
+    if (!isDelimiterRow(lines[index + 1])) return false;
+    return splitRow(lines[index]).length === splitRow(lines[index + 1]).length;
+  }
+  function isDelimiterRow(line) {
+    if (!line.includes("-")) return false;
+    const cells = splitRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+  function splitRow(line) {
+    let text = line.trim();
+    if (text.startsWith("|")) text = text.slice(1);
+    if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+    const cells = [];
+    let cell = "";
+    let ticks = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+      if (character === "\\" && text[index + 1] === "|") {
+        cell += "|";
+        index += 1;
+        continue;
+      }
+      if (character === "`") {
+        let run = 1;
+        while (text[index + run] === "`") run += 1;
+        ticks = ticks === 0 ? run : ticks === run ? 0 : ticks;
+        cell += text.slice(index, index + run);
+        index += run - 1;
+        continue;
+      }
+      if (character === "|" && ticks === 0) {
+        cells.push(cell.trim());
+        cell = "";
+        continue;
+      }
+      cell += character;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+  function isBullet(marker) {
+    return marker === "-" || marker === "*" || marker === "+";
+  }
+  function alignOf(cell) {
+    const left = cell.startsWith(":");
+    const right = cell.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return null;
+  }
+  function leadingSpaces(line) {
+    const match = /^ */.exec(line);
+    return match === null ? 0 : match[0].length;
+  }
+  function renderBlock(block, key) {
+    switch (block.kind) {
+      case "paragraph":
+        return h("p", { key, className: "ph-md-p" }, ...renderInline(block.text, key));
+      case "heading": {
+        const level = Math.min(6, Math.max(1, block.level));
+        return h(`h${level}`, { key, className: `ph-md-h ph-md-h${level}` }, ...renderInline(block.text, key));
+      }
+      case "code":
+        return h(
+          "div",
+          { key, className: "ph-md-code-block" },
+          block.info.length === 0 ? null : h("div", { key: "info", className: "ph-md-code-info" }, block.info),
+          h(
+            "pre",
+            { key: "pre", className: "ph-md-pre" },
+            h("code", { key: "code" }, block.text.length === 0 ? "\n" : block.text)
+          )
+        );
+      case "quote":
+        return h(
+          "blockquote",
+          { key, className: "ph-md-quote" },
+          block.blocks.map((child, index) => renderBlock(child, `${key}-${index}`))
+        );
+      case "list": {
+        const items = block.items.map((item, index) => {
+          const itemKey = `${key}-i${index}`;
+          return h(
+            "li",
+            {
+              key: itemKey,
+              className: item.task === null ? "ph-md-li" : "ph-md-li ph-md-li-task"
+            },
+            item.task === null ? null : h("span", {
+              key: "task",
+              className: "ph-md-task",
+              "data-done": item.task ? "true" : "false",
+              "aria-hidden": "true"
+            }, item.task ? h(Icon, { name: "check", size: 10, weight: 2 }) : null),
+            item.blocks.map((child, childIndex) => renderBlock(child, `${itemKey}-${childIndex}`))
+          );
+        });
+        return h(block.ordered ? "ol" : "ul", {
+          key,
+          className: block.ordered ? "ph-md-list ph-md-ol" : "ph-md-list ph-md-ul",
+          start: block.ordered && block.start !== 1 ? block.start : void 0
+        }, ...items);
+      }
+      case "table": {
+        const columnStyle = (index) => {
+          const align = block.align[index];
+          return typeof align === "string" ? { textAlign: align } : void 0;
+        };
+        const header = block.header.map((cell, index) => h("th", {
+          key: `h${index}`,
+          className: "ph-md-th",
+          style: columnStyle(index)
+        }, ...renderInline(cell, `${key}-h${index}`)));
+        const rows = block.rows.map((row, rowIndex) => h(
+          "tr",
+          { key: `r${rowIndex}` },
+          block.header.map((_, column) => h("td", {
+            key: `c${column}`,
+            className: "ph-md-td",
+            style: columnStyle(column)
+          }, ...renderInline(row[column] ?? "", `${key}-r${rowIndex}c${column}`)))
+        ));
+        return h(
+          "div",
+          { key, className: "ph-md-table-wrap" },
+          h(
+            "table",
+            { key: "table", className: "ph-md-table" },
+            h("thead", { key: "head" }, h("tr", { key: "row" }, ...header)),
+            rows.length === 0 ? null : h("tbody", { key: "body" }, ...rows)
+          )
+        );
+      }
+      case "rule":
+        return h("hr", { key, className: "ph-md-rule" });
+      default:
+        return h("div", { key });
+    }
+  }
+  function renderInline(text, keyPrefix) {
+    const nodes = [];
+    let buffer = "";
+    let index = 0;
+    const flush = () => {
+      if (buffer.length > 0) {
+        nodes.push(buffer);
+        buffer = "";
+      }
+    };
+    while (index < text.length) {
+      const character = text[index];
+      if (character === "\\" && ESCAPABLE.test(text[index + 1] ?? "")) {
+        buffer += text[index + 1];
+        index += 2;
+        continue;
+      }
+      if (character === "\n") {
+        const hard = /(?: {2}|\\)$/.exec(buffer);
+        if (hard !== null) {
+          buffer = buffer.slice(0, hard.index);
+          flush();
+          nodes.push(h("br", { key: `${keyPrefix}-br-${index}` }));
+        } else {
+          buffer += " ";
+        }
+        index += 1;
+        continue;
+      }
+      if (character === "`") {
+        const run = /^`+/.exec(text.slice(index))[0];
+        const rest = text.slice(index);
+        const close = rest.indexOf(run, run.length);
+        if (close === -1) {
+          buffer += run;
+          index += run.length;
+          continue;
+        }
+        let code = rest.slice(run.length, close).replace(/\n/g, " ");
+        if (code.length > 1 && code.startsWith(" ") && code.endsWith(" ")) code = code.slice(1, -1);
+        flush();
+        nodes.push(h("code", { key: `${keyPrefix}-code-${index}`, className: "ph-md-code" }, code));
+        index += close + run.length;
+        continue;
+      }
+      if (character === "!" && text[index + 1] === "[") {
+        const image = /^!\[([^\]]*)\]\(([^)]*)\)/.exec(text.slice(index));
+        if (image !== null) {
+          const target = linkTarget(image[2]);
+          flush();
+          const source = target.href !== null && /^https?:/i.test(target.href) ? target.href : null;
+          nodes.push(source === null ? h("span", { key: `${keyPrefix}-img-${index}`, className: "ph-md-a" }, image[1].length > 0 ? image[1] : image[2]) : h("img", {
+            key: `${keyPrefix}-img-${index}`,
+            className: "ph-md-img",
+            src: source,
+            alt: image[1],
+            title: target.title,
+            loading: "lazy",
+            referrerPolicy: "no-referrer"
+          }));
+          index += image[0].length;
+          continue;
+        }
+      }
+      if (character === "[") {
+        const link = /^\[([^\]]*)\]\(([^)]*)\)/.exec(text.slice(index));
+        if (link !== null) {
+          const target = linkTarget(link[2]);
+          flush();
+          const label = renderInline(link[1], `${keyPrefix}-a-${index}`);
+          nodes.push(target.href === null ? h("span", { key: `${keyPrefix}-a-${index}`, className: "ph-md-a" }, ...label) : h("a", {
+            key: `${keyPrefix}-a-${index}`,
+            className: "ph-md-a",
+            href: target.href,
+            title: target.title,
+            target: "_blank",
+            rel: "noreferrer noopener"
+          }, ...label));
+          index += link[0].length;
+          continue;
+        }
+      }
+      if (character === "<") {
+        const rest = text.slice(index);
+        const autolink = /^<([a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*)>/.exec(rest);
+        if (autolink !== null) {
+          const href = safeHref(autolink[1]);
+          if (href !== null) {
+            flush();
+            nodes.push(h("a", {
+              key: `${keyPrefix}-a-${index}`,
+              className: "ph-md-a",
+              href,
+              target: "_blank",
+              rel: "noreferrer noopener"
+            }, autolink[1]));
+            index += autolink[0].length;
+            continue;
+          }
+        }
+        if (/^<br\s*\/?>/i.test(rest)) {
+          const length = /^<br\s*\/?>/i.exec(rest)[0].length;
+          flush();
+          nodes.push(h("br", { key: `${keyPrefix}-br-${index}` }));
+          index += length;
+          continue;
+        }
+        const garbage = /^(?:<!--[\s\S]*?-->|<\/?[a-zA-Z][^>]*>)/.exec(rest);
+        if (garbage !== null) {
+          index += garbage[0].length;
+          continue;
+        }
+      }
+      if ((character === "h" || character === "H") && /^https?:\/\//i.test(text.slice(index, index + 8))) {
+        const match = /^https?:\/\/[^\s<>"'`]+/i.exec(text.slice(index));
+        let url = match[0];
+        while (url.length > 8 && /[.,;:!?)\]]$/.test(url)) url = url.slice(0, -1);
+        flush();
+        nodes.push(h("a", {
+          key: `${keyPrefix}-a-${index}`,
+          className: "ph-md-a",
+          href: url,
+          target: "_blank",
+          rel: "noreferrer noopener"
+        }, url));
+        index += url.length;
+        continue;
+      }
+      if (character === "*" || character === "_" || character === "~") {
+        const rest = text.slice(index);
+        const previous = index > 0 ? text[index - 1] : "";
+        if (character === "_" && /[0-9A-Za-z]/.test(previous)) {
+          buffer += character;
+          index += 1;
+          continue;
+        }
+        if (character === "~") {
+          const strike = /^~~(?=\S)([\s\S]*?\S)~~/.exec(rest);
+          if (strike !== null) {
+            flush();
+            nodes.push(h("del", { key: `${keyPrefix}-del-${index}` }, ...renderInline(strike[1], `${keyPrefix}-del-${index}`)));
+            index += strike[0].length;
+            continue;
+          }
+        } else {
+          const strong = /^(\*\*|__)(?=\S)([\s\S]*?\S)\1/.exec(rest);
+          if (strong !== null) {
+            flush();
+            nodes.push(h("strong", { key: `${keyPrefix}-strong-${index}` }, ...renderInline(strong[2], `${keyPrefix}-strong-${index}`)));
+            index += strong[0].length;
+            continue;
+          }
+          const emphasis = /^([*_])(?=\S)([\s\S]*?\S)\1/.exec(rest);
+          if (emphasis !== null) {
+            flush();
+            nodes.push(h("em", { key: `${keyPrefix}-em-${index}` }, ...renderInline(emphasis[2], `${keyPrefix}-em-${index}`)));
+            index += emphasis[0].length;
+            continue;
+          }
+        }
+        buffer += character;
+        index += 1;
+        continue;
+      }
+      buffer += character;
+      index += 1;
+    }
+    flush();
+    return nodes;
+  }
+  function linkTarget(raw) {
+    const trimmed = raw.trim();
+    const titled = /^(\S+)\s+"([^"]*)"$/.exec(trimmed);
+    const href = titled !== null ? titled[1] : trimmed;
+    return { href: safeHref(href), title: titled === null ? void 0 : titled[2] };
+  }
+  function safeHref(raw) {
+    const href = raw.trim();
+    if (href.length === 0) return null;
+    const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(href);
+    if (scheme === null) {
+      return href.startsWith("#") || href.startsWith("/") || href.startsWith("./") || href.startsWith("../") ? href : null;
+    }
+    const name = scheme[1].toLowerCase();
+    return name === "http" || name === "https" || name === "mailto" ? href : null;
+  }
+
   // src/client/git/pulls.tsx
   function PullsView(props) {
     const { t, api } = props;
@@ -4796,7 +5318,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           "div",
           { className: "ph-card" },
           h("div", { className: "ph-card-title" }, h(Icon, { name: "file", size: 12 }), t("gitDescription")),
-          (value.body ?? "").length === 0 ? h("div", { className: "ph-dim ph-tiny" }, t("gitNoDescription")) : h("p", { className: "ph-prose" }, value.body)
+          (value.body ?? "").length === 0 ? h("div", { className: "ph-dim ph-tiny" }, t("gitNoDescription")) : h(Markdown, { text: value.body ?? "" })
         ),
         reviews.length === 0 ? null : h(
           "div",
@@ -4812,7 +5334,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
               h("span", null, review.state),
               review.submittedAt === null ? null : h("span", null, relativeTime(review.submittedAt))
             ),
-            review.body.length > 0 ? h("p", { className: "ph-prose" }, review.body) : null
+            review.body.length > 0 ? h(Markdown, { text: review.body }) : null
           ))
         ),
         (value.files ?? []).length === 0 ? null : h(
@@ -4839,7 +5361,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
               h("span", { className: "ph-comment-author" }, comment.author.length > 0 ? comment.author : "\u2014"),
               h("span", null, relativeTime(comment.createdAt))
             ),
-            h("p", { className: "ph-prose" }, comment.body)
+            h(Markdown, { text: comment.body })
           ))
         )
       ),
@@ -5044,7 +5566,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           "div",
           { className: "ph-card" },
           h("div", { className: "ph-card-title" }, h(Icon, { name: "file", size: 12 }), t("gitDescription")),
-          (value.body ?? "").length === 0 ? h("div", { className: "ph-dim ph-tiny" }, t("gitNoDescription")) : h("p", { className: "ph-prose" }, value.body)
+          (value.body ?? "").length === 0 ? h("div", { className: "ph-dim ph-tiny" }, t("gitNoDescription")) : h(Markdown, { text: value.body ?? "" })
         ),
         (value.comments ?? []).length === 0 ? null : h(
           "div",
@@ -5059,7 +5581,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
               h("span", { className: "ph-comment-author" }, comment.author.length > 0 ? comment.author : "\u2014"),
               h("span", null, relativeTime(comment.createdAt))
             ),
-            h("p", { className: "ph-prose" }, comment.body)
+            h(Markdown, { text: comment.body })
           ))
         )
       )
@@ -6132,6 +6654,7 @@ ${repo.root}` }, repo.name),
         WorktreesView,
         WorktreeRow,
         MergeSettingsForm,
+        Markdown,
         stateLabel,
         stateTone,
         countdownText,

@@ -7,6 +7,7 @@ import { useLoader, relativeTime } from '../hooks.ts'
 import type { Translate } from '../i18n.ts'
 import type { GitApi } from '../api.ts'
 import { Empty, Failure, Loading, DetailBar, Filters, ForgeNotice } from './common.tsx'
+import { Markdown } from './markdown.tsx'
 import type { ForgeState } from '../../shared/protocol.ts'
 
 /** Props of the issue list. */
@@ -138,12 +139,12 @@ export function IssuePane(props: IssuePaneProps): ReturnType<typeof h> {
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'file', size: 12 }), t('gitDescription')),
         (value.body ?? '').length === 0
           ? h('div', { className: 'ph-dim ph-tiny' }, t('gitNoDescription'))
-          : h('p', { className: 'ph-prose' }, value.body)),
+          : h(Markdown, { text: value.body ?? '' })),
       (value.comments ?? []).length === 0 ? null : h('div', { className: 'ph-card' },
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'comment', size: 12 }), t('gitCommented', { count: (value.comments ?? []).length })),
         (value.comments ?? []).map((comment, index) => h('div', { key: `comment-${index}`, className: 'ph-comment' },
           h('div', { className: 'ph-comment-head' },
             h('span', { className: 'ph-comment-author' }, comment.author.length > 0 ? comment.author : '—'),
             h('span', null, relativeTime(comment.createdAt))),
-          h('p', { className: 'ph-prose' }, comment.body))))))
+          h(Markdown, { text: comment.body }))))))
 }

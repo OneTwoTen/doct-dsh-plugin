@@ -9,6 +9,7 @@ import type { GitApi } from '../api.ts'
 import { messageOf } from '../api.ts'
 import { Empty, Failure, Loading, DetailBar, Filters, ForgeNotice, PullMeta, CheckRow, reviewLabel, stateLabel } from './common.tsx'
 import { Counts } from './diff-view.tsx'
+import { Markdown } from './markdown.tsx'
 import type { PrAction } from './action-logic.ts'
 import type { ForgeState, MergeMethod, MergePullResult } from '../../shared/protocol.ts'
 
@@ -240,7 +241,7 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'file', size: 12 }), t('gitDescription')),
         (value.body ?? '').length === 0
           ? h('div', { className: 'ph-dim ph-tiny' }, t('gitNoDescription'))
-          : h('p', { className: 'ph-prose' }, value.body)),
+          : h(Markdown, { text: value.body ?? '' })),
       reviews.length === 0 ? null : h('div', { className: 'ph-card' },
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'comment', size: 12 }), t('gitReview')),
         reviews.map((review, index) => h('div', { key: `review-${index}`, className: 'ph-comment' },
@@ -248,7 +249,7 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
             h('span', { className: 'ph-comment-author' }, review.author.length > 0 ? review.author : '—'),
             h('span', null, review.state),
             review.submittedAt === null ? null : h('span', null, relativeTime(review.submittedAt))),
-          review.body.length > 0 ? h('p', { className: 'ph-prose' }, review.body) : null))),
+          review.body.length > 0 ? h(Markdown, { text: review.body }) : null))),
       (value.files ?? []).length === 0 ? null : h('div', { className: 'ph-card' },
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'folder', size: 12 }), t('gitFilesHeading')),
         (value.files ?? []).map((file) => h('div', { key: file.path, className: 'ph-row' },
@@ -260,7 +261,7 @@ export function PullPane(props: PullPaneProps): ReturnType<typeof h> {
           h('div', { className: 'ph-comment-head' },
             h('span', { className: 'ph-comment-author' }, comment.author.length > 0 ? comment.author : '—'),
             h('span', null, relativeTime(comment.createdAt))),
-          h('p', { className: 'ph-prose' }, comment.body))))),
+          h(Markdown, { text: comment.body }))))),
 
     pending === null
       ? null
