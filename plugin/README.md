@@ -8,6 +8,10 @@ Bảng Git còn **tạo pull request bằng model của phiên** (effort thấp 
 phiên mới — tự tạo khi bạn gửi tin nhắn đầu tiên, bắt đầu từ nhánh remote mới nhất** (không cần bấm
 gì), và **dọn dẹp sau khi PR được gộp**.
 
+Bundle cũng **tự động lưu trữ chat không tương tác**: chat không có tin nhắn mới trong một số ngày
+(mặc định 2) rời khỏi danh sách phiên nhưng vẫn khôi phục được; thẻ cấu hình có công tắc, số ngày,
+chế độ chạy thử và nút chạy ngay.
+
 Bundle cũng **bổ sung tiếng Việt cho toàn bộ giao diện DSH**: ngôn ngữ `vi` xuất hiện trong
 Settings → General → Language, và 76 namespace giao diện (hơn 4.200 chuỗi) được dịch sẵn.
 
@@ -515,7 +519,56 @@ Các mục `pull`, `worktree`, `merged` có thể đổi ngay trong giao diện:
 hình của hàng `personal-hub` → phần **Worktree và pull request đã gộp** → **Lưu**. Thao tác này ghi
 vào `cordis.patch.yml` của profile qua `configEditor`, nên giá trị còn sau khi khởi động lại DSH.
 
-## 7. Web Remote (Phase 1 — bridge)
+## 7. Tự động lưu trữ chat không tương tác
+
+Chat không có tin nhắn mới trong một số ngày sẽ tự được **lưu trữ**: nó rời khỏi danh sách phiên đang
+hoạt động nhưng hội thoại vẫn còn nguyên và khôi phục được bằng bộ lọc lưu trữ ở thanh bên. Tính năng
+mặc định **bật** với 2 ngày; tắt hoặc đổi số ngày trong cấu hình hay trong thẻ cấu hình của plugin ở
+trang **Plugins**.
+
+```yaml
+autoArchive:
+  enabled: true          # mặc định bật; tắt trong thẻ cấu hình cũng được
+  inactiveDays: 2        # số ngày không có tin nhắn mới thì lưu trữ; 0 = tắt quy tắc tuổi
+  checkMs: 3600000       # nhịp kiểm tra; tối thiểu 60 giây
+  startupDelayMs: 60000  # chờ sau khi mở DSH rồi mới kiểm tra lượt đầu
+  skipActive: true       # giữ chat đang mở trong cửa sổ này (agent còn nạp trong bộ nhớ)
+  archiveRunning: false  # false = bỏ qua chat còn việc chạy; true = dừng việc đó rồi lưu trữ
+  archiveBlank: true     # lưu trữ cả chat chưa từng có tin nhắn
+  dryRun: false          # chỉ báo cáo, không lưu trữ thật
+  maxPerPass: 50         # số chat lưu trữ tối đa mỗi lượt; 0 = không giới hạn
+```
+
+Thời điểm "không tương tác" là **tin nhắn người dùng gần nhất** (`updatedAt` của
+`sessionController.list()`, tức `lastPromptAt` bền vững), không phải lần cuối trợ lý trả lời. Một chat
+vì thế không bị lưu trữ chỉ vì trợ lý im lặng, và chat mở ra xem mà không nhắn gì vẫn tính là không
+tương tác.
+
+Các lớp bảo vệ, theo thứ tự:
+
+- **Đã lưu trữ** — không làm gì lại.
+- **Đã ghim** (`workspaceRegistry.pinnedSessionIds`) — không bao giờ lưu trữ; ghim là ý định giữ của bạn.
+- **Phiên con của subagent** — bỏ qua.
+- **Đang mở trong cửa sổ này** (còn agent nạp trong bộ nhớ) — giữ khi `skipActive: true`.
+- **Đang chạy** (lượt, job, subagent, nhắc đã lên lịch) — giữ khi `archiveRunning: false`. Đây cũng là
+  lớp bảo vệ của chính `workspaceRegistry.archiveSession`: nó từ chối lưu trữ phiên còn việc và báo
+  `WorkspaceActiveSessionError`; lượt kiểm tra ghi các phiên đó vào mục "còn việc chạy" của báo cáo
+  thay vì coi là lỗi. Bật `archiveRunning: true` thì plugin gọi `archiveSession(id, { stopActivity:
+  true })`: lưu trữ trước, rồi dừng lượt/job/subagent/nhắc giống thao tác **Dừng và lưu trữ** trong
+  giao diện. Việc đang chạy không được chờ xong.
+- **Chat trắng** (chưa từng nhắn) — giữ khi `archiveBlank: false`.
+
+Lượt kiểm tra chạy lúc mở DSH (sau `startupDelayMs`) rồi mỗi `checkMs`, và chỉ khi DSH đang chạy. Mở lại
+DSH sau nhiều ngày thì lượt đầu lưu trữ bù ngay các chat đã quá hạn. Mỗi lượt chỉ lưu trữ tối đa
+`maxPerPass` chat; phần còn lại để lượt sau. `dryRun: true` chỉ ghi báo cáo "sẽ lưu trữ ai".
+
+Thẻ cấu hình trong **Plugins** có đủ công tắc, số ngày, nhịp kiểm tra, nút **Lưu** và **Chạy ngay**,
+kèm báo cáo lượt gần nhất (quét bao nhiêu, đã lưu trữ, còn việc chạy, lỗi). Báo cáo và giờ chạy nằm ở
+`<DSH_HOME>/personal-hub/auto-archive/state.json`. Thẻ gọi ba route POST
+`/api/personal-hub-auto-archive/{state,settingsSet,runNow}`, nên bật/tắt và chạy thử không cần sửa tay
+`cordis.patch.yml` hay khởi động lại DSH.
+
+## 8. Web Remote (Phase 1 — bridge)
 
 Điều khiển DSH từ điện thoại qua một relay WebSocket. Plugin là bên **chủ động nối ra ngoài**;
 máy chạy DSH không mở port nào. Phần đã xong là **bridge Host**, **giao thức v1**
@@ -627,7 +680,7 @@ Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
 - Chỉ prompt văn bản; ảnh/tệp, xoá phiên, đổi workspace chưa có trong giao thức.
 - Chưa có E2E: relay thấy plaintext. Chỉ dùng TLS và relay do bạn kiểm soát.
 
-## 8. Tệp dữ liệu
+## 9. Tệp dữ liệu
 
 `%USERPROFILE%\.dsh\personal-hub\telegram-remote\` (hoặc `$DSH_HOME/personal-hub/telegram-remote/`):
 
@@ -641,7 +694,7 @@ Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
 - `device.key` — khoá riêng Ed25519, `0600`; **không** sao lưu lên relay.
 - `state.json` — `deviceId`, `relayUrl`, `pairedAt`.
 - `refresh-token.json` — chỉ dùng khi credential store không khả dụng.
-- `status.json` — trạng thái kết nối/ghép cặp như bảng ở mục 7.
+- `status.json` — trạng thái kết nối/ghép cặp như bảng ở mục 8.
 
 `%USERPROFILE%\.dsh\personal-hub\git.json` giữ trạng thái của bảng Git:
 
@@ -653,7 +706,13 @@ Chi tiết frame: [`protocol/README.md`](../protocol/README.md).
 - `cleanup` — kết quả lượt dọn worktree gần nhất: `at`, `removed`, `kept` (kèm lý do);
 - `probe` — lần cuối giao diện New Session hỏi trạng thái worktree (dùng để kiểm tra bridge).
 
-## 9. Mã nguồn TypeScript và thêm tính năng mới
+`%USERPROFILE%\.dsh\personal-hub\auto-archive\state.json` (hoặc `$DSH_HOME/personal-hub/auto-archive/`):
+
+- `last` — báo cáo lượt kiểm tra gần nhất: `at`, `dryRun`, số chat đã quét, số quá hạn, số còn việc
+  chạy, và danh sách `archived`, `failed`, `active`, `deferred` (mỗi mục có `sessionId`, `title` khi
+  DSH có đặt tên, và `idleDays`). Tệp này chỉ để xem/kiểm tra; xoá nó chỉ mất báo cáo, không mất chat.
+
+## 10. Mã nguồn TypeScript và thêm tính năng mới
 
 Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
 
@@ -663,6 +722,9 @@ Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
 | `src/features/git.ts` | 37 route `/api/personal-hub-git/*`, thao tác chuỗi, quản lý worktree |
 | `src/features/telegram-remote.ts` | Bot Telegram, lệnh, đẩy phản hồi về chat |
 | `src/features/web-remote.ts` | Bridge Web Remote: ghép cặp, transport, answerer |
+| `src/features/auto-archive.ts` | Tự động lưu trữ: quét `sessionController.list()`, lịch kiểm tra, lớp bảo vệ |
+| `src/features/auto-archive-routes.ts` | Ba route `/api/personal-hub-auto-archive/*` cho thẻ cấu hình |
+| `src/lib/auto-archive.ts` | Quyết định thuần và runner lưu trữ, test được không cần Host |
 | `src/lib/remote-*.ts` | Giao thức v1, identity Ed25519, pairing, WebSocket transport |
 | `src/lib/` | Phần thuần: đọc Git, forge, soạn PR/commit, worktree, text, state store |
 | `src/shared/protocol.ts` | Kiểu dữ liệu dùng chung giữa Host và trình duyệt |
@@ -686,6 +748,8 @@ npm test             # build rồi chạy toàn bộ test
 
 Thêm tính năng mới: tạo `src/features/<tên>.ts` export `mount(ctx, config, deps)` trả về hàm dọn
 dẹp, thêm một mục vào `FEATURES` trong `src/index.ts` và một khoá cấu hình trong `src/lib/config.ts`.
+Đặt `mountWhenDisabled: true` cho mục đó khi thẻ cấu hình của nó là công tắc bật tính năng (như
+`webRemote` và `autoArchive`): feature vẫn mount để phục vụ thẻ, nhưng không chạy việc gì khi tắt.
 
 ## 11. Tiếng Việt cho giao diện DSH
 
@@ -732,6 +796,12 @@ Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký
 route `/api/personal-hub-web-remote/*` (trạng thái, lưu thiết lập, ghép cặp, huỷ, ngắt) và render
 thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
 
+Tự động lưu trữ có test riêng ở ba lớp: `test/auto-archive.test.ts` cho quyết định thuần (tuổi, ghim,
+đang mở, đang chạy, chat trắng, giới hạn mỗi lượt, chạy thử, lỗi từng chat) và việc chuẩn hoá cấu
+hình; `test/auto-archive-routes.test.ts` cho ba route (đọc, lưu, chạy ngay, từ chối dữ liệu sai);
+`test/auto-archive-feature.test.ts` mount cả feature trên `sessionController`/`workspaceRegistry` giả,
+chạy một lượt thật và đọc lại báo cáo trong `state.json`.
+
 Gói tiếng Việt có test riêng trong `test/vi-language-pack.test.ts`: ngôn ngữ được thêm đúng id/label/
 fallback, mọi namespace đăng ký ở locale `vi`, placeholder giữ nguyên, không có ký tự zero-width,
 và một đăng ký lỗi không làm hỏng phần còn lại của gói.
@@ -752,6 +822,10 @@ và một đăng ký lỗi không làm hỏng phần còn lại của gói.
   CLI vẫn tạo được bằng REST nếu có token, nhưng không đọc được chi tiết kiểm tra của GitHub).
 - Dọn dẹp sau khi gộp chỉ chạy khi PR đó đã được plugin nhìn thấy (do chính nó tạo, hoặc đọc được ở
   chip PR của nhánh lúc bảng làm mới) và khi `git.merged.enabled` bật.
+- Tự động lưu trữ chỉ chạy **khi DSH đang mở**: lịch kiểm tra nằm trong tiến trình Host, và một lượt
+  đầu chạy bù sau `startupDelayMs` khi mở lại. Nó lưu trữ (không xoá) nên luôn khôi phục được; chat
+  được ghim thì không bao giờ bị lưu trữ. Bật `archiveRunning: true` sẽ **dừng** lượt, job, subagent và
+  nhắc đã lên lịch của chat đó, đúng như thao tác **Dừng và lưu trữ** trong giao diện.
 - Diff dừng sau 4000 dòng và bị cắt theo `maxDiffBytes` để giao diện giữ được nhịp.
 - Renderer Markdown là tập con GFM: chưa có setext heading, HTML thô (bị bỏ thay vì chạy), link
   dạng tham chiếu `[x][ref]`, chú thích chân trang hay tô màu cú pháp trong khối mã; tiêu đề mục
@@ -761,4 +835,4 @@ và một đăng ký lỗi không làm hỏng phần còn lại của gói.
   phải có host trong `git.gitlabHosts` (hoặc `git.forge: gitlab`) và `glab` đăng nhập đúng host, hoặc
   `GITLAB_TOKEN` / `DSH_GITLAB_TOKEN` cho REST.
 - Web Remote có bridge, thẻ cấu hình/ghép cặp trong DSH UI, relay phát triển và **relay production
-  bằng Zig** (`server/`); web client SvelteKit chưa có, chỉ nhận prompt văn bản. Xem mục 7.
+  bằng Zig** (`server/`); web client SvelteKit chưa có, chỉ nhận prompt văn bản. Xem mục 8.

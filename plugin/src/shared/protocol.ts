@@ -1045,3 +1045,110 @@ export type WebRemoteRequest<K extends WebRemoteEndpoint> = Parameters<WebRemote
 
 /** What one Web Remote route answers when it succeeds. */
 export type WebRemoteResponse<K extends WebRemoteEndpoint> = Awaited<ReturnType<WebRemoteApi[K]>>
+
+/* ------------------------------------------------------------------ */
+/* Automatic archive                                                   */
+/* ------------------------------------------------------------------ */
+
+/** The rules that decide which idle chats are archived. */
+export interface AutoArchiveSettings {
+  /** Whether passes run at all. */
+  enabled: boolean
+  /** Days without a prompt after which a chat is archived; 0 turns the rule off. */
+  inactiveDays: number
+  /** Milliseconds between passes. */
+  checkMs: number
+  /** Keep a chat that has a loaded Agent, which usually means it is open. */
+  skipActive: boolean
+  /** Archive a chat whose turn still runs, stopping that work first. */
+  archiveRunning: boolean
+  /** Archive a chat that never received a prompt. */
+  archiveBlank: boolean
+  /** Report what would be archived without archiving. */
+  dryRun: boolean
+  /** Chats archived in one pass; 0 means no bound. */
+  maxPerPass: number
+}
+
+/** One chat in a pass report. */
+export interface AutoArchiveEntry {
+  sessionId: string
+  /** The chat's projected title, when the Host projected one. */
+  title?: string
+  /** Age of the latest prompt, in days, one decimal. */
+  idleDays: number
+}
+
+/** One chat a pass could not archive, with the reason. */
+export interface AutoArchiveFailure extends AutoArchiveEntry {
+  error: string
+}
+
+/** What one archive pass did, as the card shows it. */
+export interface AutoArchiveReport {
+  /** Epoch milliseconds of the pass. */
+  at: number
+  /** True when the pass only reported; `archived` lists what it would archive. */
+  dryRun: boolean
+  /** Chats the Host listed. */
+  scanned: number
+  /** Chats past the idle threshold. */
+  due: number
+  /** Chats newer than the threshold, so kept. */
+  recent: number
+  /** Pinned chats, which are never archived. */
+  pinned: number
+  archivedCount: number
+  failedCount: number
+  /** Chats the registry refused because their work still runs. */
+  activeCount: number
+  /** Due chats left for the next pass because of `maxPerPass`. */
+  deferredCount: number
+  archived: AutoArchiveEntry[]
+  failed: AutoArchiveFailure[]
+  active: AutoArchiveEntry[]
+  deferred: AutoArchiveEntry[]
+}
+
+/** One settings edit from the card. */
+export interface AutoArchiveSettingsPatch {
+  enabled?: boolean
+  inactiveDays?: number
+  checkMs?: number
+  skipActive?: boolean
+  archiveRunning?: boolean
+  archiveBlank?: boolean
+  dryRun?: boolean
+  maxPerPass?: number
+}
+
+/** What the card reads: settings, the last pass, and whether it may edit. */
+export interface AutoArchiveCardState {
+  writable: boolean
+  settings: AutoArchiveSettings
+  last: AutoArchiveReport | null
+}
+
+/** What the card's "run now" answers. */
+export interface AutoArchiveRunResult {
+  ran: boolean
+  /** Why no pass ran, when it did not. */
+  reason?: string
+  last: AutoArchiveReport | null
+}
+
+/** Every route the automatic-archive card may call. */
+export interface AutoArchiveApi {
+  state(payload?: Record<string, never>): Promise<AutoArchiveCardState>
+  settingsSet(payload: AutoArchiveSettingsPatch): Promise<{ settings: AutoArchiveSettings }>
+  runNow(payload?: Record<string, never>): Promise<AutoArchiveRunResult>
+}
+
+/** The name of one callable automatic-archive route. */
+export type AutoArchiveEndpoint = keyof AutoArchiveApi
+
+/** The payload of one automatic-archive route. */
+export type AutoArchiveRequest<K extends AutoArchiveEndpoint> = Parameters<AutoArchiveApi[K]>[0]
+
+/** What one automatic-archive route answers when it succeeds. */
+export type AutoArchiveResponse<K extends AutoArchiveEndpoint> = Awaited<ReturnType<AutoArchiveApi[K]>>

@@ -4,6 +4,7 @@
  * Normalization never throws: an invalid value falls back to its default, so a
  * typo in the profile patch cannot keep the whole plugin from mounting.
  */
+import type { AutoArchiveSettings } from '../shared/protocol.ts'
 
 /** Telegram remote control options. */
 export interface TelegramConfig {
@@ -136,11 +137,21 @@ export interface GitConfig {
   merged: MergedConfig
 }
 
+/** Automatic archiving of chats nobody has touched for a while. */
+export interface AutoArchiveConfig extends AutoArchiveSettings {
+  /**
+   * Grace after mount before the first pass, so startup work settles and a chat
+   * opened right after a restart is not archived before it can be used.
+   */
+  startupDelayMs: number
+}
+
 /** The normalized configuration one plugin row carries. */
 export interface HubConfig {
   telegram: TelegramConfig
   webRemote: WebRemoteConfig
   git: GitConfig
+  autoArchive: AutoArchiveConfig
 }
 
 /** Telegram defaults. */
@@ -303,6 +314,27 @@ export const GIT_DEFAULTS = Object.freeze({  enabled: true,
   }),
 })
 
+/** Automatic archive defaults: on, so an idle chat leaves the list after two days. */
+export const AUTO_ARCHIVE_DEFAULTS = Object.freeze({
+  enabled: true,
+  /** Days without a prompt after which a chat is archived. */
+  inactiveDays: 2,
+  /** Milliseconds between passes. */
+  checkMs: 3600000,
+  /** Keep a chat with a loaded Agent, which usually means it is open on screen. */
+  skipActive: true,
+  /** Archive a chat whose turn still runs, stopping that work first. */
+  archiveRunning: false,
+  /** Archive a chat that never received a prompt. */
+  archiveBlank: true,
+  /** Report what would be archived without archiving. */
+  dryRun: false,
+  /** Chats archived in one pass; 0 means no bound. */
+  maxPerPass: 50,
+  /** Grace after mount before the first pass. */
+  startupDelayMs: 60000,
+})
+
 /** A plain record, the shape every raw config value starts as. */
 type Raw = Record<string, unknown>
 
@@ -329,6 +361,26 @@ function asPositiveInteger(
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
+}
+
+/**
+ * Read one whole number that may legitimately be zero.
+ *
+ * `asPositiveInteger` treats zero as "unset", which is wrong for a setting
+ * whose zero means "off" or "unbounded", so those read through here.
+ *
+ * @param value raw configuration value.
+ * @param fallback value used when the entry is absent or not a number.
+ * @param bounds inclusive clamping range.
+ */
+function asWholeNumber(
+  value: unknown,
+  fallback: number,
+  { min = 0, max = Number.MAX_SAFE_INTEGER }: { min?: number; max?: number } = {},
+): number {
+  const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.min(max, Math.max(min, Math.round(numeric)))
 }
 
 function asStringList(value: unknown, fallback: readonly string[]): string[] {
@@ -382,6 +434,7 @@ export function normalizeConfig(raw: unknown): HubConfig {
   const cleanup = asRecord(worktree.cleanup)
   const merged = asRecord(git.merged)
   const webRemote = asRecord(root.webRemote)
+  const autoArchive = asRecord(root.autoArchive)
   const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 60000 })
   const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 300000 })
   return {
@@ -492,6 +545,17 @@ export function normalizeConfig(raw: unknown): HubConfig {
         archiveSession: asBoolean(merged.archiveSession, GIT_DEFAULTS.merged.archiveSession),
         checkMs: asPositiveInteger(merged.checkMs, GIT_DEFAULTS.merged.checkMs, { min: 15000, max: 3600000 }),
       },
+    },
+    autoArchive: {
+      enabled: asBoolean(autoArchive.enabled, AUTO_ARCHIVE_DEFAULTS.enabled),
+      inactiveDays: asWholeNumber(autoArchive.inactiveDays, AUTO_ARCHIVE_DEFAULTS.inactiveDays, { min: 0, max: 3650 }),
+      checkMs: asPositiveInteger(autoArchive.checkMs, AUTO_ARCHIVE_DEFAULTS.checkMs, { min: 60000, max: 86400000 }),
+      skipActive: asBoolean(autoArchive.skipActive, AUTO_ARCHIVE_DEFAULTS.skipActive),
+      archiveRunning: asBoolean(autoArchive.archiveRunning, AUTO_ARCHIVE_DEFAULTS.archiveRunning),
+      archiveBlank: asBoolean(autoArchive.archiveBlank, AUTO_ARCHIVE_DEFAULTS.archiveBlank),
+      dryRun: asBoolean(autoArchive.dryRun, AUTO_ARCHIVE_DEFAULTS.dryRun),
+      maxPerPass: asWholeNumber(autoArchive.maxPerPass, AUTO_ARCHIVE_DEFAULTS.maxPerPass, { min: 0, max: 500 }),
+      startupDelayMs: asWholeNumber(autoArchive.startupDelayMs, AUTO_ARCHIVE_DEFAULTS.startupDelayMs, { min: 0, max: 3600000 }),
     },
   }
 }

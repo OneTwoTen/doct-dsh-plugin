@@ -154,6 +154,25 @@ var GIT_DEFAULTS = Object.freeze({
     checkMs: 6e4
   })
 });
+var AUTO_ARCHIVE_DEFAULTS = Object.freeze({
+  enabled: true,
+  /** Days without a prompt after which a chat is archived. */
+  inactiveDays: 2,
+  /** Milliseconds between passes. */
+  checkMs: 36e5,
+  /** Keep a chat with a loaded Agent, which usually means it is open on screen. */
+  skipActive: true,
+  /** Archive a chat whose turn still runs, stopping that work first. */
+  archiveRunning: false,
+  /** Archive a chat that never received a prompt. */
+  archiveBlank: true,
+  /** Report what would be archived without archiving. */
+  dryRun: false,
+  /** Chats archived in one pass; 0 means no bound. */
+  maxPerPass: 50,
+  /** Grace after mount before the first pass. */
+  startupDelayMs: 6e4
+});
 function asRecord(value) {
   return value !== null && typeof value === "object" ? value : {};
 }
@@ -170,6 +189,11 @@ function asPositiveInteger(value, fallback, { min = 1, max = Number.MAX_SAFE_INT
 }
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
+}
+function asWholeNumber(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const numeric = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
 }
 function asStringList(value, fallback) {
   if (!Array.isArray(value)) return [...fallback];
@@ -205,6 +229,7 @@ function normalizeConfig(raw) {
   const cleanup = asRecord(worktree.cleanup);
   const merged = asRecord(git.merged);
   const webRemote = asRecord(root.webRemote);
+  const autoArchive = asRecord(root.autoArchive);
   const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 6e4 });
   const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 3e5 });
   return {
@@ -313,19 +338,929 @@ function normalizeConfig(raw) {
         archiveSession: asBoolean(merged.archiveSession, GIT_DEFAULTS.merged.archiveSession),
         checkMs: asPositiveInteger(merged.checkMs, GIT_DEFAULTS.merged.checkMs, { min: 15e3, max: 36e5 })
       }
+    },
+    autoArchive: {
+      enabled: asBoolean(autoArchive.enabled, AUTO_ARCHIVE_DEFAULTS.enabled),
+      inactiveDays: asWholeNumber(autoArchive.inactiveDays, AUTO_ARCHIVE_DEFAULTS.inactiveDays, { min: 0, max: 3650 }),
+      checkMs: asPositiveInteger(autoArchive.checkMs, AUTO_ARCHIVE_DEFAULTS.checkMs, { min: 6e4, max: 864e5 }),
+      skipActive: asBoolean(autoArchive.skipActive, AUTO_ARCHIVE_DEFAULTS.skipActive),
+      archiveRunning: asBoolean(autoArchive.archiveRunning, AUTO_ARCHIVE_DEFAULTS.archiveRunning),
+      archiveBlank: asBoolean(autoArchive.archiveBlank, AUTO_ARCHIVE_DEFAULTS.archiveBlank),
+      dryRun: asBoolean(autoArchive.dryRun, AUTO_ARCHIVE_DEFAULTS.dryRun),
+      maxPerPass: asWholeNumber(autoArchive.maxPerPass, AUTO_ARCHIVE_DEFAULTS.maxPerPass, { min: 0, max: 500 }),
+      startupDelayMs: asWholeNumber(autoArchive.startupDelayMs, AUTO_ARCHIVE_DEFAULTS.startupDelayMs, { min: 0, max: 36e5 })
     }
   };
+}
+
+// src/features/auto-archive.ts
+import { join as join2 } from "node:path";
+
+// src/lib/auto-archive.ts
+var DAY_MS = 864e5;
+var AUTO_ARCHIVE_REPORT_LIMIT = 50;
+function autoArchiveDecision(settings, fact, now = Date.now()) {
+  const config = settings ?? {};
+  if (config.enabled !== true) return { archive: false, reason: "disabled" };
+  if (fact.archived === true) return { archive: false, reason: "already-archived" };
+  if (fact.pinned === true) return { archive: false, reason: "pinned" };
+  if (fact.subagent === true) return { archive: false, reason: "subagent" };
+  if (config.skipActive !== false && fact.active === true) return { archive: false, reason: "active" };
+  if (config.archiveRunning !== true && fact.running === true) return { archive: false, reason: "running" };
+  if (config.archiveBlank === false && fact.blank === true) return { archive: false, reason: "blank" };
+  const inactiveDays = Number(config.inactiveDays) || 0;
+  if (inactiveDays <= 0) return { archive: false, reason: "idle-rule-off" };
+  const idleMs = now - (Number(fact.updatedAt) || 0);
+  if (idleMs < inactiveDays * DAY_MS) return { archive: false, reason: "recent" };
+  return { archive: true, reason: "archive" };
+}
+function createAutoArchiver({
+  settings,
+  logger,
+  store,
+  runtime,
+  now = Date.now
+}) {
+  let timer;
+  let running = false;
+  let disposed = false;
+  let report = null;
+  async function runOnce() {
+    if (disposed || running) return report;
+    if (settings.enabled !== true) return report;
+    running = true;
+    try {
+      const at = now();
+      const facts = await runtime.facts();
+      const due = [];
+      let recent = 0;
+      let pinned = 0;
+      for (const fact of facts) {
+        const decision = autoArchiveDecision(settings, fact, at);
+        if (!decision.archive) {
+          if (decision.reason === "recent") recent += 1;
+          else if (decision.reason === "pinned") pinned += 1;
+          continue;
+        }
+        due.push(entryOf(fact, at));
+      }
+      const limit = Number(settings.maxPerPass) > 0 ? Number(settings.maxPerPass) : due.length;
+      const attempted = due.slice(0, limit);
+      const deferred = due.slice(attempted.length);
+      const archived = [];
+      const failed = [];
+      const active = [];
+      for (const entry of attempted) {
+        if (settings.dryRun === true) {
+          archived.push(entry);
+          continue;
+        }
+        try {
+          const result = await runtime.archive(entry.sessionId, { stopActivity: settings.archiveRunning === true });
+          if (result.archived) {
+            archived.push(entry);
+            logger.info("auto-archive: archived %s after %d days without a prompt", entry.sessionId, entry.idleDays);
+          } else if (result.active === true) {
+            active.push(entry);
+          } else {
+            failed.push({ ...entry, error: result.error ?? "the registry refused the archive" });
+            logger.warn("auto-archive: cannot archive %s: %s", entry.sessionId, result.error ?? "refused");
+          }
+        } catch (error) {
+          failed.push({ ...entry, error: messageOf(error) });
+          logger.warn("auto-archive: cannot archive %s: %s", entry.sessionId, messageOf(error));
+        }
+      }
+      report = {
+        at,
+        dryRun: settings.dryRun === true,
+        scanned: facts.length,
+        due: due.length,
+        recent,
+        pinned,
+        archivedCount: archived.length,
+        failedCount: failed.length,
+        activeCount: active.length,
+        deferredCount: deferred.length,
+        archived: archived.slice(0, AUTO_ARCHIVE_REPORT_LIMIT),
+        failed: failed.slice(0, AUTO_ARCHIVE_REPORT_LIMIT),
+        active: active.slice(0, AUTO_ARCHIVE_REPORT_LIMIT),
+        deferred: deferred.slice(0, AUTO_ARCHIVE_REPORT_LIMIT)
+      };
+      await store.update((state) => {
+        state.last = report;
+      }).catch((error) => {
+        logger.warn("auto-archive: cannot record the pass: %s", messageOf(error));
+      });
+      return report;
+    } finally {
+      running = false;
+    }
+  }
+  function schedule(delayMs) {
+    if (disposed) return;
+    timer = setTimeout(() => {
+      timer = void 0;
+      void runOnce().catch((error) => {
+        logger.warn("auto-archive: pass failed: %s", messageOf(error));
+      }).finally(() => {
+        schedule(Number(settings.checkMs) || 36e5);
+      });
+    }, delayMs);
+    timer.unref?.();
+  }
+  return {
+    runOnce,
+    last: () => report,
+    start() {
+      if (disposed || timer !== void 0) return;
+      if (settings.enabled !== true) {
+        logger.info("auto-archive: off");
+        return;
+      }
+      const startupDelayMs = Math.max(0, Number(settings.startupDelayMs) || 0);
+      const checkMs = Number(settings.checkMs) || 36e5;
+      logger.info(
+        "auto-archive: chats untouched for %d days are archived, first pass in %d ms, then every %d ms",
+        Number(settings.inactiveDays) || 0,
+        startupDelayMs,
+        checkMs
+      );
+      schedule(startupDelayMs);
+    },
+    stop() {
+      disposed = true;
+      if (timer !== void 0) clearTimeout(timer);
+      timer = void 0;
+    }
+  };
+}
+function entryOf(fact, at) {
+  const idleMs = Math.max(0, at - (Number(fact.updatedAt) || 0));
+  const idleDays = Math.round(idleMs / DAY_MS * 10) / 10;
+  return {
+    sessionId: fact.sessionId,
+    ...typeof fact.title === "string" && fact.title.length > 0 ? { title: fact.title } : {},
+    idleDays
+  };
+}
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// src/lib/host-http.ts
+async function readJsonPayload(request) {
+  let text2;
+  try {
+    text2 = await request.text();
+  } catch {
+    return void 0;
+  }
+  if (text2.trim().length === 0) return {};
+  try {
+    const parsed = JSON.parse(text2);
+    return parsed !== null && typeof parsed === "object" ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function jsonResponse(body) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+  });
+}
+
+// src/lib/remote-protocol.ts
+var PROTOCOL_VERSION = 1;
+var DEFAULT_LIMITS = Object.freeze({
+  maxFrameBytes: 262144,
+  maxStreams: 8,
+  maxInflight: 32,
+  heartbeatMs: 25e3,
+  requestTimeoutMs: 6e4,
+  approvalTimeoutMs: 3e5,
+  questionTimeoutMs: 3e5
+});
+var APPROVAL_OUTCOMES = Object.freeze([
+  "allowed-once",
+  "rejected",
+  "cancelled",
+  "unavailable"
+]);
+var END_REASONS = Object.freeze([
+  "complete",
+  "cancelled",
+  "overflow",
+  "error",
+  "revoked",
+  "shutdown"
+]);
+var FRAME_TYPES = Object.freeze([
+  "hello",
+  "hello.ok",
+  "req",
+  "res",
+  "open",
+  "item",
+  "end",
+  "cancel",
+  "ping",
+  "pong",
+  "error"
+]);
+var CLIENT_OPS = Object.freeze([
+  "session.list",
+  "session.state",
+  "session.create",
+  "session.rename",
+  "session.prompt",
+  "session.cancel",
+  "session.events",
+  "session.modelCatalog",
+  "session.selectModel"
+]);
+var STREAM_OPS = Object.freeze(["session.follow", "session.control"]);
+var DEVICE_OPS = Object.freeze(["approval.ask", "question.ask", "relay.ping"]);
+var ERROR_CATALOG = Object.freeze({
+  "bad-frame": false,
+  "bad-request": false,
+  unsupported: false,
+  internal: true,
+  "auth/invalid-token": false,
+  "auth/expired": true,
+  "auth/replay": false,
+  "device/pending": true,
+  "device/revoked": false,
+  "session/not-found": false,
+  "stream/limit": false,
+  "stream/overflow": false,
+  "approval/expired": false,
+  "rate/limited": true,
+  "transport/not-ready": true,
+  "transport/timeout": true,
+  "transport/closed": true,
+  "transport/cancelled": false,
+  relay: false
+});
+var ProtocolError = class extends Error {
+  code;
+  retryable;
+  /**
+   * @param code one of `ERROR_CATALOG`
+   * @param message human-readable, already safe to log
+   */
+  constructor(code, message3, options = {}) {
+    super(message3, options.cause === void 0 ? void 0 : { cause: options.cause });
+    this.name = "ProtocolError";
+    this.code = code;
+    this.retryable = options.retryable ?? ERROR_CATALOG[code] ?? false;
+  }
+};
+function toWireError(error) {
+  if (error instanceof ProtocolError) {
+    return { code: error.code, message: error.message, retryable: error.retryable };
+  }
+  return {
+    code: "internal",
+    message: error instanceof Error ? error.message : String(error),
+    retryable: true
+  };
+}
+var OPS_PATTERN = /^[a-z][a-z0-9]*\.[a-zA-Z][a-zA-Z0-9]*$/;
+function badFrame(message3) {
+  return new ProtocolError("bad-frame", message3);
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isFrameType(value) {
+  return typeof value === "string" && FRAME_TYPES.includes(value);
+}
+function requireObject(frame, field2, { optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (!isObject(value)) throw badFrame(`"${field2}" must be an object`);
+}
+function requireString(frame, field2, { min = 1, max = 4096, optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (typeof value !== "string") throw badFrame(`"${field2}" must be a string`);
+  if (value.length < min || value.length > max) throw badFrame(`"${field2}" has an invalid length`);
+}
+function requireInteger(frame, field2, { min = 0, optional = false } = {}) {
+  const value = frame[field2];
+  if (value === void 0 && optional) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min) {
+    throw badFrame(`"${field2}" must be a number >= ${min}`);
+  }
+}
+function requireBoolean(frame, field2) {
+  if (typeof frame[field2] !== "boolean") throw badFrame(`"${field2}" must be a boolean`);
+}
+function requireId(frame) {
+  requireString(frame, "id", { min: 1, max: 128 });
+}
+function requireOp(frame) {
+  requireString(frame, "op", { min: 3, max: 64 });
+  const op = frame.op;
+  if (typeof op !== "string" || !OPS_PATTERN.test(op)) throw badFrame('"op" must look like "<namespace>.<verb>"');
+}
+function validateFrame(value) {
+  if (!isObject(value)) throw badFrame("a frame must be a JSON object");
+  if (!isFrameType(value.t)) {
+    throw badFrame("unknown frame type");
+  }
+  const frame = value;
+  switch (frame.t) {
+    case "hello": {
+      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
+      requireString(frame, "deviceId", { min: 1, max: 128 });
+      requireInteger(frame, "ts");
+      requireString(frame, "nonce", { min: 8, max: 128 });
+      requireString(frame, "sig", { min: 40, max: 256 });
+      return frame;
+    }
+    case "hello.ok": {
+      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
+      requireInteger(frame, "serverTime");
+      requireObject(frame, "limits", { optional: true });
+      return frame;
+    }
+    case "req":
+    case "open": {
+      requireId(frame);
+      requireOp(frame);
+      requireObject(frame, "args", { optional: true });
+      return frame;
+    }
+    case "res": {
+      requireId(frame);
+      requireBoolean(frame, "ok");
+      if (frame.ok === true) {
+        if (!Object.prototype.hasOwnProperty.call(frame, "value")) {
+          throw badFrame('a successful response must carry "value"');
+        }
+        return frame;
+      }
+      const error = frame.error;
+      if (!isObject(error)) throw badFrame('a failed response must carry "error"');
+      requireString(error, "code", { min: 1, max: 64 });
+      requireString(error, "message", { min: 0, max: 8192 });
+      if (error.retryable !== void 0 && typeof error.retryable !== "boolean") {
+        throw badFrame('"error.retryable" must be a boolean');
+      }
+      return frame;
+    }
+    case "item": {
+      requireId(frame);
+      if (!Object.prototype.hasOwnProperty.call(frame, "item")) throw badFrame('"item" is required');
+      requireInteger(frame, "seq", { optional: true });
+      return frame;
+    }
+    case "end": {
+      requireId(frame);
+      if (frame.reason !== void 0 && !END_REASONS.includes(frame.reason)) {
+        throw badFrame('"reason" is not a known end reason');
+      }
+      return frame;
+    }
+    case "cancel": {
+      requireId(frame);
+      return frame;
+    }
+    case "ping":
+    case "pong": {
+      requireString(frame, "nonce", { min: 0, max: 128, optional: true });
+      return frame;
+    }
+    case "error": {
+      requireString(frame, "code", { min: 1, max: 64 });
+      requireString(frame, "message", { min: 0, max: 8192 });
+      if (frame.retryable !== void 0 && typeof frame.retryable !== "boolean") {
+        throw badFrame('"retryable" must be a boolean');
+      }
+      return frame;
+    }
+    /* v8 ignore next -- FRAME_TYPES is closed and checked above. */
+    default:
+      throw badFrame("unknown frame type");
+  }
+}
+function decodeFrame(text2, options = {}) {
+  if (typeof text2 !== "string") throw badFrame("a wire frame must be text");
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
+  const bytes = Buffer.byteLength(text2, "utf8");
+  if (bytes > maxFrameBytes) {
+    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text2);
+  } catch (error) {
+    throw new ProtocolError("bad-frame", "frame is not valid JSON", { cause: error });
+  }
+  return validateFrame(parsed);
+}
+function encodeFrame(frame, options = {}) {
+  validateFrame(frame);
+  const text2 = JSON.stringify(frame);
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
+  const bytes = Buffer.byteLength(text2, "utf8");
+  if (bytes > maxFrameBytes) {
+    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
+  }
+  return text2;
+}
+function helloFrame({ deviceId, ts, nonce, sig }) {
+  return { t: "hello", v: PROTOCOL_VERSION, deviceId, ts, nonce, sig };
+}
+function requestFrame(id, op, args = {}) {
+  return { t: "req", id, op, args };
+}
+function responseFrame(id, value) {
+  return { t: "res", id, ok: true, value: value ?? null };
+}
+function errorResponseFrame(id, code, message3, options = {}) {
+  return {
+    t: "res",
+    id,
+    ok: false,
+    error: {
+      code,
+      message: message3,
+      ...options.retryable === void 0 ? {} : { retryable: options.retryable }
+    }
+  };
+}
+function itemFrame(id, item, seq) {
+  return { t: "item", id, item, ...seq === void 0 ? {} : { seq } };
+}
+function endFrame(id, reason = "complete") {
+  return { t: "end", id, reason };
+}
+function pingFrame(nonce) {
+  return { t: "ping", ...nonce === void 0 ? {} : { nonce } };
+}
+function pongFrame(nonce) {
+  return { t: "pong", ...nonce === void 0 ? {} : { nonce } };
+}
+
+// src/features/auto-archive-routes.ts
+var AUTO_ARCHIVE_PATH_PREFIX = "/api/personal-hub-auto-archive";
+var AUTO_ARCHIVE_ENDPOINTS = ["state", "settingsSet", "runNow"];
+var ROW_PACKAGE = "@local/personal-hub";
+var LIMITS = Object.freeze({
+  inactiveDays: { min: 0, max: 3650 },
+  checkMs: { min: 6e4, max: 864e5 },
+  maxPerPass: { min: 0, max: 500 }
+});
+function mountAutoArchiveRoutes(ctx, deps) {
+  const connection = ctx.get("connection");
+  if (connection?.fetch !== void 0 && typeof connection.fetch.register === "function") {
+    return registerRoutes(ctx, connection.fetch.register.bind(connection.fetch), deps);
+  }
+  if (typeof ctx.inject !== "function") {
+    deps.logger.info("auto-archive: the connection service is absent, so the settings card has no Host side");
+    return () => {
+    };
+  }
+  let routeDisposer;
+  let fiber;
+  try {
+    fiber = ctx.inject(["connection"], (scoped) => {
+      const scopedConnection = scoped.get("connection");
+      if (scopedConnection?.fetch === void 0 || typeof scopedConnection.fetch.register !== "function") {
+        deps.logger.warn("auto-archive: the connection service exposes no Fetch routes; the card has no Host side");
+        return;
+      }
+      routeDisposer = registerRoutes(ctx, scopedConnection.fetch.register.bind(scopedConnection.fetch), deps);
+    });
+  } catch (error) {
+    deps.logger.warn("auto-archive: cannot wait for the connection service: %s", messageOf2(error));
+    return () => {
+    };
+  }
+  return () => {
+    try {
+      routeDisposer?.();
+    } catch (error) {
+      deps.logger.warn("auto-archive: route disposal failed: %s", messageOf2(error));
+    }
+    routeDisposer = void 0;
+    try {
+      fiber?.dispose?.();
+    } catch {
+    }
+  };
+}
+function registerRoutes(ctx, register, deps) {
+  const disposers = [];
+  for (const endpoint of AUTO_ARCHIVE_ENDPOINTS) {
+    const route = {
+      path: `${AUTO_ARCHIVE_PATH_PREFIX}/${endpoint}`,
+      methods: ["POST"],
+      requestBody: "buffered",
+      fetch: async (request) => {
+        const payload = await readJsonPayload(request);
+        if (payload === void 0) {
+          return jsonResponse(failure("input/invalid", "The request body is not valid JSON"));
+        }
+        return jsonResponse(await dispatch(ctx, deps, endpoint, payload));
+      }
+    };
+    try {
+      disposers.push(register(route));
+    } catch (error) {
+      deps.logger.error("auto-archive: cannot register %s: %s", route.path, messageOf2(error));
+    }
+  }
+  if (disposers.length === 0) {
+    deps.logger.error("auto-archive: no card route could be registered");
+  } else {
+    deps.logger.info("auto-archive: %d routes are open under %s for this browser", disposers.length, AUTO_ARCHIVE_PATH_PREFIX);
+  }
+  return () => {
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch (error) {
+        deps.logger.warn("auto-archive: route dispose failed: %s", messageOf2(error));
+      }
+    }
+  };
+}
+async function dispatch(ctx, deps, endpoint, payload) {
+  try {
+    switch (endpoint) {
+      case "state":
+        return { ok: true, value: cardState(ctx, deps) };
+      case "settingsSet":
+        return { ok: true, value: await settingsSet(ctx, deps, payload) };
+      case "runNow":
+        return { ok: true, value: await runNow(deps) };
+      default:
+        return failure("input/unknown-endpoint", `Unknown automatic-archive route "${String(endpoint)}"`);
+    }
+  } catch (error) {
+    deps.logger.warn("auto-archive: %s failed: %s", endpoint, messageOf2(error));
+    return failureOf(error);
+  }
+}
+function cardState(ctx, deps) {
+  return {
+    writable: editorOf(ctx) !== void 0,
+    settings: deps.settings(),
+    last: deps.last()
+  };
+}
+async function runNow(deps) {
+  if (deps.settings().enabled !== true) {
+    return { ran: false, reason: "disabled", last: deps.last() };
+  }
+  const last = await deps.run();
+  return { ran: true, last: last ?? deps.last() };
+}
+async function settingsSet(ctx, deps, payload) {
+  const editor = editorOf(ctx);
+  if (editor === void 0) {
+    throw new ProtocolError("config/unavailable", "This build cannot edit configuration from the UI");
+  }
+  const current = deps.settings();
+  const next = mergeSettings(current, payload);
+  if (sameSettings(current, next)) return { settings: current };
+  const entry = editor.entries().find((row) => row?.options?.name === ROW_PACKAGE);
+  if (entry === void 0) {
+    throw new ProtocolError("config/unknown-entry", "The plugin row is missing from this profile configuration");
+  }
+  await editor.edit(entry, (raw) => writeRow(raw, next));
+  deps.applySettings(next);
+  return { settings: next };
+}
+function editorOf(ctx) {
+  const service = ctx.get("configEditor");
+  return service !== void 0 && typeof service.edit === "function" && typeof service.entries === "function" ? service : void 0;
+}
+function mergeSettings(current, payload) {
+  return {
+    enabled: boolean(current.enabled, payload.enabled, "enabled"),
+    inactiveDays: whole(payload.inactiveDays, current.inactiveDays, "inactiveDays"),
+    checkMs: whole(payload.checkMs, current.checkMs, "checkMs"),
+    skipActive: boolean(current.skipActive, payload.skipActive, "skipActive"),
+    archiveRunning: boolean(current.archiveRunning, payload.archiveRunning, "archiveRunning"),
+    archiveBlank: boolean(current.archiveBlank, payload.archiveBlank, "archiveBlank"),
+    dryRun: boolean(current.dryRun, payload.dryRun, "dryRun"),
+    maxPerPass: whole(payload.maxPerPass, current.maxPerPass, "maxPerPass")
+  };
+}
+function boolean(current, value, name2) {
+  if (value === void 0) return current;
+  if (typeof value !== "boolean") throw new ProtocolError("input/invalid", `${name2} must be true or false`);
+  return value;
+}
+function whole(value, current, name2) {
+  if (value === void 0) return current;
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new ProtocolError("input/invalid", `${name2} must be a whole number`);
+  }
+  const limit = LIMITS[name2];
+  if (value < limit.min || value > limit.max) {
+    throw new ProtocolError("input/invalid", `${name2} must be between ${limit.min} and ${limit.max}`);
+  }
+  return value;
+}
+function sameSettings(left, right) {
+  return left.enabled === right.enabled && left.inactiveDays === right.inactiveDays && left.checkMs === right.checkMs && left.skipActive === right.skipActive && left.archiveRunning === right.archiveRunning && left.archiveBlank === right.archiveBlank && left.dryRun === right.dryRun && left.maxPerPass === right.maxPerPass;
+}
+function writeRow(raw, settings) {
+  const row = record(raw);
+  return {
+    ...row,
+    autoArchive: {
+      ...record(row.autoArchive),
+      ...settings
+    }
+  };
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function failure(code, message3) {
+  return { ok: false, error: { code, message: message3 } };
+}
+function failureOf(error) {
+  if (error instanceof ProtocolError) return failure(error.code, error.message);
+  return failure("system/failed", messageOf2(error));
+}
+function messageOf2(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// src/lib/paths.ts
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+function expandHome(input) {
+  if (typeof input !== "string" || input.length === 0) return input;
+  const value = input.trim();
+  if (value === "~") return homedir();
+  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homedir(), value.slice(2));
+  return value;
+}
+function dshHome(env = process.env) {
+  const fromEnv = env.DSH_HOME;
+  if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return resolve(expandHome(fromEnv));
+  return join(homedir(), ".dsh");
+}
+function pluginDataDir(name2, env = process.env) {
+  return join(dshHome(env), name2);
+}
+
+// src/lib/state-store.ts
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+var RETRYABLE_WRITE = /* @__PURE__ */ new Set(["EBUSY", "EPERM", "EACCES"]);
+function delay(ms) {
+  return new Promise((resolve6) => {
+    setTimeout(resolve6, ms).unref?.();
+  });
+}
+async function writeJsonFile(file, value, attempts = 6) {
+  await mkdir(dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${nextTempId()}.tmp`;
+  const text2 = `${JSON.stringify(value, null, 2)}
+`;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await writeFile(temporary, text2, "utf8");
+      await rename(temporary, file);
+      return;
+    } catch (error) {
+      const code = error?.code ?? "";
+      if (attempt >= attempts || !RETRYABLE_WRITE.has(code)) throw error;
+      await delay(10 * attempt);
+    }
+  }
+}
+var tempCounter = 0;
+function nextTempId() {
+  tempCounter = (tempCounter + 1) % 1e6;
+  return `${tempCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+async function readJsonFile(file) {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+var JsonStateStore = class {
+  #file;
+  #defaults;
+  #state;
+  #loadPromise;
+  #queue = Promise.resolve();
+  constructor(file, defaults) {
+    this.#file = file;
+    this.#defaults = defaults;
+  }
+  async load() {
+    this.#loadPromise ??= readJsonFile(this.#file).then((stored) => {
+      const source = stored !== null && typeof stored === "object" ? stored : {};
+      this.#state = { ...structuredClone(this.#defaults), ...source };
+      return this.#state;
+    });
+    return this.#loadPromise;
+  }
+  get state() {
+    if (this.#state === void 0) throw new Error("JsonStateStore.load() must be awaited first");
+    return this.#state;
+  }
+  /**
+   * Apply one mutation and persist the result. Mutations run in call order.
+   * @param mutate the change to apply to the loaded state
+   */
+  update(mutate) {
+    const next = this.#queue.then(async () => {
+      await this.load();
+      mutate(this.state);
+      await writeJsonFile(this.#file, this.state);
+      return this.state;
+    });
+    this.#queue = next;
+    return next;
+  }
+};
+
+// src/features/auto-archive.ts
+var DATA_DIR_NAME = "personal-hub";
+var STATE_DIR_NAME = "auto-archive";
+function mountAutoArchive(ctx, config, deps) {
+  const logger = deps.logger;
+  const registry = ctx.get("workspaceRegistry");
+  if (typeof registry?.archiveSession === "function") return mountWithRegistry(ctx, config, deps, registry);
+  if (typeof ctx.inject !== "function") {
+    logger.warn("auto-archive: this build exposes no archive set, so the feature cannot mount");
+    return () => {
+    };
+  }
+  let inner;
+  let fiber;
+  try {
+    fiber = ctx.inject(["workspaceRegistry"], (scoped) => {
+      const live = scoped.get("workspaceRegistry");
+      if (typeof live?.archiveSession !== "function") {
+        logger.warn("auto-archive: this build exposes no archive set, so the feature cannot mount");
+        return;
+      }
+      inner = mountWithRegistry(scoped, config, deps, live);
+    });
+  } catch (error) {
+    logger.warn("auto-archive: cannot wait for the workspace registry: %s", messageOf3(error));
+    return () => {
+    };
+  }
+  return () => {
+    try {
+      inner?.();
+    } catch (error) {
+      logger.warn("auto-archive: dispose failed: %s", messageOf3(error));
+    }
+    inner = void 0;
+    try {
+      fiber?.dispose?.();
+    } catch {
+    }
+  };
+}
+function mountWithRegistry(ctx, config, deps, registry) {
+  const logger = deps.logger;
+  const controller = new AbortController();
+  const sessionController = ctx.get("sessionController");
+  if (typeof sessionController?.list !== "function") {
+    logger.warn("auto-archive: this build lists no Sessions, so nothing can be archived");
+    return () => {
+    };
+  }
+  const settings = { ...config };
+  const store = new JsonStateStore(
+    join2(pluginDataDir(DATA_DIR_NAME), STATE_DIR_NAME, "state.json"),
+    { version: 1, last: null }
+  );
+  let lastReport = null;
+  void store.load().then((value) => {
+    lastReport = value.last ?? null;
+  }).catch((error) => {
+    logger.warn("auto-archive: cannot read the last pass: %s", messageOf3(error));
+  });
+  function idSet(value) {
+    if (value instanceof Set) return new Set([...value].map(String));
+    return new Set(Array.isArray(value) ? value.map((item) => String(item)) : []);
+  }
+  const runtime = {
+    /** Every Session the Host lists, with the archive and pin sets applied. */
+    async facts() {
+      let archived;
+      let pinned;
+      try {
+        archived = idSet(registry.archivedSessionIds);
+        pinned = idSet(registry.pinnedSessionIds);
+      } catch (error) {
+        logger.warn("auto-archive: cannot read the archive or pin set: %s", messageOf3(error));
+        archived = /* @__PURE__ */ new Set();
+        pinned = /* @__PURE__ */ new Set();
+      }
+      const value = await sessionController.list({}, controller.signal);
+      const rows = Array.isArray(value?.items) ? value.items : [];
+      const facts = [];
+      for (const summary of rows) {
+        const sessionId = String(summary?.sessionId ?? "");
+        if (sessionId.length === 0) continue;
+        const title = projectedTitle(summary);
+        facts.push({
+          sessionId,
+          updatedAt: Number(summary?.updatedAt) || 0,
+          active: summary?.agentAvailable === true,
+          running: summary?.running === true,
+          blank: summary?.blank === true,
+          subagent: summary?.origin === "subagent",
+          archived: archived.has(sessionId),
+          pinned: pinned.has(sessionId),
+          ...title.length > 0 ? { title } : {}
+        });
+      }
+      return facts;
+    },
+    /** Archive one Session, classifying the registry's activity refusal. */
+    async archive(sessionId, options) {
+      try {
+        await registry.archiveSession(sessionId, options.stopActivity ? { stopActivity: true } : {});
+        return { archived: true };
+      } catch (error) {
+        if (errorName(error) === "WorkspaceActiveSessionError") return { archived: false, active: true };
+        throw error;
+      }
+    }
+  };
+  const archiver = createAutoArchiver({
+    settings,
+    logger,
+    store,
+    runtime,
+    now: () => Date.now()
+  });
+  function view() {
+    return {
+      enabled: settings.enabled,
+      inactiveDays: settings.inactiveDays,
+      checkMs: settings.checkMs,
+      skipActive: settings.skipActive,
+      archiveRunning: settings.archiveRunning,
+      archiveBlank: settings.archiveBlank,
+      dryRun: settings.dryRun,
+      maxPerPass: settings.maxPerPass
+    };
+  }
+  const routes = mountAutoArchiveRoutes(ctx, {
+    logger,
+    settings: view,
+    last: () => archiver.last() ?? lastReport,
+    run: async () => {
+      const report = await archiver.runOnce();
+      if (report !== null) lastReport = report;
+      return report;
+    },
+    applySettings: (next) => {
+      Object.assign(settings, next);
+    }
+  });
+  archiver.start();
+  logger.info("auto-archive: mounted; routes under %s", AUTO_ARCHIVE_PATH_PREFIX);
+  return () => {
+    archiver.stop();
+    controller.abort();
+    routes();
+  };
+}
+function projectedTitle(summary) {
+  const value = summary?.projections?.values?.title;
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+function errorName(error) {
+  return error instanceof Error ? error.name : "";
+}
+function messageOf3(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // src/features/git.ts
 import { randomUUID } from "node:crypto";
 import { stat as stat4 } from "node:fs/promises";
-import { isAbsolute as isAbsolute3, join as join4, resolve as resolve5 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join5, resolve as resolve5 } from "node:path";
 
 // src/lib/git-run.ts
 import { execFile } from "node:child_process";
 import { open, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join as join3, relative, resolve as resolve2, sep } from "node:path";
 
 // src/lib/git-core.ts
 var CONFLICT_CODES = /* @__PURE__ */ new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
@@ -1184,7 +2119,7 @@ async function readFilePatch(runner, options) {
   const relativePath = normalizeRelativePath(root, options.path);
   const maxBytes = Number(config.maxDiffBytes) || 393216;
   if (untracked) {
-    const preview = await readFilePreview(join(root, relativePath), Math.min(maxBytes, Number(config.maxUntrackedBytes) || 131072));
+    const preview = await readFilePreview(join3(root, relativePath), Math.min(maxBytes, Number(config.maxUntrackedBytes) || 131072));
     return {
       path: relativePath,
       staged: false,
@@ -1304,7 +2239,7 @@ async function readDiffBundle(runner, options) {
     if (untracked.code === 0 && nulFields(untracked.stdout).length > paths.length) truncated = true;
     for (const path of paths) {
       try {
-        const preview = await readFilePreview(join(root, path), Math.min(maxBytes, Number(config.maxUntrackedBytes) || 131072));
+        const preview = await readFilePreview(join3(root, path), Math.min(maxBytes, Number(config.maxUntrackedBytes) || 131072));
         files.push({
           path,
           staged: false,
@@ -1416,7 +2351,7 @@ async function attachUntrackedCounts(files, root, config) {
   const untracked = files.filter((file) => file.untracked === true).slice(0, budget);
   await Promise.all(untracked.map(async (file) => {
     try {
-      const preview = await readFilePreview(join(root, file.path), maxBytes);
+      const preview = await readFilePreview(join3(root, file.path), maxBytes);
       file.additions = preview.binary ? 0 : countLines(preview.text);
       file.binary = preview.binary;
       file.tooLarge = preview.tooLarge === true;
@@ -1465,7 +2400,7 @@ function normalizeRelativePath(root, path) {
     throw new CommandError("input/invalid", "Invalid file path", { path: text2 });
   }
   const normalized = text2.split(sep).join("/").replace(/^\.\//, "");
-  const target = resolve(root, normalized);
+  const target = resolve2(root, normalized);
   const inside = relative(root, target);
   if (inside.startsWith("..") || isAbsolute(inside)) {
     throw new CommandError("input/invalid", "File path is outside the repository", { path: text2 });
@@ -1807,12 +2742,12 @@ async function locateRepository(runner, cwd, signal) {
   }
   const root = String(result.stdout ?? "").trim().split("\n")[0];
   if (root.length === 0) return null;
-  return resolve(cwd, root);
+  return resolve2(cwd, root);
 }
 
 // src/lib/worktree.ts
-import { mkdir, readFile, stat as stat2, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute as isAbsolute2, join as join2, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+import { mkdir as mkdir2, readFile as readFile2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join4, relative as relative2, resolve as resolve3, sep as sep2 } from "node:path";
 var POOL_IGNORE = ".gitignore";
 var BRANCH_NAME = /^(?![-/.])(?!.*\.\.)(?!.*[/.]$)[A-Za-z0-9._/-]+$/;
 function generatedWorktreeName(sessionId, prefix = "dsh") {
@@ -1830,11 +2765,11 @@ function randomHex(length) {
 }
 function poolDirectory(repoRoot, config) {
   const configured = String(config?.directory ?? ".agents/worktrees").trim() || ".agents/worktrees";
-  return isAbsolute2(configured) ? configured : join2(repoRoot, configured.split("/").join(sep2));
+  return isAbsolute2(configured) ? configured : join4(repoRoot, configured.split("/").join(sep2));
 }
 function isInside(parent, child) {
-  const from = resolve2(parent);
-  const to = resolve2(child);
+  const from = resolve3(parent);
+  const to = resolve3(child);
   if (from === to) return true;
   const path = relative2(from, to);
   return path.length > 0 && !path.startsWith("..") && !isAbsolute2(path);
@@ -1843,8 +2778,8 @@ function worktreePath(repoRoot, config, name2) {
   if (!BRANCH_NAME.test(String(name2 ?? ""))) {
     throw new CommandError("worktree/invalid-name", `T\xEAn worktree kh\xF4ng h\u1EE3p l\u1EC7: ${String(name2)}`, { name: name2 });
   }
-  const path = join2(poolDirectory(repoRoot, config), name2);
-  if (!isInside(poolDirectory(repoRoot, config), path) || resolve2(path) === resolve2(poolDirectory(repoRoot, config))) {
+  const path = join4(poolDirectory(repoRoot, config), name2);
+  if (!isInside(poolDirectory(repoRoot, config), path) || resolve3(path) === resolve3(poolDirectory(repoRoot, config))) {
     throw new CommandError("worktree/invalid-name", "\u0110\u01B0\u1EDDng d\u1EABn worktree n\u1EB1m ngo\xE0i th\u01B0 m\u1EE5c worktree", { name: name2 });
   }
   return path;
@@ -2105,18 +3040,18 @@ async function createWorktree(runner, { repoRoot, name: name2, base, source = "l
 async function ensurePool(repoRoot, config) {
   const pool = poolDirectory(repoRoot, config);
   const before = await stat2(pool).catch(() => void 0);
-  await mkdir(pool, { recursive: true });
+  await mkdir2(pool, { recursive: true });
   if (before !== void 0) return;
-  const ignore = join2(pool, POOL_IGNORE);
-  const present = await readFile(ignore, "utf8").catch(() => void 0);
+  const ignore = join4(pool, POOL_IGNORE);
+  const present = await readFile2(ignore, "utf8").catch(() => void 0);
   if (present !== void 0) return;
   try {
-    await writeFile(ignore, "*\n", "utf8");
+    await writeFile2(ignore, "*\n", "utf8");
   } catch {
   }
 }
 async function removeWorktree(runner, { repoRoot, path, branch, deleteBranch = false, force = false, timeoutMs, signal }) {
-  const target = resolve2(String(path ?? ""));
+  const target = resolve3(String(path ?? ""));
   if (target.length === 0) {
     throw new CommandError("input/invalid", "Thi\u1EBFu \u0111\u01B0\u1EDDng d\u1EABn worktree");
   }
@@ -2152,12 +3087,12 @@ async function readCheckoutKind(runner, { path, signal }) {
     runner.run("git", ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd: path, signal }),
     runner.run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: path, signal })
   ]);
-  const gitValue = gitDir.code === 0 ? resolve2(gitDir.stdout.trim()) : null;
-  const commonValue = commonDir.code === 0 ? resolve2(commonDir.stdout.trim()) : null;
+  const gitValue = gitDir.code === 0 ? resolve3(gitDir.stdout.trim()) : null;
+  const commonValue = commonDir.code === 0 ? resolve3(commonDir.stdout.trim()) : null;
   return {
     gitDir: gitValue,
     commonDir: commonValue,
-    linked: gitValue !== null && commonValue !== null && resolve2(gitValue) !== resolve2(commonValue)
+    linked: gitValue !== null && commonValue !== null && resolve3(gitValue) !== resolve3(commonValue)
   };
 }
 function firstLine2(text2) {
@@ -2617,7 +3552,7 @@ function createForge({ runner, config, logger, resolveToken, resolveGitLabToken,
         version = await exec(program, ["--version"], { cwd, signal, maxBytes: 8192 });
       } catch (error) {
         if (signal?.aborted === true) throw error;
-        return { installed: false, signedIn: false, login: null, reason: messageOf(error) };
+        return { installed: false, signedIn: false, login: null, reason: messageOf4(error) };
       }
       if (version.code !== 0) {
         return { installed: false, signedIn: false, login: null, reason: "CLI kh\xF4ng ch\u1EA1y \u0111\u01B0\u1EE3c" };
@@ -2629,7 +3564,7 @@ function createForge({ runner, config, logger, resolveToken, resolveGitLabToken,
         status = await exec(program, authArgs, { cwd, signal, maxBytes: 16384 });
       } catch (error) {
         if (signal?.aborted === true) throw error;
-        return { installed: true, signedIn: false, login: null, reason: messageOf(error) };
+        return { installed: true, signedIn: false, login: null, reason: messageOf4(error) };
       }
       const text2 = `${status.stdout}
 ${status.stderr}`;
@@ -2849,7 +3784,7 @@ ${status.stderr}`;
         ...options.signal === void 0 ? {} : { signal: options.signal }
       });
     } catch (error) {
-      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitLab: ${messageOf(error)}`);
+      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitLab: ${messageOf4(error)}`);
     }
     if (response.status === 401) throw new CommandError("forge/not-signed-in", "GitLab token kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c \u0111\xE3 h\u1EBFt h\u1EA1n");
     if (response.status === 403) {
@@ -2874,7 +3809,7 @@ ${status.stderr}`;
       return await gitlabRequest(info, remote, endpoint, { signal });
     } catch (error) {
       if (error instanceof CommandError && error.code === "forge/not-signed-in") throw error;
-      logger.warn("git: GitLab sub-resource %s failed: %s", endpoint, messageOf(error));
+      logger.warn("git: GitLab sub-resource %s failed: %s", endpoint, messageOf4(error));
       return void 0;
     }
   }
@@ -2900,7 +3835,7 @@ ${status.stderr}`;
     try {
       response = await fetch(`https://api.github.com${path}`, { headers, ...options.signal === void 0 ? {} : { signal: options.signal } });
     } catch (error) {
-      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitHub: ${messageOf(error)}`);
+      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitHub: ${messageOf4(error)}`);
     }
     if (response.status === 404) {
       if (options.allow404 === true) return void 0;
@@ -3177,7 +4112,7 @@ ${status.stderr}`;
         ...options.signal === void 0 ? {} : { signal: options.signal }
       });
     } catch (error) {
-      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitHub: ${messageOf(error)}`);
+      throw new CommandError("forge/offline", `Kh\xF4ng g\u1ECDi \u0111\u01B0\u1EE3c GitHub: ${messageOf4(error)}`);
     }
     if (response.status === 401) throw new CommandError("forge/not-signed-in", "Token GitHub kh\xF4ng h\u1EE3p l\u1EC7");
     if (response.status === 405) {
@@ -3389,7 +4324,7 @@ ${status.stderr}`;
       await restDelete(`/repos/${remote.slug}/git/refs/heads/${name2}`, { signal });
       return true;
     } catch (error) {
-      logger.warn("git: could not delete the source branch %s: %s", name2, messageOf(error));
+      logger.warn("git: could not delete the source branch %s: %s", name2, messageOf4(error));
       return false;
     }
   }
@@ -3510,7 +4445,7 @@ function asArray(value) {
 function asRecord3(value) {
   return value !== null && typeof value === "object" ? value : {};
 }
-function messageOf(error) {
+function messageOf4(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -3583,9 +4518,9 @@ function parseChangeRequestDraft(text2, options = {}) {
   if (jsonText !== null) {
     try {
       const value = JSON.parse(jsonText);
-      const record2 = value !== null && typeof value === "object" ? value : {};
-      const title2 = normalizeTitle(String(record2.title ?? ""));
-      const body = normalizeBody(String(record2.body ?? record2.description ?? ""));
+      const record3 = value !== null && typeof value === "object" ? value : {};
+      const title2 = normalizeTitle(String(record3.title ?? ""));
+      const body = normalizeBody(String(record3.body ?? record3.description ?? ""));
       if (title2.length > 0) return { title: title2, body, parsed: "json" };
     } catch {
     }
@@ -3759,11 +4694,11 @@ ${note}` }] }],
     };
   } catch (error) {
     if (signal?.aborted === true) throw error;
-    logger?.warn?.("pr: the change-request draft failed: %s", messageOf2(error));
-    return { ...fallback, error: messageOf2(error) };
+    logger?.warn?.("pr: the change-request draft failed: %s", messageOf5(error));
+    return { ...fallback, error: messageOf5(error) };
   }
 }
-function messageOf2(error) {
+function messageOf5(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -3823,11 +4758,11 @@ function parseCommitDraft(text2, options = {}) {
   if (jsonText !== null) {
     try {
       const value = JSON.parse(jsonText);
-      const record2 = value !== null && typeof value === "object" ? value : {};
-      const subject2 = cleanSubjectLine(String(record2.subject ?? record2.title ?? ""));
-      const body = normalizeCommitBody(String(record2.body ?? record2.description ?? ""));
+      const record3 = value !== null && typeof value === "object" ? value : {};
+      const subject2 = cleanSubjectLine(String(record3.subject ?? record3.title ?? ""));
+      const body = normalizeCommitBody(String(record3.body ?? record3.description ?? ""));
       if (subject2.length > 0) return { subject: subject2, body, parsed: "json" };
-      if ("subject" in record2 || "title" in record2 || "body" in record2 || "description" in record2) {
+      if ("subject" in record3 || "title" in record3 || "body" in record3 || "description" in record3) {
         return { subject: fallbackSubject, body, parsed: "fallback" };
       }
     } catch {
@@ -3936,8 +4871,8 @@ ${draft.body}` : draft.subject,
     };
   } catch (error) {
     if (signal?.aborted === true) throw error;
-    logger?.warn?.("git: the commit-message draft failed: %s", messageOf3(error));
-    return { ...fallbackResult, error: messageOf3(error) };
+    logger?.warn?.("git: the commit-message draft failed: %s", messageOf6(error));
+    return { ...fallbackResult, error: messageOf6(error) };
   }
 }
 function cleanSubjectLine(text2, maxSubjectLength = MAX_SUBJECT_LENGTH) {
@@ -3961,12 +4896,12 @@ function basenameOf(path) {
 function isLlmService(value) {
   return value !== null && typeof value === "object" && typeof value.prepareCall === "function";
 }
-function messageOf3(error) {
+function messageOf6(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
 // src/lib/merge-watch.ts
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 var MIN_CHECK_MS = 15e3;
 var SETTLE_RETRY_LIMIT = 5;
 function mergedCleanup(config, facts = {}) {
@@ -3982,8 +4917,8 @@ function mergedCleanup(config, facts = {}) {
 }
 function samePath(left, right) {
   if (left.length === 0 || right.length === 0) return false;
-  const one = resolve3(left);
-  const other = resolve3(right);
+  const one = resolve4(left);
+  const other = resolve4(right);
   return process.platform === "win32" ? one.toLowerCase() === other.toLowerCase() : one === other;
 }
 function checkoutOwnsBinding(binding, checkout) {
@@ -4022,13 +4957,13 @@ async function reconcileCheckouts(options) {
   const byRoot = /* @__PURE__ */ new Map();
   for (const [sessionId, raw] of Object.entries(store.state.worktrees ?? {})) {
     if (raw === null || typeof raw !== "object") continue;
-    const record2 = raw;
-    const path = typeof record2.path === "string" ? record2.path : "";
-    const repositoryRoot = typeof record2.repositoryRoot === "string" ? record2.repositoryRoot : "";
+    const record3 = raw;
+    const path = typeof record3.path === "string" ? record3.path : "";
+    const repositoryRoot = typeof record3.repositoryRoot === "string" ? record3.repositoryRoot : "";
     if (path.length === 0 || repositoryRoot.length === 0) continue;
     const branch = await currentBranch(path).catch(() => null);
     if (branch === null || branch.length === 0) continue;
-    if (branch !== String(record2.branch ?? "")) {
+    if (branch !== String(record3.branch ?? "")) {
       await store.update((current) => {
         const entry = current.worktrees?.[sessionId];
         if (entry !== void 0) entry.branch = branch;
@@ -4065,19 +5000,19 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
   let timer;
   let running = false;
   let disposed = false;
-  async function track(sessionId, record2) {
+  async function track(sessionId, record3) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return;
-    if (record2 === null || typeof record2 !== "object") return;
-    const number = Number(record2.number);
+    if (record3 === null || typeof record3 !== "object") return;
+    const number = Number(record3.number);
     if (!Number.isFinite(number) || number <= 0) return;
     await store.load();
     const checkout = store.state.worktrees?.[sessionId];
-    if (checkout !== void 0 && !checkoutOwnsBinding(record2, checkout)) {
+    if (checkout !== void 0 && !checkoutOwnsBinding(record3, checkout)) {
       logger.warn(
         "git: ignoring change request %d for %s: branch %s is not its checkout branch %s",
         number,
         sessionId,
-        String(record2.branch ?? ""),
+        String(record3.branch ?? ""),
         String(checkout.branch ?? "")
       );
       return;
@@ -4089,7 +5024,7 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       const previous = state.pulls[sessionId];
       state.pulls[sessionId] = {
         ...previous,
-        ...record2,
+        ...record3,
         number,
         sessionId,
         trackedAt: previous?.trackedAt ?? now(),
@@ -4119,16 +5054,16 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     try {
       await store.load();
       const pulls = store.state.pulls ?? {};
-      for (const [sessionId, record2] of Object.entries(pulls)) {
-        if (record2 === null || typeof record2 !== "object") continue;
+      for (const [sessionId, record3] of Object.entries(pulls)) {
+        if (record3 === null || typeof record3 !== "object") continue;
         try {
-          if (record2.done === true) {
-            await retrySettledArchive(sessionId, record2);
+          if (record3.done === true) {
+            await retrySettledArchive(sessionId, record3);
             continue;
           }
-          await settle(sessionId, record2);
+          await settle(sessionId, record3);
         } catch (error) {
-          logger.warn("git: merge check for %s failed: %s", sessionId, messageOf4(error));
+          logger.warn("git: merge check for %s failed: %s", sessionId, messageOf7(error));
         }
       }
     } finally {
@@ -4139,15 +5074,15 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     try {
       return { archived: await runtime.archiveSession(sessionId) === true };
     } catch (error) {
-      logger.warn("git: could not archive %s: %s", sessionId, messageOf4(error));
-      return { archived: false, error: messageOf4(error) };
+      logger.warn("git: could not archive %s: %s", sessionId, messageOf7(error));
+      return { archived: false, error: messageOf7(error) };
     }
   }
-  async function retrySettledArchive(sessionId, record2) {
-    if (record2.state !== "merged") return;
-    if (typeof record2.archiveError !== "string") return;
+  async function retrySettledArchive(sessionId, record3) {
+    if (record3.state !== "merged") return;
+    if (typeof record3.archiveError !== "string") return;
     if (!mergedCleanup(merged, {}).archiveSession) return;
-    const attempts = Number(record2.attempts) || 0;
+    const attempts = Number(record3.attempts) || 0;
     if (attempts >= SETTLE_RETRY_LIMIT) return;
     const result = await archiveNow(sessionId);
     await store.update((value) => {
@@ -4162,22 +5097,22 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     });
     if (result.archived) logger.info("git: archived %s after its change request merged", sessionId);
   }
-  async function settle(sessionId, record2) {
+  async function settle(sessionId, record3) {
     const state = await forge.pullState({
-      root: record2.root,
-      remote: record2.remote,
-      number: Number(record2.number)
+      root: record3.root,
+      remote: record3.remote,
+      number: Number(record3.number)
     });
     if (state === null) return;
     const next = String(state.state ?? "");
     if (next === "merged") {
       const worktrees = store.state.worktrees ?? {};
       const checkout = worktrees[sessionId];
-      if (checkout !== void 0 && !checkoutOwnsBinding(record2, checkout)) {
+      if (checkout !== void 0 && !checkoutOwnsBinding(record3, checkout)) {
         logger.warn(
           "git: %s merged but belongs to branch %s, not the checkout of %s (%s); leaving it alone",
-          String(state.url ?? record2.url ?? record2.number ?? ""),
-          String(record2.branch ?? ""),
+          String(state.url ?? record3.url ?? record3.number ?? ""),
+          String(record3.branch ?? ""),
           sessionId,
           String(checkout.branch ?? "")
         );
@@ -4196,8 +5131,8 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       const action = mergedCleanup(merged, { hasWorktree: checkout !== void 0 });
       const outcome = {
         cleanedAt: now(),
-        mergedUrl: state.url ?? record2.url ?? "",
-        attempts: (Number(record2.attempts) || 0) + 1,
+        mergedUrl: state.url ?? record3.url ?? "",
+        attempts: (Number(record3.attempts) || 0) + 1,
         deferred: void 0,
         skipped: void 0,
         archiveError: void 0,
@@ -4232,8 +5167,8 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
           outcome.branchDeleted = removed.branchDeleted === true;
           logger.info("git: removed the worktree of %s after its change request merged", sessionId);
         } catch (error) {
-          outcome.worktreeError = messageOf4(error);
-          logger.warn("git: could not remove the worktree of %s: %s", sessionId, messageOf4(error));
+          outcome.worktreeError = messageOf7(error);
+          logger.warn("git: could not remove the worktree of %s: %s", sessionId, messageOf7(error));
         }
       }
       const failed = outcome.archiveError !== void 0 || outcome.worktreeError !== void 0;
@@ -4278,132 +5213,14 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     }
   };
 }
-function messageOf4(error) {
+function messageOf7(error) {
   return error instanceof Error ? error.message : String(error);
 }
-
-// src/lib/paths.ts
-import { homedir } from "node:os";
-import { join as join3, resolve as resolve4 } from "node:path";
-function expandHome(input) {
-  if (typeof input !== "string" || input.length === 0) return input;
-  const value = input.trim();
-  if (value === "~") return homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join3(homedir(), value.slice(2));
-  return value;
-}
-function dshHome(env = process.env) {
-  const fromEnv = env.DSH_HOME;
-  if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return resolve4(expandHome(fromEnv));
-  return join3(homedir(), ".dsh");
-}
-function pluginDataDir(name2, env = process.env) {
-  return join3(dshHome(env), name2);
-}
-
-// src/lib/host-http.ts
-async function readJsonPayload(request) {
-  let text2;
-  try {
-    text2 = await request.text();
-  } catch {
-    return void 0;
-  }
-  if (text2.trim().length === 0) return {};
-  try {
-    const parsed = JSON.parse(text2);
-    return parsed !== null && typeof parsed === "object" ? parsed : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function jsonResponse(body) {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-  });
-}
-
-// src/lib/state-store.ts
-import { mkdir as mkdir2, readFile as readFile2, rename, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname2 } from "node:path";
-var RETRYABLE_WRITE = /* @__PURE__ */ new Set(["EBUSY", "EPERM", "EACCES"]);
-function delay(ms) {
-  return new Promise((resolve6) => {
-    setTimeout(resolve6, ms).unref?.();
-  });
-}
-async function writeJsonFile(file, value, attempts = 6) {
-  await mkdir2(dirname2(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${nextTempId()}.tmp`;
-  const text2 = `${JSON.stringify(value, null, 2)}
-`;
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await writeFile2(temporary, text2, "utf8");
-      await rename(temporary, file);
-      return;
-    } catch (error) {
-      const code = error?.code ?? "";
-      if (attempt >= attempts || !RETRYABLE_WRITE.has(code)) throw error;
-      await delay(10 * attempt);
-    }
-  }
-}
-var tempCounter = 0;
-function nextTempId() {
-  tempCounter = (tempCounter + 1) % 1e6;
-  return `${tempCounter}-${Math.random().toString(36).slice(2, 8)}`;
-}
-async function readJsonFile(file) {
-  try {
-    return JSON.parse(await readFile2(file, "utf8"));
-  } catch {
-    return void 0;
-  }
-}
-var JsonStateStore = class {
-  #file;
-  #defaults;
-  #state;
-  #loadPromise;
-  #queue = Promise.resolve();
-  constructor(file, defaults) {
-    this.#file = file;
-    this.#defaults = defaults;
-  }
-  async load() {
-    this.#loadPromise ??= readJsonFile(this.#file).then((stored) => {
-      const source = stored !== null && typeof stored === "object" ? stored : {};
-      this.#state = { ...structuredClone(this.#defaults), ...source };
-      return this.#state;
-    });
-    return this.#loadPromise;
-  }
-  get state() {
-    if (this.#state === void 0) throw new Error("JsonStateStore.load() must be awaited first");
-    return this.#state;
-  }
-  /**
-   * Apply one mutation and persist the result. Mutations run in call order.
-   * @param mutate the change to apply to the loaded state
-   */
-  update(mutate) {
-    const next = this.#queue.then(async () => {
-      await this.load();
-      mutate(this.state);
-      await writeJsonFile(this.#file, this.state);
-      return this.state;
-    });
-    this.#queue = next;
-    return next;
-  }
-};
 
 // src/lib/worktree-cleanup.ts
 import { stat as stat3 } from "node:fs/promises";
 var MIN_CHECK_MS2 = 3e5;
-var DAY_MS = 864e5;
+var DAY_MS2 = 864e5;
 var HOUR_MS = 36e5;
 function cleanupDecision(settings, facts) {
   const config = settings ?? {};
@@ -4413,7 +5230,7 @@ function cleanupDecision(settings, facts) {
   if (keep === "any" && facts.localFiles > 0) return { remove: false, reason: "local-files" };
   if (keep === "tracked" && facts.trackedChanges > 0) return { remove: false, reason: "uncommitted-changes" };
   const inactiveDays = Number(config.inactiveDays) || 0;
-  if (inactiveDays > 0 && facts.ageMs >= inactiveDays * DAY_MS) {
+  if (inactiveDays > 0 && facts.ageMs >= inactiveDays * DAY_MS2) {
     return { remove: true, reason: "inactive" };
   }
   const noCommitsHours = Number(config.noCommitsAfterHours) || 0;
@@ -4422,9 +5239,9 @@ function cleanupDecision(settings, facts) {
   }
   return { remove: false, reason: "kept" };
 }
-async function inspectWorktree(runner, record2, at = Date.now()) {
-  const path = String(record2?.path ?? "");
-  const created = Number(record2?.createdAt) || at;
+async function inspectWorktree(runner, record3, at = Date.now()) {
+  const path = String(record3?.path ?? "");
+  const created = Number(record3?.createdAt) || at;
   const info = await stat3(path).catch(() => void 0);
   if (info === void 0) {
     return { missing: true, ageMs: at - created, localFiles: 0, trackedChanges: 0, commitsAhead: 0 };
@@ -4432,7 +5249,7 @@ async function inspectWorktree(runner, record2, at = Date.now()) {
   const status = await runner.run("git", ["status", "--porcelain=v1", "-z"], { cwd: path });
   const entries = status.code === 0 ? String(status.stdout ?? "").split("\0").filter((entry) => entry.length > 0) : [];
   const trackedChanges = entries.filter((entry) => !entry.startsWith("??")).length;
-  const start = String(record2?.start ?? "").length > 0 ? String(record2.start) : String(record2?.base ?? "").length > 0 ? `refs/heads/${String(record2.base)}` : "HEAD";
+  const start = String(record3?.start ?? "").length > 0 ? String(record3.start) : String(record3?.base ?? "").length > 0 ? `refs/heads/${String(record3.base)}` : "HEAD";
   const count = await runner.run("git", ["rev-list", "--count", `${start}...HEAD`], { cwd: path });
   const commitsAhead = count.code === 0 ? Number.parseInt(String(count.stdout ?? "").trim(), 10) || 0 : 0;
   return {
@@ -4461,21 +5278,21 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
       const records = worktreeRecords(store.state);
       for (const [sessionId, value] of Object.entries(records)) {
         if (value === null || typeof value !== "object") continue;
-        const record2 = value;
+        const record3 = value;
         try {
-          const facts = await inspectWorktree(runner, record2, now());
+          const facts = await inspectWorktree(runner, record3, now());
           const decision = cleanupDecision(settings, {
             ...facts,
-            active: runtime.isSessionActive(sessionId, record2)
+            active: runtime.isSessionActive(sessionId, record3)
           });
           if (!decision.remove) {
-            kept.push({ sessionId, branch: record2.branch, reason: decision.reason });
+            kept.push({ sessionId, branch: record3.branch, reason: decision.reason });
             continue;
           }
           await removeWorktree(runner, {
-            repoRoot: String(record2.repositoryRoot ?? ""),
-            path: String(record2.path ?? ""),
-            branch: record2.branch,
+            repoRoot: String(record3.repositoryRoot ?? ""),
+            path: String(record3.path ?? ""),
+            branch: record3.branch,
             deleteBranch: settings.deleteBranch === true,
             timeoutMs
           });
@@ -4486,12 +5303,12 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
               delete worktrees[sessionId];
             }
           });
-          removed.push({ sessionId, branch: record2.branch, reason: decision.reason });
-          logger.info("git: cleanup removed %s (%s)", String(record2.branch ?? ""), decision.reason);
+          removed.push({ sessionId, branch: record3.branch, reason: decision.reason });
+          logger.info("git: cleanup removed %s (%s)", String(record3.branch ?? ""), decision.reason);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
-          kept.push({ sessionId, branch: record2?.branch, reason: "failed", error: reason });
-          logger.warn("git: cleanup kept %s: %s", String(record2?.branch ?? ""), reason);
+          kept.push({ sessionId, branch: record3?.branch, reason: "failed", error: reason });
+          logger.warn("git: cleanup kept %s: %s", String(record3?.branch ?? ""), reason);
         }
       }
       const result = { at: now(), removed, kept };
@@ -4691,7 +5508,7 @@ function mountGit(ctx, config, deps) {
       routeDisposer = mountRoutes(scoped, scopedConnection, config, deps);
     });
   } catch (error) {
-    logger.warn("git: cannot wait for the connection service: %s", messageOf5(error));
+    logger.warn("git: cannot wait for the connection service: %s", messageOf8(error));
     return () => {
     };
   }
@@ -4699,7 +5516,7 @@ function mountGit(ctx, config, deps) {
     try {
       routeDisposer?.();
     } catch (error) {
-      logger.warn("git: route disposal failed: %s", messageOf5(error));
+      logger.warn("git: route disposal failed: %s", messageOf8(error));
     }
     routeDisposer = void 0;
     try {
@@ -4720,7 +5537,7 @@ function mountRoutes(ctx, connection, config, deps) {
   });
   logger.info("git: mounted over %s, code host %s", runner.backend, config.forge);
   const store = new JsonStateStore(
-    join4(pluginDataDir("personal-hub"), "git.json"),
+    join5(pluginDataDir("personal-hub"), "git.json"),
     { worktrees: {}, pulls: {} }
   );
   async function state() {
@@ -4787,10 +5604,10 @@ function mountRoutes(ctx, connection, config, deps) {
     store,
     forge,
     runtime: {
-      async removeSessionWorktree(record2, sessionId) {
-        const target = typeof record2?.path === "string" ? record2.path : "";
+      async removeSessionWorktree(record3, sessionId) {
+        const target = typeof record3?.path === "string" ? record3.path : "";
         if (target.length === 0) return { removed: false, branchDeleted: false };
-        const repoRoot = typeof record2.repositoryRoot === "string" ? record2.repositoryRoot : "";
+        const repoRoot = typeof record3.repositoryRoot === "string" ? record3.repositoryRoot : "";
         const live = liveSessionDirectory(ctx, sessionId);
         if (live !== void 0 && isInside(target, live)) {
           const agent = agentFor(sessionId);
@@ -4802,7 +5619,7 @@ function mountRoutes(ctx, connection, config, deps) {
         const result = await removeWorktree(runner, {
           repoRoot,
           path: target,
-          branch: record2.branch,
+          branch: record3.branch,
           deleteBranch: config.merged.deleteBranch === true,
           timeoutMs: config.worktreeTimeoutMs
         });
@@ -4826,9 +5643,9 @@ function mountRoutes(ctx, connection, config, deps) {
        * checkout. When no live directory answers, the Session is idle and
        * cleanup may proceed (the checkout match is checked separately).
        */
-      isSessionActive(sessionId, record2) {
+      isSessionActive(sessionId, record3) {
         const live = liveSessionDirectory(ctx, sessionId);
-        const target = typeof record2?.path === "string" ? String(record2.path) : "";
+        const target = typeof record3?.path === "string" ? String(record3.path) : "";
         return live !== void 0 && target.length > 0 && isInside(target, live);
       }
     }
@@ -4874,7 +5691,7 @@ function mountRoutes(ctx, connection, config, deps) {
           await registry.archiveSession(sessionId, { stopActivity: true });
           logger.info("git: archived %s again: the archive set had lost it", sessionId);
         } catch (error) {
-          logger.warn("git: cannot archive %s again: %s", sessionId, messageOf5(error));
+          logger.warn("git: cannot archive %s again: %s", sessionId, messageOf8(error));
         }
       }
     }
@@ -4883,7 +5700,7 @@ function mountRoutes(ctx, connection, config, deps) {
       logger,
       currentBranch: checkedOutBranch,
       mergedPulls: recentlyMergedPulls,
-      track: (sessionId, record2) => watcher.track(sessionId, record2)
+      track: (sessionId, record3) => watcher.track(sessionId, record3)
     });
     if (bound > 0) {
       logger.info("git: settling %d merged change request(s) found in recorded checkouts", bound);
@@ -4898,13 +5715,13 @@ function mountRoutes(ctx, connection, config, deps) {
     // and writes only the keys it owns.
     store,
     runtime: {
-      isSessionActive(sessionId, record2) {
+      isSessionActive(sessionId, record3) {
         const agent = agentFor(sessionId);
         if (agent === void 0) return false;
         const session = agent.session;
         const workingDirectory = ctx.get("workingDirectory");
         const directory = session !== void 0 && typeof workingDirectory?.get === "function" ? workingDirectory.get(session) : session?.header?.cwd;
-        const target = typeof record2?.path === "string" ? record2.path : "";
+        const target = typeof record3?.path === "string" ? record3.path : "";
         return directory !== void 0 && target.length > 0 && isInside(target, directory);
       }
     }
@@ -4916,9 +5733,9 @@ function mountRoutes(ctx, connection, config, deps) {
     const text2 = textOfUserMessage(message3);
     if (text2.length === 0) return;
     const value = await state();
-    const record2 = value.worktrees?.[sessionId];
-    if (record2 === void 0 || typeof record2 !== "object") return;
-    if (record2.branch !== record2.name) return;
+    const record3 = value.worktrees?.[sessionId];
+    if (record3 === void 0 || typeof record3 !== "object") return;
+    if (record3.branch !== record3.name) return;
     naming.add(sessionId);
     try {
       const draft = await suggestBranchName({
@@ -4939,9 +5756,9 @@ function mountRoutes(ctx, connection, config, deps) {
         });
         return;
       }
-      const repoRoot = String(record2.repositoryRoot ?? "");
+      const repoRoot = String(record3.repositoryRoot ?? "");
       const branch = await uniqueBranchName(runner, { root: repoRoot, branch: draft.branch });
-      await renameWorktreeBranch(runner, { path: String(record2.path ?? ""), branch });
+      await renameWorktreeBranch(runner, { path: String(record3.path ?? ""), branch });
       await store.update((current) => {
         const entry = current.worktrees?.[sessionId];
         if (entry !== void 0) {
@@ -4951,10 +5768,10 @@ function mountRoutes(ctx, connection, config, deps) {
       });
       logger.info("git: renamed the worktree of %s to %s", sessionId, branch);
     } catch (error) {
-      logger.warn("git: could not name the worktree of %s: %s", sessionId, messageOf5(error));
+      logger.warn("git: could not name the worktree of %s: %s", sessionId, messageOf8(error));
       await store.update((current) => {
         const entry = current.worktrees?.[sessionId];
-        if (entry !== void 0) entry.namingError = messageOf5(error);
+        if (entry !== void 0) entry.namingError = messageOf8(error);
       }).catch(() => void 0);
     } finally {
       naming.delete(sessionId);
@@ -5031,11 +5848,11 @@ function mountRoutes(ctx, connection, config, deps) {
         await createCheckoutForMessage(agent, sessionId, message3, signal);
       });
     } catch (error) {
-      logger.info("git: no checkout is prepared for %s now: %s", sessionId, messageOf5(error));
+      logger.info("git: no checkout is prepared for %s now: %s", sessionId, messageOf8(error));
       return false;
     }
     void task.catch((error) => {
-      logger.warn("git: preparing the checkout for %s failed: %s", sessionId, messageOf5(error));
+      logger.warn("git: preparing the checkout for %s failed: %s", sessionId, messageOf8(error));
     });
     return true;
   }
@@ -5126,11 +5943,11 @@ function mountRoutes(ctx, connection, config, deps) {
         }).catch(() => void 0);
       }
       if (signal.aborted) return;
-      logger.warn("git: could not prepare a checkout for %s: %s", sessionId, messageOf5(error));
+      logger.warn("git: could not prepare a checkout for %s: %s", sessionId, messageOf8(error));
       await failRequest(
         sessionId,
         error instanceof CommandError ? error.code : "worktree/failed",
-        messageOf5(error)
+        messageOf8(error)
       );
       return;
     } finally {
@@ -5388,12 +6205,12 @@ function mountRoutes(ctx, connection, config, deps) {
       progress.label = "Done";
       progress.finishedAt = Date.now();
     } catch (error) {
-      const failure3 = failureOf(error);
+      const failure4 = failureOf2(error);
       progress.status = "failed";
-      progress.error = failure3;
-      progress.label = failure3.message;
+      progress.error = failure4;
+      progress.label = failure4.message;
       progress.finishedAt = Date.now();
-      logger.warn("git: action %s failed: %s", action, failure3.message);
+      logger.warn("git: action %s failed: %s", action, failure4.message);
     }
   }
   async function createPullForBranch(options) {
@@ -5548,7 +6365,7 @@ function mountRoutes(ctx, connection, config, deps) {
             });
           }
         } catch (error) {
-          value.branchPullError = failureOf(error);
+          value.branchPullError = failureOf2(error);
         }
       }
       return value;
@@ -5601,7 +6418,7 @@ function mountRoutes(ctx, connection, config, deps) {
         value.issues = issues.issues?.length ?? 0;
         value.issuesCapped = value.issues >= COUNT_PAGE;
       } catch (error) {
-        logger.info("git: the tab counters could not read the code host: %s", messageOf5(error));
+        logger.info("git: the tab counters could not read the code host: %s", messageOf8(error));
       }
       return value;
     },
@@ -5796,7 +6613,7 @@ function mountRoutes(ctx, connection, config, deps) {
       actions.set(actionId, progress);
       void runStackedAction(progress, payload).catch((error) => {
         progress.status = "failed";
-        progress.error = failureOf(error);
+        progress.error = failureOf2(error);
         progress.finishedAt = Date.now();
       });
       return { actionId };
@@ -6186,12 +7003,12 @@ function mountRoutes(ctx, connection, config, deps) {
       ]);
       const mainRoot = resolve5(entries[0]?.path ?? root);
       const records = /* @__PURE__ */ new Map();
-      for (const record2 of Object.values(value.worktrees ?? {})) {
-        if (typeof record2?.path === "string") records.set(pathKey(record2.path), record2);
+      for (const record3 of Object.values(value.worktrees ?? {})) {
+        if (typeof record3?.path === "string") records.set(pathKey(record3.path), record3);
       }
       const pool = poolDirectory(mainRoot, config.worktree);
       const worktrees = await Promise.all(entries.map(async (entry) => {
-        const record2 = records.get(pathKey(entry.path));
+        const record3 = records.get(pathKey(entry.path));
         const entryPath = resolve5(entry.path);
         const changedFiles = entry.bare || entry.prunable ? null : await countChangedFiles(entryPath, signal);
         return {
@@ -6204,8 +7021,8 @@ function mountRoutes(ctx, connection, config, deps) {
           prunable: entry.prunable,
           current: pathKey(entryPath) === pathKey(currentPath),
           isPool: pathKey(entryPath) !== pathKey(pool) && isInside(pool, entryPath),
-          sessionId: record2?.sessionId ?? null,
-          createdAt: record2?.createdAt ?? null,
+          sessionId: record3?.sessionId ?? null,
+          createdAt: record3?.createdAt ?? null,
           changedFiles
         };
       }));
@@ -6253,7 +7070,7 @@ function mountRoutes(ctx, connection, config, deps) {
         signal
       });
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
-      const record2 = {
+      const record3 = {
         ...created,
         base,
         source,
@@ -6265,7 +7082,7 @@ function mountRoutes(ctx, connection, config, deps) {
       if (sessionId.length > 0) {
         await store.update((current) => {
           current.worktrees ??= {};
-          current.worktrees[sessionId] = record2;
+          current.worktrees[sessionId] = record3;
         });
         if (payload.switch !== false) {
           try {
@@ -6287,7 +7104,7 @@ function mountRoutes(ctx, connection, config, deps) {
         }
       }
       logger.info("git: created worktree %s for %s", created.branch, sessionId.length > 0 ? sessionId : "no Session");
-      return { worktree: record2, switched };
+      return { worktree: record3, switched };
     },
     /** Move one Session into an existing checkout, or back to the project. */
     async worktreeSwitch(payload, signal) {
@@ -6306,7 +7123,7 @@ function mountRoutes(ctx, connection, config, deps) {
       await store.update((current) => {
         current.worktrees ??= {};
         const existing = Object.values(current.worktrees).find(
-          (record2) => typeof record2?.path === "string" && pathKey(record2.path) === pathKey(matchPath)
+          (record3) => typeof record3?.path === "string" && pathKey(record3.path) === pathKey(matchPath)
         );
         if (existing !== void 0 && pathKey(matchPath) !== pathKey(mainRoot)) {
           current.worktrees[sessionId] = { ...existing, sessionId };
@@ -6347,8 +7164,8 @@ function mountRoutes(ctx, connection, config, deps) {
       });
       await store.update((current) => {
         if (current.worktrees === void 0) return;
-        for (const [id, record2] of Object.entries(current.worktrees)) {
-          if (typeof record2?.path === "string" && pathKey(record2.path) === pathKey(match.path)) delete current.worktrees[id];
+        for (const [id, record3] of Object.entries(current.worktrees)) {
+          if (typeof record3?.path === "string" && pathKey(record3.path) === pathKey(match.path)) delete current.worktrees[id];
         }
       });
       return { removed: result.removed, branchDeleted: result.branchDeleted, directory: resolve5(match.path) };
@@ -6419,7 +7236,7 @@ ${result.stderr ?? ""}`;
         timeoutMs: config.worktreeTimeoutMs,
         signal
       });
-      const record2 = {
+      const record3 = {
         ...created,
         base,
         source,
@@ -6437,28 +7254,28 @@ ${result.stderr ?? ""}`;
           deleteBranch: true,
           timeoutMs: config.worktreeTimeoutMs
         }).catch(() => void 0);
-        throw error instanceof CommandError ? error : new CommandError("worktree/failed", `Cannot move the Session into the worktree: ${messageOf5(error)}`);
+        throw error instanceof CommandError ? error : new CommandError("worktree/failed", `Cannot move the Session into the worktree: ${messageOf8(error)}`);
       }
       await store.update((current) => {
         current.worktrees ??= {};
-        current.worktrees[sessionId] = record2;
+        current.worktrees[sessionId] = record3;
       });
       logger.info("git: %s now works in worktree %s", sessionId, created.branch);
-      return { worktree: record2 };
+      return { worktree: record3 };
     },
     /** Remove the checkout this plugin created for a Session and return it to the project. */
     async worktreeRemove(payload, signal) {
       const sessionId = requiredString(payload.sessionId, "sessionId");
       const value = await state();
-      const record2 = value.worktrees?.[sessionId];
-      if (record2 === void 0) {
+      const record3 = value.worktrees?.[sessionId];
+      if (record3 === void 0) {
         throw new CommandError("worktree/unknown", "This Session has no worktree created by the plugin");
       }
-      const repoRoot = String(record2.repositoryRoot ?? "");
+      const repoRoot = String(record3.repositoryRoot ?? "");
       const result = await removeWorktree(runner, {
         repoRoot,
-        path: String(record2.path ?? ""),
-        branch: record2.branch,
+        path: String(record3.path ?? ""),
+        branch: record3.branch,
         deleteBranch: payload.deleteBranch === true,
         timeoutMs: config.worktreeTimeoutMs,
         signal
@@ -6572,20 +7389,20 @@ ${result.stderr ?? ""}`;
       return { ran: true, last: last ?? before };
     }
   };
-  async function dispatch2(endpoint, payload, signal) {
+  async function dispatch3(endpoint, payload, signal) {
     const handler = handlers[endpoint];
     if (typeof handler !== "function") {
-      return failure("input/unknown-endpoint", `Unknown Git action "${String(endpoint)}"`);
+      return failure2("input/unknown-endpoint", `Unknown Git action "${String(endpoint)}"`);
     }
     try {
       return { ok: true, value: await handler(payload, signal) };
     } catch (error) {
       if (error instanceof CommandError) {
         logger.warn("git: %s failed: %s", endpoint, error.message);
-        return failure(error.code, error.message, error.details);
+        return failure2(error.code, error.message, error.details);
       }
-      logger.error("git: %s crashed: %s", endpoint, messageOf5(error));
-      return failure("system/failed", messageOf5(error));
+      logger.error("git: %s crashed: %s", endpoint, messageOf8(error));
+      return failure2("system/failed", messageOf8(error));
     }
   }
   async function sessionCheckout(ctx2, sessionId, fallbackCwd) {
@@ -6594,10 +7411,10 @@ ${result.stderr ?? ""}`;
     const id = typeof sessionId === "string" ? sessionId.trim() : "";
     if (id.length > 0) {
       const value = await state();
-      const record2 = value.worktrees?.[id];
-      const path = typeof record2?.path === "string" ? record2.path : "";
+      const record3 = value.worktrees?.[id];
+      const path = typeof record3?.path === "string" ? record3.path : "";
       if (path.length > 0) {
-        const marker = await stat4(join4(path, ".git")).catch(() => void 0);
+        const marker = await stat4(join5(path, ".git")).catch(() => void 0);
         if (marker !== void 0) return path;
       }
     }
@@ -6628,7 +7445,7 @@ ${result.stderr ?? ""}`;
         available: false,
         backend: null,
         cli: null,
-        reason: messageOf5(error)
+        reason: messageOf8(error)
       };
     }
   }
@@ -6643,13 +7460,13 @@ ${result.stderr ?? ""}`;
         if (payload === void 0) {
           return jsonResponse({ ok: false, error: { code: "input/invalid", message: "The request body is not valid JSON" } });
         }
-        return jsonResponse(await dispatch2(endpoint, payload, request.signal));
+        return jsonResponse(await dispatch3(endpoint, payload, request.signal));
       }
     };
     try {
       disposers.push(connection.fetch.register(route));
     } catch (error) {
-      logger.error("git: cannot register %s: %s", route.path, messageOf5(error));
+      logger.error("git: cannot register %s: %s", route.path, messageOf8(error));
     }
   }
   if (disposers.length === 0) {
@@ -6661,7 +7478,7 @@ ${result.stderr ?? ""}`;
   cleanup.start();
   const reconciling = () => {
     void reconcileMergedWork().catch((error) => {
-      logger.warn("git: checkout reconciliation failed: %s", messageOf5(error));
+      logger.warn("git: checkout reconciliation failed: %s", messageOf8(error));
     });
   };
   reconciling();
@@ -6681,7 +7498,7 @@ ${result.stderr ?? ""}`;
         }).catch(() => void 0);
       }));
     } catch (error) {
-      logger.warn("git: cannot watch session unarchive: %s", messageOf5(error));
+      logger.warn("git: cannot watch session unarchive: %s", messageOf8(error));
     }
   }
   let stopWorktrees;
@@ -6698,7 +7515,7 @@ ${result.stderr ?? ""}`;
         }
       });
     } catch (error) {
-      logger.warn("git: cannot watch for the first message: %s", messageOf5(error));
+      logger.warn("git: cannot watch for the first message: %s", messageOf8(error));
     }
   }
   void store.update((value) => {
@@ -6731,7 +7548,7 @@ ${result.stderr ?? ""}`;
       try {
         dispose();
       } catch (error) {
-        logger.warn("git: route disposal failed: %s", messageOf5(error));
+        logger.warn("git: route disposal failed: %s", messageOf8(error));
       }
     }
   };
@@ -6852,13 +7669,13 @@ function clampLimit(value, configured, hard) {
   if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
   return Math.min(hard, Math.round(numeric));
 }
-function failure(code, message3, details) {
+function failure2(code, message3, details) {
   return { ok: false, error: { code, message: message3, ...details === void 0 ? {} : { details } } };
 }
-function failureOf(error) {
-  return error instanceof CommandError ? { code: error.code, message: error.message } : { code: "system/failed", message: messageOf5(error) };
+function failureOf2(error) {
+  return error instanceof CommandError ? { code: error.code, message: error.message } : { code: "system/failed", message: messageOf8(error) };
 }
-function messageOf5(error) {
+function messageOf8(error) {
   return error instanceof Error ? error.message : String(error);
 }
 function textOfUserMessage(message3) {
@@ -6870,7 +7687,7 @@ function textOfUserMessage(message3) {
 // src/features/telegram-remote.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir3, readFile as readFile3 } from "node:fs/promises";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 
 // src/lib/telegram-api.ts
 var API_BASE = "https://api.telegram.org";
@@ -7090,11 +7907,11 @@ function applyToolResult(entry, event) {
   if (entry.kind !== "file" || !Array.isArray(diffs)) return;
   const files = [];
   for (const diff of diffs) {
-    const record2 = diff;
-    if (!record2 || typeof record2.path !== "string" || record2.path.length === 0) continue;
-    const stats = lineStats(record2.oldText, record2.newText);
+    const record3 = diff;
+    if (!record3 || typeof record3.path !== "string" || record3.path.length === 0) continue;
+    const stats = lineStats(record3.oldText, record3.newText);
     files.push({
-      path: record2.path,
+      path: record3.path,
       added: stats?.added ?? 0,
       deleted: stats?.removed ?? 0
     });
@@ -7361,7 +8178,7 @@ function isFiniteNumber(value) {
 }
 
 // src/features/telegram-remote.ts
-var DATA_DIR_NAME = "personal-hub";
+var DATA_DIR_NAME2 = "personal-hub";
 var TELEGRAM_DATA_DIR = "telegram-remote";
 var PLACEHOLDER = "\u23F3 \u0110ang x\u1EED l\xFD\u2026";
 var SESSION_PAGE_SIZE = 8;
@@ -7391,9 +8208,9 @@ var HELP_TEXT = [
 ].join("\n");
 function mountTelegramRemote(ctx, config, deps) {
   const logger = deps.logger;
-  const dataDir = deps.dataDir ?? join5(pluginDataDir(DATA_DIR_NAME), TELEGRAM_DATA_DIR);
-  const stateFile = join5(dataDir, "state.json");
-  const statusFile = join5(dataDir, "status.json");
+  const dataDir = deps.dataDir ?? join6(pluginDataDir(DATA_DIR_NAME2), TELEGRAM_DATA_DIR);
+  const stateFile = join6(dataDir, "state.json");
+  const statusFile = join6(dataDir, "status.json");
   const store = new JsonStateStore(stateFile, {
     version: 1,
     offset: 0,
@@ -7488,7 +8305,7 @@ function mountTelegramRemote(ctx, config, deps) {
     const envName = typeof config.tokenEnv === "string" ? config.tokenEnv.trim() : "";
     const fromEnv = envName.length > 0 ? (process.env[envName] ?? "").trim() : "";
     if (fromEnv.length > 0) return { token: fromEnv, source: `env:${envName}` };
-    const tokenFile = config.tokenFile ? expandHome(String(config.tokenFile)) : join5(dataDir, "token");
+    const tokenFile = config.tokenFile ? expandHome(String(config.tokenFile)) : join6(dataDir, "token");
     try {
       const raw = (await readFile3(tokenFile, "utf8")).trim();
       if (raw.length > 0) return { token: raw, source: `file:${tokenFile}` };
@@ -8021,23 +8838,23 @@ function mountTelegramRemote(ctx, config, deps) {
       }, controller.signal);
       if (observeSessionEvents) {
         await sink.chain;
-        for (const record2 of [...wait.output?.records ?? []].reverse()) {
-          if (record2?.event) enqueueSinkEvent(sink, record2.event);
+        for (const record3 of [...wait.output?.records ?? []].reverse()) {
+          if (record3?.event) enqueueSinkEvent(sink, record3.event);
         }
         await sink.chain;
       } else {
         const events = await readEventsSince(sessionId, afterSeq, wait.state?.cursor);
         if (events === void 0) {
           const records = [...wait.output?.records ?? []].reverse();
-          for (const record2 of records) {
-            const event = record2?.event;
+          for (const record3 of records) {
+            const event = record3?.event;
             if (!event || typeof event.seq !== "number" || event.seq <= afterSeq) continue;
             afterSeq = event.seq;
             await reporter.handle(event);
           }
         } else {
-          for (const record2 of events) {
-            const event = record2?.event;
+          for (const record3 of events) {
+            const event = record3?.event;
             if (!event || typeof event.seq !== "number" || event.seq <= afterSeq) continue;
             afterSeq = event.seq;
             await reporter.handle(event);
@@ -8074,9 +8891,9 @@ function mountTelegramRemote(ctx, config, deps) {
         cut = void 0;
       }
       const seen = /* @__PURE__ */ new Set();
-      return pages.flat().filter(isSequencedRecord).sort((left, right) => left.event.seq - right.event.seq).filter((record2) => {
-        if (record2.event.seq <= afterSeq || seen.has(record2.event.seq)) return false;
-        seen.add(record2.event.seq);
+      return pages.flat().filter(isSequencedRecord).sort((left, right) => left.event.seq - right.event.seq).filter((record3) => {
+        if (record3.event.seq <= afterSeq || seen.has(record3.event.seq)) return false;
+        seen.add(record3.event.seq);
         return true;
       });
     } catch (error) {
@@ -8322,8 +9139,8 @@ ${entry.providerName} (${entry.provider})`);
           const suffix = marks.length > 0 ? `  ${marks.join(" \xB7 ")}` : "";
           lines.push(`${index + 1}. ${entry.model}${suffix}`);
         });
-        for (const failure3 of catalog.failures ?? []) {
-          lines.push(`\u26A0 ${failure3.name ?? failure3.id}: ${failure3.message}`);
+        for (const failure4 of catalog.failures ?? []) {
+          lines.push(`\u26A0 ${failure4.name ?? failure4.id}: ${failure4.message}`);
         }
         lines.push("", "Ch\u1EA1m n\xFAt b\xEAn d\u01B0\u1EDBi \u0111\u1EC3 ch\u1ECDn, ho\u1EB7c g\xF5 /model <s\u1ED1> hay /model provider/model[@effort].");
         await reply(api, chatId, lines.join("\n"), { keyboard: modelKeyboard(chatId, flat) });
@@ -8676,7 +9493,7 @@ ${entry.providerName} (${entry.provider})`);
         await publishStatus({
           state: "waiting-token",
           tokenSource: source,
-          hint: `\u0110\u1EB7t token v\xE0o ${tokenFile ?? join5(dataDir, "token")}, ho\u1EB7c \u0111\u1EB7t bi\u1EBFn m\xF4i tr\u01B0\u1EDDng ${config.tokenEnv}. T\u1EC7p token \u0111\u01B0\u1EE3c \u0111\u1ECDc l\u1EA1i m\u1ED7i v\xF2ng n\xEAn kh\xF4ng c\u1EA7n kh\u1EDFi \u0111\u1ED9ng l\u1EA1i.`
+          hint: `\u0110\u1EB7t token v\xE0o ${tokenFile ?? join6(dataDir, "token")}, ho\u1EB7c \u0111\u1EB7t bi\u1EBFn m\xF4i tr\u01B0\u1EDDng ${config.tokenEnv}. T\u1EC7p token \u0111\u01B0\u1EE3c \u0111\u1ECDc l\u1EA1i m\u1ED7i v\xF2ng n\xEAn kh\xF4ng c\u1EA7n kh\u1EDFi \u0111\u1ED9ng l\u1EA1i.`
         });
         if (!probed) {
           probed = true;
@@ -8773,8 +9590,8 @@ ${entry.providerName} (${entry.provider})`);
     turnSinks.clear();
   };
 }
-function isSequencedRecord(record2) {
-  return record2?.event !== void 0 && typeof record2.event.seq === "number";
+function isSequencedRecord(record3) {
+  return record3?.event !== void 0 && typeof record3.event.seq === "number";
 }
 function requiredService(ctx, name2) {
   return ctx.get(name2);
@@ -8787,7 +9604,7 @@ function errorMessage2(error) {
 // src/features/web-remote.ts
 import { mkdir as mkdir5, readFile as readFile5, writeFile as writeFile4 } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 
 // src/lib/remote-device.ts
 import {
@@ -8800,7 +9617,7 @@ import {
   verify
 } from "node:crypto";
 import { chmod, mkdir as mkdir4, readFile as readFile4, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 var HELLO_CONTEXT = "dsh-remote-hello";
 function helloSigningText({ v = 1, deviceId, ts, nonce }) {
   return `${HELLO_CONTEXT}|${v}|${deviceId}|${ts}|${nonce}`;
@@ -8820,7 +9637,7 @@ function fingerprintFor(publicKeyBase64) {
 function publicKeyBase64Of(publicKey) {
   return publicKey.export({ type: "spki", format: "der" }).toString("base64");
 }
-async function loadOrCreateIdentity({ dir, keyFile = join6(dir, "device.key") }) {
+async function loadOrCreateIdentity({ dir, keyFile = join7(dir, "device.key") }) {
   await mkdir4(dir, { recursive: true, mode: 448 });
   let pem;
   try {
@@ -8892,21 +9709,21 @@ function relayEndpoints(relayUrl) {
   const wsUrl = `${secure ? "wss" : "ws"}://${url.host}${basePath}/ws`;
   return { apiBase, wsUrl };
 }
-function isObject(value) {
+function isObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function asRecord4(value) {
-  return isObject(value) ? value : {};
+  return isObject2(value) ? value : {};
 }
 function errorCodeOf(body) {
   const error = asRecord4(body).error;
   if (typeof error === "string") return error;
-  if (isObject(error) && typeof error.code === "string") return error.code;
+  if (isObject2(error) && typeof error.code === "string") return error.code;
   return void 0;
 }
-function messageOf6(body, fallback) {
+function messageOf9(body, fallback) {
   const error = asRecord4(body).error;
-  if (isObject(error) && typeof error.message === "string" && error.message.length > 0) return error.message;
+  if (isObject2(error) && typeof error.message === "string" && error.message.length > 0) return error.message;
   return fallback;
 }
 async function readBody(response) {
@@ -8977,7 +9794,7 @@ function sleep(ms, signal) {
   });
 }
 function hasAccessToken(body) {
-  return isObject(body) && typeof body.access_token === "string";
+  return isObject2(body) && typeof body.access_token === "string";
 }
 async function pairDevice(options) {
   const {
@@ -9012,7 +9829,7 @@ async function pairDevice(options) {
   });
   if (authorized.status !== 200 && authorized.status !== 201) {
     const code = errorCodeOf(authorized.body) ?? "pair/authorize-failed";
-    throw new PairingError(code, messageOf6(authorized.body, `relay answered HTTP ${authorized.status}`));
+    throw new PairingError(code, messageOf9(authorized.body, `relay answered HTTP ${authorized.status}`));
   }
   const authorizedBody = asRecord4(authorized.body);
   const deviceCode = authorizedBody.device_code;
@@ -9069,11 +9886,11 @@ async function pairDevice(options) {
       throw new PairingError("pair/expired", "the pairing code expired");
     }
     if (polled.status === 429) {
-      throw new PairingError("rate/limited", messageOf6(polled.body, "relay rate-limited pairing"));
+      throw new PairingError("rate/limited", messageOf9(polled.body, "relay rate-limited pairing"));
     }
     throw new PairingError(
       code ?? "pair/token-failed",
-      messageOf6(polled.body, `relay answered HTTP ${polled.status} while polling for a token`)
+      messageOf9(polled.body, `relay answered HTTP ${polled.status} while polling for a token`)
     );
   }
 }
@@ -9097,284 +9914,9 @@ async function refreshAccessToken({
   });
   if (response.status !== 200 || !hasAccessToken(response.body)) {
     const code = errorCodeOf(response.body) ?? "auth/invalid-token";
-    throw new PairingError(code, messageOf6(response.body, `token refresh failed with HTTP ${response.status}`));
+    throw new PairingError(code, messageOf9(response.body, `token refresh failed with HTTP ${response.status}`));
   }
   return response.body;
-}
-
-// src/lib/remote-protocol.ts
-var PROTOCOL_VERSION = 1;
-var DEFAULT_LIMITS = Object.freeze({
-  maxFrameBytes: 262144,
-  maxStreams: 8,
-  maxInflight: 32,
-  heartbeatMs: 25e3,
-  requestTimeoutMs: 6e4,
-  approvalTimeoutMs: 3e5,
-  questionTimeoutMs: 3e5
-});
-var APPROVAL_OUTCOMES = Object.freeze([
-  "allowed-once",
-  "rejected",
-  "cancelled",
-  "unavailable"
-]);
-var END_REASONS = Object.freeze([
-  "complete",
-  "cancelled",
-  "overflow",
-  "error",
-  "revoked",
-  "shutdown"
-]);
-var FRAME_TYPES = Object.freeze([
-  "hello",
-  "hello.ok",
-  "req",
-  "res",
-  "open",
-  "item",
-  "end",
-  "cancel",
-  "ping",
-  "pong",
-  "error"
-]);
-var CLIENT_OPS = Object.freeze([
-  "session.list",
-  "session.state",
-  "session.create",
-  "session.rename",
-  "session.prompt",
-  "session.cancel",
-  "session.events",
-  "session.modelCatalog",
-  "session.selectModel"
-]);
-var STREAM_OPS = Object.freeze(["session.follow", "session.control"]);
-var DEVICE_OPS = Object.freeze(["approval.ask", "question.ask", "relay.ping"]);
-var ERROR_CATALOG = Object.freeze({
-  "bad-frame": false,
-  "bad-request": false,
-  unsupported: false,
-  internal: true,
-  "auth/invalid-token": false,
-  "auth/expired": true,
-  "auth/replay": false,
-  "device/pending": true,
-  "device/revoked": false,
-  "session/not-found": false,
-  "stream/limit": false,
-  "stream/overflow": false,
-  "approval/expired": false,
-  "rate/limited": true,
-  "transport/not-ready": true,
-  "transport/timeout": true,
-  "transport/closed": true,
-  "transport/cancelled": false,
-  relay: false
-});
-var ProtocolError = class extends Error {
-  code;
-  retryable;
-  /**
-   * @param code one of `ERROR_CATALOG`
-   * @param message human-readable, already safe to log
-   */
-  constructor(code, message3, options = {}) {
-    super(message3, options.cause === void 0 ? void 0 : { cause: options.cause });
-    this.name = "ProtocolError";
-    this.code = code;
-    this.retryable = options.retryable ?? ERROR_CATALOG[code] ?? false;
-  }
-};
-function toWireError(error) {
-  if (error instanceof ProtocolError) {
-    return { code: error.code, message: error.message, retryable: error.retryable };
-  }
-  return {
-    code: "internal",
-    message: error instanceof Error ? error.message : String(error),
-    retryable: true
-  };
-}
-var OPS_PATTERN = /^[a-z][a-z0-9]*\.[a-zA-Z][a-zA-Z0-9]*$/;
-function badFrame(message3) {
-  return new ProtocolError("bad-frame", message3);
-}
-function isObject2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isFrameType(value) {
-  return typeof value === "string" && FRAME_TYPES.includes(value);
-}
-function requireObject(frame, field2, { optional = false } = {}) {
-  const value = frame[field2];
-  if (value === void 0 && optional) return;
-  if (!isObject2(value)) throw badFrame(`"${field2}" must be an object`);
-}
-function requireString(frame, field2, { min = 1, max = 4096, optional = false } = {}) {
-  const value = frame[field2];
-  if (value === void 0 && optional) return;
-  if (typeof value !== "string") throw badFrame(`"${field2}" must be a string`);
-  if (value.length < min || value.length > max) throw badFrame(`"${field2}" has an invalid length`);
-}
-function requireInteger(frame, field2, { min = 0, optional = false } = {}) {
-  const value = frame[field2];
-  if (value === void 0 && optional) return;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < min) {
-    throw badFrame(`"${field2}" must be a number >= ${min}`);
-  }
-}
-function requireBoolean(frame, field2) {
-  if (typeof frame[field2] !== "boolean") throw badFrame(`"${field2}" must be a boolean`);
-}
-function requireId(frame) {
-  requireString(frame, "id", { min: 1, max: 128 });
-}
-function requireOp(frame) {
-  requireString(frame, "op", { min: 3, max: 64 });
-  const op = frame.op;
-  if (typeof op !== "string" || !OPS_PATTERN.test(op)) throw badFrame('"op" must look like "<namespace>.<verb>"');
-}
-function validateFrame(value) {
-  if (!isObject2(value)) throw badFrame("a frame must be a JSON object");
-  if (!isFrameType(value.t)) {
-    throw badFrame("unknown frame type");
-  }
-  const frame = value;
-  switch (frame.t) {
-    case "hello": {
-      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
-      requireString(frame, "deviceId", { min: 1, max: 128 });
-      requireInteger(frame, "ts");
-      requireString(frame, "nonce", { min: 8, max: 128 });
-      requireString(frame, "sig", { min: 40, max: 256 });
-      return frame;
-    }
-    case "hello.ok": {
-      if (frame.v !== PROTOCOL_VERSION) throw badFrame("unsupported protocol version");
-      requireInteger(frame, "serverTime");
-      requireObject(frame, "limits", { optional: true });
-      return frame;
-    }
-    case "req":
-    case "open": {
-      requireId(frame);
-      requireOp(frame);
-      requireObject(frame, "args", { optional: true });
-      return frame;
-    }
-    case "res": {
-      requireId(frame);
-      requireBoolean(frame, "ok");
-      if (frame.ok === true) {
-        if (!Object.prototype.hasOwnProperty.call(frame, "value")) {
-          throw badFrame('a successful response must carry "value"');
-        }
-        return frame;
-      }
-      const error = frame.error;
-      if (!isObject2(error)) throw badFrame('a failed response must carry "error"');
-      requireString(error, "code", { min: 1, max: 64 });
-      requireString(error, "message", { min: 0, max: 8192 });
-      if (error.retryable !== void 0 && typeof error.retryable !== "boolean") {
-        throw badFrame('"error.retryable" must be a boolean');
-      }
-      return frame;
-    }
-    case "item": {
-      requireId(frame);
-      if (!Object.prototype.hasOwnProperty.call(frame, "item")) throw badFrame('"item" is required');
-      requireInteger(frame, "seq", { optional: true });
-      return frame;
-    }
-    case "end": {
-      requireId(frame);
-      if (frame.reason !== void 0 && !END_REASONS.includes(frame.reason)) {
-        throw badFrame('"reason" is not a known end reason');
-      }
-      return frame;
-    }
-    case "cancel": {
-      requireId(frame);
-      return frame;
-    }
-    case "ping":
-    case "pong": {
-      requireString(frame, "nonce", { min: 0, max: 128, optional: true });
-      return frame;
-    }
-    case "error": {
-      requireString(frame, "code", { min: 1, max: 64 });
-      requireString(frame, "message", { min: 0, max: 8192 });
-      if (frame.retryable !== void 0 && typeof frame.retryable !== "boolean") {
-        throw badFrame('"retryable" must be a boolean');
-      }
-      return frame;
-    }
-    /* v8 ignore next -- FRAME_TYPES is closed and checked above. */
-    default:
-      throw badFrame("unknown frame type");
-  }
-}
-function decodeFrame(text2, options = {}) {
-  if (typeof text2 !== "string") throw badFrame("a wire frame must be text");
-  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
-  const bytes = Buffer.byteLength(text2, "utf8");
-  if (bytes > maxFrameBytes) {
-    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text2);
-  } catch (error) {
-    throw new ProtocolError("bad-frame", "frame is not valid JSON", { cause: error });
-  }
-  return validateFrame(parsed);
-}
-function encodeFrame(frame, options = {}) {
-  validateFrame(frame);
-  const text2 = JSON.stringify(frame);
-  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_LIMITS.maxFrameBytes;
-  const bytes = Buffer.byteLength(text2, "utf8");
-  if (bytes > maxFrameBytes) {
-    throw new ProtocolError("stream/overflow", `frame is ${bytes} bytes, limit is ${maxFrameBytes}`);
-  }
-  return text2;
-}
-function helloFrame({ deviceId, ts, nonce, sig }) {
-  return { t: "hello", v: PROTOCOL_VERSION, deviceId, ts, nonce, sig };
-}
-function requestFrame(id, op, args = {}) {
-  return { t: "req", id, op, args };
-}
-function responseFrame(id, value) {
-  return { t: "res", id, ok: true, value: value ?? null };
-}
-function errorResponseFrame(id, code, message3, options = {}) {
-  return {
-    t: "res",
-    id,
-    ok: false,
-    error: {
-      code,
-      message: message3,
-      ...options.retryable === void 0 ? {} : { retryable: options.retryable }
-    }
-  };
-}
-function itemFrame(id, item, seq) {
-  return { t: "item", id, item, ...seq === void 0 ? {} : { seq } };
-}
-function endFrame(id, reason = "complete") {
-  return { t: "end", id, reason };
-}
-function pingFrame(nonce) {
-  return { t: "ping", ...nonce === void 0 ? {} : { nonce } };
-}
-function pongFrame(nonce) {
-  return { t: "pong", ...nonce === void 0 ? {} : { nonce } };
 }
 
 // src/lib/remote-transport.ts
@@ -9707,19 +10249,19 @@ var RemoteTransport = class {
       this.#safeSend(endFrame(frame.id, "error"));
       return;
     }
-    const record2 = {
+    const record3 = {
       id: frame.id,
       closed: false,
       cancelHandlers: /* @__PURE__ */ new Set()
     };
-    this.#streams.set(frame.id, record2);
+    this.#streams.set(frame.id, record3);
     const stream = {
       id: frame.id,
       get closed() {
-        return record2.closed;
+        return record3.closed;
       },
       push: (item, seq) => {
-        if (record2.closed) return false;
+        if (record3.closed) return false;
         try {
           this.#send(itemFrame(frame.id, item, seq));
           return true;
@@ -9732,8 +10274,8 @@ var RemoteTransport = class {
         this.#finishStream(frame.id, reason, true);
       },
       onCancel: (listener) => {
-        record2.cancelHandlers.add(listener);
-        return () => record2.cancelHandlers.delete(listener);
+        record3.cancelHandlers.add(listener);
+        return () => record3.cancelHandlers.delete(listener);
       }
     };
     try {
@@ -9747,16 +10289,16 @@ var RemoteTransport = class {
     }
   }
   #onStreamItem(frame) {
-    const record2 = this.#streams.get(frame.id);
-    if (record2 === void 0 || record2.closed) return;
+    const record3 = this.#streams.get(frame.id);
+    if (record3 === void 0 || record3.closed) return;
     this.logger.warn("web-remote: unexpected item for stream %s", frame.id);
   }
   #onStreamEnd(frame, reason) {
-    const record2 = this.#streams.get(frame.id);
-    if (record2 === void 0) return;
-    record2.closed = true;
+    const record3 = this.#streams.get(frame.id);
+    if (record3 === void 0) return;
+    record3.closed = true;
     this.#streams.delete(frame.id);
-    for (const listener of [...record2.cancelHandlers]) {
+    for (const listener of [...record3.cancelHandlers]) {
       try {
         listener(reason);
       } catch (error) {
@@ -9765,9 +10307,9 @@ var RemoteTransport = class {
     }
   }
   #finishStream(id, reason, sendEnd) {
-    const record2 = this.#streams.get(id);
-    if (record2 === void 0) return;
-    record2.closed = true;
+    const record3 = this.#streams.get(id);
+    if (record3 === void 0) return;
+    record3.closed = true;
     this.#streams.delete(id);
     if (sendEnd) this.#safeSend(endFrame(id, reason));
   }
@@ -9834,10 +10376,10 @@ var RemoteTransport = class {
     }
   }
   #closeStreams(reason) {
-    for (const [id, record2] of [...this.#streams]) {
-      record2.closed = true;
+    for (const [id, record3] of [...this.#streams]) {
+      record3.closed = true;
       this.#streams.delete(id);
-      for (const listener of [...record2.cancelHandlers]) {
+      for (const listener of [...record3.cancelHandlers]) {
         try {
           listener(reason);
         } catch {
@@ -10272,13 +10814,13 @@ function normalizeAnswers(questions, answers) {
 // src/features/web-remote-routes.ts
 var WEB_REMOTE_PATH_PREFIX = "/api/personal-hub-web-remote";
 var WEB_REMOTE_ENDPOINTS = ["state", "settingsSet", "pair", "pairCancel", "unpair"];
-var ROW_PACKAGE = "@local/personal-hub";
+var ROW_PACKAGE2 = "@local/personal-hub";
 var MAX_DEVICE_NAME = 80;
 var MAX_RELAY_URL = 2048;
 function mountWebRemoteRoutes(ctx, deps) {
   const connection = ctx.get("connection");
   if (connection?.fetch !== void 0 && typeof connection.fetch.register === "function") {
-    return registerRoutes(ctx, connection.fetch.register.bind(connection.fetch), deps);
+    return registerRoutes2(ctx, connection.fetch.register.bind(connection.fetch), deps);
   }
   if (typeof ctx.inject !== "function") {
     deps.logger.info("web-remote: the connection service is absent, so the settings card has no Host side");
@@ -10294,10 +10836,10 @@ function mountWebRemoteRoutes(ctx, deps) {
         deps.logger.warn("web-remote: the connection service exposes no Fetch routes; the settings card has no Host side");
         return;
       }
-      routeDisposer = registerRoutes(ctx, scopedConnection.fetch.register.bind(scopedConnection.fetch), deps);
+      routeDisposer = registerRoutes2(ctx, scopedConnection.fetch.register.bind(scopedConnection.fetch), deps);
     });
   } catch (error) {
-    deps.logger.warn("web-remote: cannot wait for the connection service: %s", messageOf7(error));
+    deps.logger.warn("web-remote: cannot wait for the connection service: %s", messageOf10(error));
     return () => {
     };
   }
@@ -10305,7 +10847,7 @@ function mountWebRemoteRoutes(ctx, deps) {
     try {
       routeDisposer?.();
     } catch (error) {
-      deps.logger.warn("web-remote: route disposal failed: %s", messageOf7(error));
+      deps.logger.warn("web-remote: route disposal failed: %s", messageOf10(error));
     }
     routeDisposer = void 0;
     try {
@@ -10314,7 +10856,7 @@ function mountWebRemoteRoutes(ctx, deps) {
     }
   };
 }
-function registerRoutes(ctx, register, deps) {
+function registerRoutes2(ctx, register, deps) {
   const disposers = [];
   for (const endpoint of WEB_REMOTE_ENDPOINTS) {
     const route = {
@@ -10324,15 +10866,15 @@ function registerRoutes(ctx, register, deps) {
       fetch: async (request) => {
         const payload = await readJsonPayload(request);
         if (payload === void 0) {
-          return jsonResponse(failure2("input/invalid", "The request body is not valid JSON"));
+          return jsonResponse(failure3("input/invalid", "The request body is not valid JSON"));
         }
-        return jsonResponse(await dispatch(ctx, deps, endpoint, payload));
+        return jsonResponse(await dispatch2(ctx, deps, endpoint, payload));
       }
     };
     try {
       disposers.push(register(route));
     } catch (error) {
-      deps.logger.error("web-remote: cannot register %s: %s", route.path, messageOf7(error));
+      deps.logger.error("web-remote: cannot register %s: %s", route.path, messageOf10(error));
     }
   }
   if (disposers.length === 0) {
@@ -10345,18 +10887,18 @@ function registerRoutes(ctx, register, deps) {
       try {
         dispose();
       } catch (error) {
-        deps.logger.warn("web-remote: route dispose failed: %s", messageOf7(error));
+        deps.logger.warn("web-remote: route dispose failed: %s", messageOf10(error));
       }
     }
   };
 }
-async function dispatch(ctx, deps, endpoint, payload) {
+async function dispatch2(ctx, deps, endpoint, payload) {
   try {
     switch (endpoint) {
       case "state":
-        return { ok: true, value: cardState(ctx, deps) };
+        return { ok: true, value: cardState2(ctx, deps) };
       case "settingsSet":
-        return { ok: true, value: await settingsSet(ctx, deps, payload) };
+        return { ok: true, value: await settingsSet2(ctx, deps, payload) };
       case "pair":
         await deps.pair();
         return { ok: true, value: actionResult(deps) };
@@ -10367,16 +10909,16 @@ async function dispatch(ctx, deps, endpoint, payload) {
         await deps.unpair();
         return { ok: true, value: actionResult(deps) };
       default:
-        return failure2("input/unknown-endpoint", `Unknown Web Remote route "${String(endpoint)}"`);
+        return failure3("input/unknown-endpoint", `Unknown Web Remote route "${String(endpoint)}"`);
     }
   } catch (error) {
-    deps.logger.warn("web-remote: %s failed: %s", endpoint, messageOf7(error));
-    return failureOf2(error);
+    deps.logger.warn("web-remote: %s failed: %s", endpoint, messageOf10(error));
+    return failureOf3(error);
   }
 }
-function cardState(ctx, deps) {
+function cardState2(ctx, deps) {
   return {
-    writable: editorOf(ctx) !== void 0,
+    writable: editorOf2(ctx) !== void 0,
     settings: deps.settings(),
     status: deps.status()
   };
@@ -10384,26 +10926,26 @@ function cardState(ctx, deps) {
 function actionResult(deps) {
   return { state: deps.status().state };
 }
-async function settingsSet(ctx, deps, payload) {
-  const editor = editorOf(ctx);
+async function settingsSet2(ctx, deps, payload) {
+  const editor = editorOf2(ctx);
   if (editor === void 0) {
     throw new ProtocolError("config/unavailable", "This build cannot edit configuration from the UI");
   }
   const current = deps.settings();
-  const next = mergeSettings(current, payload);
-  if (sameSettings(current, next)) return { settings: current };
-  const entry = editor.entries().find((row) => row?.options?.name === ROW_PACKAGE);
+  const next = mergeSettings2(current, payload);
+  if (sameSettings2(current, next)) return { settings: current };
+  const entry = editor.entries().find((row) => row?.options?.name === ROW_PACKAGE2);
   if (entry === void 0) {
     throw new ProtocolError("config/unknown-entry", "The plugin row is missing from this profile configuration");
   }
-  await editor.edit(entry, (raw) => writeRow(raw, next));
+  await editor.edit(entry, (raw) => writeRow2(raw, next));
   return { settings: next };
 }
-function editorOf(ctx) {
+function editorOf2(ctx) {
   const service = ctx.get("configEditor");
   return service !== void 0 && typeof service.edit === "function" && typeof service.entries === "function" ? service : void 0;
 }
-function mergeSettings(current, payload) {
+function mergeSettings2(current, payload) {
   let enabled = current.enabled;
   if (payload.enabled !== void 0) {
     if (typeof payload.enabled !== "boolean") {
@@ -10438,15 +10980,15 @@ function text(value, name2, max) {
   }
   return trimmed;
 }
-function sameSettings(left, right) {
+function sameSettings2(left, right) {
   return left.enabled === right.enabled && left.relayUrl === right.relayUrl && left.deviceName === right.deviceName && left.autoPair === right.autoPair;
 }
-function writeRow(raw, settings) {
-  const row = record(raw);
+function writeRow2(raw, settings) {
+  const row = record2(raw);
   return {
     ...row,
     webRemote: {
-      ...record(row.webRemote),
+      ...record2(row.webRemote),
       enabled: settings.enabled,
       relayUrl: settings.relayUrl,
       deviceName: settings.deviceName,
@@ -10454,19 +10996,19 @@ function writeRow(raw, settings) {
     }
   };
 }
-function record(value) {
+function record2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
-function failure2(code, message3) {
+function failure3(code, message3) {
   return { ok: false, error: { code, message: message3 } };
 }
-function failureOf2(error) {
+function failureOf3(error) {
   if (error instanceof ProtocolError || error instanceof PairingError) {
-    return failure2(error.code, error.message);
+    return failure3(error.code, error.message);
   }
-  return failure2("system/failed", messageOf7(error));
+  return failure3("system/failed", messageOf10(error));
 }
-function messageOf7(error) {
+function messageOf10(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -10483,10 +11025,10 @@ function mountWebRemote(ctx, config, deps = {}) {
   }
   const sessionController = resolvedController;
   const now = deps.now ?? Date.now;
-  const dataDir = config.dataDir ? expandHome(config.dataDir) : join7(pluginDataDir("personal-hub"), "web-remote");
-  const statusFile = join7(dataDir, "status.json");
-  const tokenFile = join7(dataDir, "refresh-token.json");
-  const stateStore = new JsonStateStore(join7(dataDir, "state.json"), {
+  const dataDir = config.dataDir ? expandHome(config.dataDir) : join8(pluginDataDir("personal-hub"), "web-remote");
+  const statusFile = join8(dataDir, "status.json");
+  const tokenFile = join8(dataDir, "refresh-token.json");
+  const stateStore = new JsonStateStore(join8(dataDir, "state.json"), {
     deviceId: "",
     relayUrl: "",
     pairedAt: 0
@@ -10862,7 +11404,7 @@ function mountWebRemote(ctx, config, deps = {}) {
     const attempt = pairingAttempt;
     setTimeout(() => {
       if (stopped) return;
-      void pair().then((paired) => paired ? connect() : void 0).catch((failure3) => reportError("re-pairing failed", failure3));
+      void pair().then((paired) => paired ? connect() : void 0).catch((failure4) => reportError("re-pairing failed", failure4));
     }, Math.min(3e4, 1500 * Math.max(1, attempt))).unref?.();
   }
   async function getAccessToken() {
@@ -10987,22 +11529,23 @@ function message(error) {
 var name = "personal-hub";
 var inject = ["sessionController"];
 var FEATURES = [
-  {
-    key: "telegram",
-    label: "Telegram remote control",
-    mount: mountTelegramRemote
-  },
-  {
-    key: "git",
-    label: "Git panel",
-    mount: mountGit
-  },
-  {
-    key: "webRemote",
-    label: "Web Remote",
-    mount: mountWebRemote
-  }
+  { key: "telegram", label: "Telegram remote control" },
+  { key: "git", label: "Git panel" },
+  { key: "webRemote", label: "Web Remote", mountWhenDisabled: true },
+  { key: "autoArchive", label: "Automatic archive", mountWhenDisabled: true }
 ];
+function mountFeature(ctx, settings, key, deps) {
+  switch (key) {
+    case "telegram":
+      return mountTelegramRemote(ctx, settings.telegram, deps);
+    case "git":
+      return mountGit(ctx, settings.git, deps);
+    case "webRemote":
+      return mountWebRemote(ctx, settings.webRemote, deps);
+    case "autoArchive":
+      return mountAutoArchive(ctx, settings.autoArchive, deps);
+  }
+}
 function apply(ctx, config) {
   const settings = normalizeConfig(config);
   const logger = makeLogger(ctx);
@@ -11014,13 +11557,12 @@ function apply(ctx, config) {
     const disposers = [];
     for (const feature of FEATURES) {
       const featureConfig = settings[feature.key];
-      if (featureConfig === void 0) continue;
-      if (featureConfig.enabled === false && feature.key !== "webRemote") {
+      if (featureConfig.enabled === false && feature.mountWhenDisabled !== true) {
         logger.info("personal-hub: %s disabled by configuration", feature.label);
         continue;
       }
       try {
-        disposers.push(feature.key === "telegram" ? feature.mount(ctx, settings.telegram, { logger }) : feature.key === "git" ? feature.mount(ctx, settings.git, { logger }) : feature.mount(ctx, settings.webRemote, { logger }));
+        disposers.push(mountFeature(ctx, settings, feature.key, { logger }));
         logger.info("personal-hub: %s mounted", feature.label);
       } catch (error) {
         logger.error("personal-hub: %s failed to mount: %s", feature.label, message2(error));

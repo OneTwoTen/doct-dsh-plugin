@@ -59,3 +59,22 @@
             deleteBranch: false
             archiveSession: true
             checkMs: 60000
+        # Tự động lưu trữ chat không tương tác: quá N ngày không có tin nhắn mới
+        # thì ẩn khỏi danh sách phiên (khôi phục được từ bộ lọc lưu trữ).
+        autoArchive:
+          enabled: true
+          # Số ngày không có tin nhắn mới thì lưu trữ; 0 = tắt quy tắc tuổi.
+          inactiveDays: 2
+          # Khoảng cách giữa hai lượt kiểm tra (ms) và thời gian chờ sau khi mở DSH.
+          checkMs: 3600000
+          startupDelayMs: 60000
+          # Giữ chat đang mở trong cửa sổ này (agent còn nạp trong bộ nhớ).
+          skipActive: true
+          # false = chỉ lưu trữ chat thật sự rảnh; chat còn việc chạy bị bỏ qua.
+          archiveRunning: false
+          # Lưu trữ cả chat chưa từng có tin nhắn nào.
+          archiveBlank: true
+          # Chỉ báo cáo, không lưu trữ thật.
+          dryRun: false
+          # Số chat lưu trữ tối đa mỗi lượt; 0 = không giới hạn.
+          maxPerPass: 50

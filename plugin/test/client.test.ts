@@ -918,3 +918,94 @@ test('the Web Remote helpers name states and refuse URLs the transport cannot us
   assert.equal(relayLooksValid('relay.test'), false)
   assert.equal(relayLooksValid('ftp://relay.test'), false)
 })
+
+test('the automatic-archive form draws the rules and the last pass', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const AutoArchiveForm = view.AutoArchiveForm as (props: Record<string, unknown>) => unknown
+  const changes: Array<Record<string, unknown>> = []
+  const form = AutoArchiveForm({
+    t: (key: string, values?: Record<string, string | number>) =>
+      values === undefined ? key : `${key}:${Object.values(values).join(',')}`,
+    settings: {
+      enabled: true,
+      inactiveDays: 2,
+      checkMs: 3600000,
+      skipActive: true,
+      archiveRunning: false,
+      archiveBlank: true,
+      dryRun: false,
+      maxPerPass: 50,
+    },
+    last: {
+      at: 1_700_000_000_000,
+      dryRun: false,
+      scanned: 6,
+      due: 2,
+      recent: 4,
+      pinned: 0,
+      archivedCount: 2,
+      failedCount: 0,
+      activeCount: 0,
+      deferredCount: 0,
+      archived: [],
+      failed: [],
+      active: [],
+      deferred: [],
+    },
+    writable: true,
+    status: 'ready',
+    error: '',
+    notice: '',
+    running: false,
+    onChange: (patch: Record<string, unknown>) => {
+      changes.push(patch)
+    },
+    onSave: () => {},
+    onRun: () => {},
+  })
+
+  assert.match(textOf(form), /aaTitle/)
+  assert.match(textOf(form), /aaEnabled/)
+  assert.match(textOf(form), /aaInactiveDays/)
+  assert.match(textOf(form), /aaLast:6,2,0,0/)
+  const boxes = findAll(form, (element) => element.type === 'input' && element.props?.type === 'checkbox')
+  assert.equal(boxes.length, 5)
+  assert.equal(boxes[0].props?.checked, true)
+
+  const days = findAll(form, (element) => element.type === 'input' && element.props?.type === 'number')[0]
+  assert.equal(days.props?.value, 2)
+  ;(days.props?.onChange as (event: { target: { value: string } }) => void)({ target: { value: '3' } })
+  assert.deepEqual(changes[0], { inactiveDays: 3 })
+  // The interval field is in minutes and converts back to milliseconds.
+  const minutes = findAll(form, (element) => element.type === 'input' && element.props?.type === 'number')[1]
+  assert.equal(minutes.props?.value, 60)
+  ;(minutes.props?.onChange as (event: { target: { value: string } }) => void)({ target: { value: '90' } })
+  assert.deepEqual(changes[1], { checkMs: 5400000 })
+})
+
+test('the automatic-archive caller posts to its own route prefix', async () => {
+  const { createAutoArchiveApi } = await import('../src/client/api.ts')
+  const calls: Array<{ url: string; init: { method: string; body: string; credentials: string } }> = []
+  const restore = stubFetch(calls, { ok: true, value: { writable: true, settings: {}, last: null } })
+  try {
+    const api = createAutoArchiveApi()
+    const answer = await api.runNow({})
+    assert.deepEqual(answer, { writable: true, settings: {}, last: null })
+  } finally {
+    restore()
+  }
+  assert.equal(calls[0].url, 'api/personal-hub-auto-archive/runNow')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+})
+
+test('both languages carry the same personal-hub keys and placeholders', async () => {
+  const { en, vi } = await import('../src/client/i18n.ts')
+  assert.deepEqual(Object.keys(vi).sort(), Object.keys(en).sort())
+  const placeholders = (text: string): string[] =>
+    [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort()
+  for (const key of Object.keys(en)) {
+    assert.deepEqual(placeholders(vi[key]), placeholders(en[key]), `placeholders of ${key}`)
+  }
+})
