@@ -15,7 +15,7 @@ theo Phase 1, thẻ **Web Remote** trong hàng plugin (`plugin/src/client/web-re
 WebChat tối giản** trong `tools/dev-relay/` để chạy thử end-to-end. **Relay production bằng Zig
 0.17.1** đã có trong [`server/`](../server/README.md) (Phase 2: SQLite, pairing, token, WebSocket,
 e2e với bridge thật). Web client SvelteKit (Phase 3) chưa viết. Trạng thái cấu hình/ghép cặp nằm
-trong [`plugin/README.md`](../plugin/README.md#7-web-remote-phase-1--bridge).
+trong [`plugin/README.md`](../plugin/README.md#8-web-remote-phase-1--bridge).
 
 ## Thứ tự đọc
 

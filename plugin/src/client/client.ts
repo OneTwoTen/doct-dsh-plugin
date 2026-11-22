@@ -10,13 +10,14 @@ import { h } from './runtime.ts'
 import type { ClientContext, Disposer } from '../host/dsh.ts'
 import { NS, dictionaries } from './i18n.ts'
 import type { Translate } from './i18n.ts'
-import { createGitCaller, createGitApi, createWebRemoteApi, messageOf } from './api.ts'
-import type { GitApi, WebRemoteApi } from './api.ts'
+import { createGitCaller, createGitApi, createWebRemoteApi, createAutoArchiveApi, messageOf } from './api.ts'
+import type { AutoArchiveApi, GitApi, WebRemoteApi } from './api.ts'
 import { GIT_CSS } from './styles.ts'
 import { Icon } from './icons.tsx'
 import { TelegramCard, createController } from './telegram.tsx'
 import { WebRemoteCard, WebRemoteForm, countdownText, draftOf, emptyCardState, relayLooksValid, stateLabel, stateTone } from './web-remote.tsx'
 import { MergeSettingsCard, MergeSettingsForm } from './git/settings.tsx'
+import { AutoArchiveCard, AutoArchiveForm } from './auto-archive.tsx'
 import { WorktreeHero, WorktreeOption, WorktreeDock, WorktreeDockCard } from './worktree.tsx'
 import { GitPanel, GitHeaderButton } from './git/panel.tsx'
 import { GitActions } from './git/actions.tsx'
@@ -56,6 +57,8 @@ export function createClient(): ClientModule {
       WebRemoteCard,
       WebRemoteForm,
       MergeSettingsCard,
+      AutoArchiveCard,
+      AutoArchiveForm,
       WorktreeHero,
       WorktreeOption,
       WorktreeDock,
@@ -101,6 +104,7 @@ export function createClient(): ClientModule {
 
       const api: GitApi = createGitApi(createGitCaller())
       const webRemote: WebRemoteApi = createWebRemoteApi()
+      const autoArchive: AutoArchiveApi = createAutoArchiveApi()
       ctx.effect(() => installStyles(), 'personal-hub: styles')
 
       // `plugins.row.config` is a keyed slot with exactly one occupant per row
@@ -122,6 +126,7 @@ export function createClient(): ClientModule {
             clear: controller.clear,
             api,
             webRemote,
+            autoArchive,
           }),
         }, PersonalHubCard)),
         'personal-hub: row config card',
@@ -240,6 +245,7 @@ function PersonalHubCard(props: Record<string, unknown> & {
   t: Translate
   api: GitApi
   webRemote: WebRemoteApi
+  autoArchive: AutoArchiveApi
   view?: string
 }): ReturnType<typeof h> {
   const t = props.t
@@ -247,14 +253,17 @@ function PersonalHubCard(props: Record<string, unknown> & {
     return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
       h('span', null, t('summary')),
       h('span', { className: 'ph-hint' }, t('webRemoteSummary')),
-      h('span', { className: 'ph-hint' }, t('gitSettingsSummary')))
+      h('span', { className: 'ph-hint' }, t('gitSettingsSummary')),
+      h('span', { className: 'ph-hint' }, t('aaSummary')))
   }
   return h('div', { 'data-personal-hub-card': true, style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
     h(TelegramCard, props as never),
     h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
     h(WebRemoteCard, { api: props.webRemote, t }),
     h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
-    h(MergeSettingsCard, { api: props.api, t }))
+    h(MergeSettingsCard, { api: props.api, t }),
+    h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l3)' } }),
+    h(AutoArchiveCard, { api: props.autoArchive, t }))
 }
 
 /**

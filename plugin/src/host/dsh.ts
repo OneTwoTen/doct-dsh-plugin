@@ -171,6 +171,8 @@ export interface WorkspaceRegistryService {
   archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
   /** The registry-global archive set, when this build exposes it. */
   archivedSessionIds?: readonly string[]
+  /** Chats the user pinned, which automatic archive leaves alone. */
+  pinnedSessionIds?: readonly string[]
 }
 
 /** The `sessionController` service: creating a Session for a new chat. */

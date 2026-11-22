@@ -8,11 +8,15 @@
  * Feature 2 — a Git panel in the right Sidebar: the working tree, per-file
  * diffs, the commit log, and the code host's change requests and issues.
  *
+ * Feature 3 — automatic archive: chats without a prompt for a configured number
+ * of days are hidden from the Session list, and can always be restored.
+ *
  * Add a feature by writing `features/<name>.ts` that exports `mount(ctx, config,
  * deps)` returning a disposer, then list it in `FEATURES` below.
  */
 import { normalizeConfig } from './lib/config.ts'
-import type { GitConfig, TelegramConfig, WebRemoteConfig } from './lib/config.ts'
+import type { HubConfig } from './lib/config.ts'
+import { mountAutoArchive } from './features/auto-archive.ts'
 import { mountGit } from './features/git.ts'
 import { mountTelegramRemote } from './features/telegram-remote.ts'
 import { mountWebRemote } from './features/web-remote.ts'
@@ -28,23 +32,49 @@ interface FeatureDeps {
   logger: Logger
 }
 
-const FEATURES = [
-  {
-    key: 'telegram',
-    label: 'Telegram remote control',
-    mount: mountTelegramRemote,
-  },
-  {
-    key: 'git',
-    label: 'Git panel',
-    mount: mountGit,
-  },
-  {
-    key: 'webRemote',
-    label: 'Web Remote',
-    mount: mountWebRemote,
-  },
-] as const
+/** One feature this bundle mounts. */
+interface HubFeature {
+  key: keyof HubConfig
+  label: string
+  /**
+   * Mount even while the configuration says off: the feature's settings card is
+   * the control that turns it back on, and a disabled mount starts no work.
+   */
+  mountWhenDisabled?: boolean
+}
+
+const FEATURES: readonly HubFeature[] = [
+  { key: 'telegram', label: 'Telegram remote control' },
+  { key: 'git', label: 'Git panel' },
+  { key: 'webRemote', label: 'Web Remote', mountWhenDisabled: true },
+  { key: 'autoArchive', label: 'Automatic archive', mountWhenDisabled: true },
+]
+
+/**
+ * Mount one feature with its own configuration slice.
+ *
+ * @param ctx Harness plugin context.
+ * @param settings the normalized row configuration.
+ * @param key which feature to mount.
+ * @param deps what every feature receives.
+ */
+function mountFeature(
+  ctx: DshContext,
+  settings: HubConfig,
+  key: HubFeature['key'],
+  deps: FeatureDeps,
+): Disposer {
+  switch (key) {
+    case 'telegram':
+      return mountTelegramRemote(ctx, settings.telegram, deps)
+    case 'git':
+      return mountGit(ctx, settings.git, deps)
+    case 'webRemote':
+      return mountWebRemote(ctx, settings.webRemote, deps)
+    case 'autoArchive':
+      return mountAutoArchive(ctx, settings.autoArchive, deps)
+  }
+}
 
 /**
  * @param ctx Harness plugin context.
@@ -62,22 +92,13 @@ export function apply(ctx: DshContext, config: unknown): void {
   ctx.effect(() => {
     const disposers: Disposer[] = []
     for (const feature of FEATURES) {
-      const featureConfig: TelegramConfig | GitConfig | WebRemoteConfig | undefined = settings[feature.key]
-      if (featureConfig === undefined) continue
-      // Web Remote still mounts while disabled: its settings card is the control
-      // that turns it back on, and a disabled mount opens no socket.
-      if (featureConfig.enabled === false && feature.key !== 'webRemote') {
+      const featureConfig = settings[feature.key]
+      if (featureConfig.enabled === false && feature.mountWhenDisabled !== true) {
         logger.info('personal-hub: %s disabled by configuration', feature.label)
         continue
       }
       try {
-        // The three entries carry different configuration slices, so the
-        // discriminant is what keeps each `mount` paired with its own slice.
-        disposers.push(feature.key === 'telegram'
-          ? feature.mount(ctx, settings.telegram, { logger })
-          : feature.key === 'git'
-            ? feature.mount(ctx, settings.git, { logger })
-            : feature.mount(ctx, settings.webRemote, { logger }))
+        disposers.push(mountFeature(ctx, settings, feature.key, { logger }))
         logger.info('personal-hub: %s mounted', feature.label)
       } catch (error) {
         logger.error('personal-hub: %s failed to mount: %s', feature.label, message(error))

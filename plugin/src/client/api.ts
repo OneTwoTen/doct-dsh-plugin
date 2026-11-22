@@ -8,6 +8,10 @@
  */
 import type {
   ActionStateRequest,
+  AutoArchiveApi,
+  AutoArchiveCardState,
+  AutoArchiveRunResult,
+  AutoArchiveSettings,
   CommitRequest,
   CommitRequestPayload,
   CreateBranchRequest,
@@ -33,13 +37,16 @@ import type {
   WebRemoteSettingsView,
 } from '../shared/protocol.ts'
 
-export type { GitApi, GitRequest, GitResponse, WebRemoteApi } from '../shared/protocol.ts'
+export type { AutoArchiveApi, GitApi, GitRequest, GitResponse, WebRemoteApi } from '../shared/protocol.ts'
 
 /** The Host route prefix, relative to the page. */
 export const GIT_PATH = 'api/personal-hub-git'
 
 /** The Web Remote card's Host route prefix, relative to the page. */
 export const WEB_REMOTE_PATH = 'api/personal-hub-web-remote'
+
+/** The automatic-archive card's Host route prefix, relative to the page. */
+export const AUTO_ARCHIVE_PATH = 'api/personal-hub-auto-archive'
 
 /** One raw route call, before the envelope is unwrapped. */
 export type RawCall = (endpoint: string, payload?: unknown) => Promise<unknown>
@@ -130,6 +137,18 @@ export function createWebRemoteApi(call: RawCall = createCaller(WEB_REMOTE_PATH)
     pair: (payload) => call('pair', payload) as Promise<WebRemoteActionResult>,
     pairCancel: (payload) => call('pairCancel', payload) as Promise<WebRemoteActionResult>,
     unpair: (payload) => call('unpair', payload) as Promise<WebRemoteActionResult>,
+  }
+}
+
+/**
+ * The automatic-archive card's caller and typed API.
+ * @param call one raw route call; defaults to its own prefix.
+ */
+export function createAutoArchiveApi(call: RawCall = createCaller(AUTO_ARCHIVE_PATH)): AutoArchiveApi {
+  return {
+    state: (payload) => call('state', payload) as Promise<AutoArchiveCardState>,
+    settingsSet: (payload) => call('settingsSet', payload) as Promise<{ settings: AutoArchiveSettings }>,
+    runNow: (payload) => call('runNow', payload) as Promise<AutoArchiveRunResult>,
   }
 }
 

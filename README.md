@@ -17,6 +17,9 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
   nhất rồi tạo checkout riêng cho chat; lượt chỉ chạy sau khi thư mục đã đổi. Ô **Worktree** trên màn
   hình New Session chỉ để tắt cho một chat cụ thể.
 - **Dọn dẹp sau khi gộp** — tùy chọn trong cấu hình: PR của phiên được gộp thì xoá worktree, ẩn phiên.
+- **Tự động lưu trữ chat** — bật sẵn: chat không có tin nhắn mới trong 2 ngày tự ẩn khỏi danh sách
+  phiên; chat ghim, chat đang mở và chat còn việc chạy được giữ lại, và mọi chat đã lưu trữ đều khôi
+  phục được. Đổi số ngày, tắt, hoặc chạy thử ngay trong thẻ cấu hình của plugin.
 - **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
   mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH), dev
   relay và **relay production bằng Zig (`server/`)** đã có; web client SvelteKit là Phase 3.
@@ -56,7 +59,7 @@ Mục tiêu: điều khiển DSH từ điện thoại qua WebChat, không mở p
 | Relay (Zig) | **đã có** trong [`server/`](server/) — Phase 2: SQLite WAL, pairing luồng B, token xoay vòng, WebSocket, rate limit, Caddy/systemd mẫu |
 | Web client (SvelteKit) | chưa có — Phase 3; dev relay có WebChat tối giản để thử |
 
-Cấu hình, trạng thái và giới hạn: [`plugin/README.md#7-web-remote-phase-1--bridge`](plugin/README.md#7-web-remote-phase-1--bridge).
+Cấu hình, trạng thái và giới hạn: [`plugin/README.md#8-web-remote-phase-1--bridge`](plugin/README.md#8-web-remote-phase-1--bridge).
 
 ### Chạy thử nhanh
 
@@ -216,7 +219,10 @@ node tools/schema.mjs C:\tmp\dsh-asar\dsh\node_modules\@deepseek-ai\dsh-api-sess
 - Chỉ chat riêng (private).
 - Phê duyệt và câu hỏi của DSH được báo về chat nhưng chưa trả lời được từ Telegram.
 - DSH chưa có API xoá phiên; plugin chỉ **lưu trữ** (ẩn khỏi danh sách, dữ liệu vẫn còn) và **khôi phục**.
-  Phiên đang chạy phải `/cancel` hoặc đợi xong trước khi lưu trữ.
+  Chat đang chạy chỉ được lưu trữ từ thẻ tự động lưu trữ khi bật `archiveRunning: true` (dừng việc đó);
+  còn lệnh `/archive` trong Telegram cần `/cancel` hoặc đợi lượt xong.
+- Tự động lưu trữ chỉ chạy khi DSH đang mở, và một lượt chạy bù khi mở lại. Chat được ghim không bao giờ
+  bị lưu trữ; bật `archiveRunning` sẽ dừng lượt, job, subagent và nhắc đã lên lịch của chat bị lưu trữ.
 - Bảng Git giờ **đọc và ghi**: commit (chọn tệp), stage/unstage/huỷ thay đổi từng tệp, push, pull,
   đổi/tạo nhánh, tạo PR, gộp PR (merge/squash/rebase), publish; diff dừng sau 4000 dòng mỗi tệp.
   Chưa có amend, rebase tương tác hay stage từng hunk.

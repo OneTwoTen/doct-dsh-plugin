@@ -498,7 +498,35 @@
     webRemoteStateRevoked: "Device revoked",
     webRemoteStateError: "Error",
     webRemoteStateStopped: "Stopped",
-    webRemoteStateDisconnected: "Disconnected"
+    webRemoteStateDisconnected: "Disconnected",
+    /* Automatic archive */
+    aaTitle: "Automatic archive",
+    aaSummary: "Archive chats nobody has written to for a while",
+    aaIntro: "A chat with no new message for the configured number of days is hidden from the session list. Archiving keeps the conversation, and you can restore it from the archive filter in the sidebar.",
+    aaEnabled: "Archive idle chats automatically",
+    aaInactiveDays: "Days without a message",
+    aaInactiveDaysHint: "0 turns the age rule off; nothing is archived until you set it back above zero.",
+    aaCheckMinutes: "Check every (minutes)",
+    aaCheckMinutesHint: "The schedule only runs while Harness is open; a pass catches up at startup.",
+    aaSkipActive: "Keep the chat open in this window",
+    aaBlank: "Also archive chats that never got a message",
+    aaRunning: "Archive even while work is running (stops that work)",
+    aaDryRun: "Dry run: report what would be archived, archive nothing",
+    aaSave: "Save",
+    aaSaving: "Saving\u2026",
+    aaSaved: "Saved. The next pass uses these rules.",
+    aaSaveFailed: "The Host rejected the change",
+    aaRunNow: "Run now",
+    aaRunningNow: "Running\u2026",
+    aaRunDone: "Pass finished: {archived} archived, {failed} failed.",
+    aaRunFailed: "The pass failed",
+    aaNever: "No pass has run yet.",
+    aaLast: "Last pass: scanned {scanned}, archived {archived}, kept {active} with running work, {failed} failed.",
+    aaLastDry: "Last dry run: scanned {scanned}, {due} would be archived.",
+    aaOff: "Automatic archiving is off, so no pass ran.",
+    aaOffHint: "Turn the switch on and save to start archiving.",
+    aaRestoreHint: "Pinned chats are never archived; with the running-work switch off, chats with active work are kept too. Restore an archived chat from the sidebar\u2019s archive filter.",
+    aaLoadFailed: "Could not read the automatic-archive settings"
   };
   var vi = {
     cardTitle: "Trung t\xE2m c\xE1 nh\xE2n",
@@ -950,13 +978,42 @@
     webRemoteStateRevoked: "Thi\u1EBFt b\u1ECB b\u1ECB thu h\u1ED3i",
     webRemoteStateError: "L\u1ED7i",
     webRemoteStateStopped: "\u0110\xE3 d\u1EEBng",
-    webRemoteStateDisconnected: "\u0110\xE3 ng\u1EAFt k\u1EBFt n\u1ED1i"
+    webRemoteStateDisconnected: "\u0110\xE3 ng\u1EAFt k\u1EBFt n\u1ED1i",
+    /* Tự động lưu trữ */
+    aaTitle: "T\u1EF1 \u0111\u1ED9ng l\u01B0u tr\u1EEF",
+    aaSummary: "L\u01B0u tr\u1EEF chat l\xE2u ng\xE0y kh\xF4ng c\xF3 tin nh\u1EAFn m\u1EDBi",
+    aaIntro: "Chat kh\xF4ng c\xF3 tin nh\u1EAFn m\u1EDBi trong s\u1ED1 ng\xE0y \u0111\xE3 \u0111\u1EB7t s\u1EBD \u0111\u01B0\u1EE3c \u1EA9n kh\u1ECFi danh s\xE1ch phi\xEAn. L\u01B0u tr\u1EEF v\u1EABn gi\u1EEF nguy\xEAn h\u1ED9i tho\u1EA1i; kh\xF4i ph\u1EE5c b\u1EB1ng b\u1ED9 l\u1ECDc l\u01B0u tr\u1EEF \u1EDF thanh b\xEAn.",
+    aaEnabled: "T\u1EF1 \u0111\u1ED9ng l\u01B0u tr\u1EEF chat kh\xF4ng t\u01B0\u01A1ng t\xE1c",
+    aaInactiveDays: "S\u1ED1 ng\xE0y kh\xF4ng c\xF3 tin nh\u1EAFn",
+    aaInactiveDaysHint: "0 l\xE0 t\u1EAFt quy t\u1EAFc tu\u1ED5i; s\u1EBD kh\xF4ng l\u01B0u tr\u1EEF g\xEC cho t\u1EDBi khi \u0111\u1EB7t l\u1EA1i l\u1EDBn h\u01A1n 0.",
+    aaCheckMinutes: "Ki\u1EC3m tra m\u1ED7i (ph\xFAt)",
+    aaCheckMinutesHint: "L\u1ECBch ch\u1EC9 ch\u1EA1y khi Harness \u0111ang m\u1EDF; m\u1EDF l\u1EA1i DSH s\u1EBD ki\u1EC3m tra b\xF9 ngay sau khi kh\u1EDFi \u0111\u1ED9ng.",
+    aaSkipActive: "Gi\u1EEF chat \u0111ang m\u1EDF trong c\u1EEDa s\u1ED5 n\xE0y",
+    aaBlank: "L\u01B0u tr\u1EEF c\u1EA3 chat ch\u01B0a t\u1EEBng c\xF3 tin nh\u1EAFn",
+    aaRunning: "L\u01B0u tr\u1EEF c\u1EA3 khi \u0111ang c\xF3 vi\u1EC7c ch\u1EA1y (d\u1EEBng vi\u1EC7c \u0111\xF3)",
+    aaDryRun: "Ch\u1EA1y th\u1EED: ch\u1EC9 b\xE1o c\xE1o s\u1EBD l\u01B0u tr\u1EEF g\xEC, kh\xF4ng l\u01B0u tr\u1EEF th\u1EADt",
+    aaSave: "L\u01B0u",
+    aaSaving: "\u0110ang l\u01B0u\u2026",
+    aaSaved: "\u0110\xE3 l\u01B0u. L\u01B0\u1EE3t ki\u1EC3m tra k\u1EBF ti\u1EBFp d\xF9ng quy t\u1EAFc n\xE0y.",
+    aaSaveFailed: "Host t\u1EEB ch\u1ED1i thay \u0111\u1ED5i",
+    aaRunNow: "Ch\u1EA1y ngay",
+    aaRunningNow: "\u0110ang ch\u1EA1y\u2026",
+    aaRunDone: "L\u01B0\u1EE3t ch\u1EA1y xong: l\u01B0u tr\u1EEF {archived}, l\u1ED7i {failed}.",
+    aaRunFailed: "L\u01B0\u1EE3t ch\u1EA1y th\u1EA5t b\u1EA1i",
+    aaNever: "Ch\u01B0a c\xF3 l\u01B0\u1EE3t ki\u1EC3m tra n\xE0o.",
+    aaLast: "L\u01B0\u1EE3t tr\u01B0\u1EDBc: qu\xE9t {scanned}, l\u01B0u tr\u1EEF {archived}, gi\u1EEF {active} v\xEC c\xF2n vi\u1EC7c ch\u1EA1y, l\u1ED7i {failed}.",
+    aaLastDry: "L\u01B0\u1EE3t ch\u1EA1y th\u1EED tr\u01B0\u1EDBc: qu\xE9t {scanned}, s\u1EBD l\u01B0u tr\u1EEF {due}.",
+    aaOff: "T\u1EF1 \u0111\u1ED9ng l\u01B0u tr\u1EEF \u0111ang t\u1EAFt n\xEAn kh\xF4ng c\xF3 l\u01B0\u1EE3t ch\u1EA1y n\xE0o.",
+    aaOffHint: "B\u1EADt c\xF4ng t\u1EAFc r\u1ED3i l\u01B0u \u0111\u1EC3 b\u1EAFt \u0111\u1EA7u l\u01B0u tr\u1EEF.",
+    aaRestoreHint: 'Chat \u0111\u01B0\u1EE3c ghim th\xEC kh\xF4ng bao gi\u1EDD b\u1ECB l\u01B0u tr\u1EEF; khi t\u1EAFt c\xF4ng t\u1EAFc "\u0111ang c\xF3 vi\u1EC7c ch\u1EA1y", chat c\xF2n vi\u1EC7c c\u0169ng \u0111\u01B0\u1EE3c gi\u1EEF l\u1EA1i. Kh\xF4i ph\u1EE5c chat \u0111\xE3 l\u01B0u tr\u1EEF b\u1EB1ng b\u1ED9 l\u1ECDc l\u01B0u tr\u1EEF \u1EDF thanh b\xEAn.',
+    aaLoadFailed: "Kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c thi\u1EBFt l\u1EADp t\u1EF1 \u0111\u1ED9ng l\u01B0u tr\u1EEF"
   };
   var dictionaries = { en, vi };
 
   // src/client/api.ts
   var GIT_PATH = "api/personal-hub-git";
   var WEB_REMOTE_PATH = "api/personal-hub-web-remote";
+  var AUTO_ARCHIVE_PATH = "api/personal-hub-auto-archive";
   var GitRequestError = class extends Error {
     code;
     details;
@@ -1015,6 +1072,13 @@
       pair: (payload) => call("pair", payload),
       pairCancel: (payload) => call("pairCancel", payload),
       unpair: (payload) => call("unpair", payload)
+    };
+  }
+  function createAutoArchiveApi(call = createCaller(AUTO_ARCHIVE_PATH)) {
+    return {
+      state: (payload) => call("state", payload),
+      settingsSet: (payload) => call("settingsSet", payload),
+      runNow: (payload) => call("runNow", payload)
     };
   }
   function createGitApi(call) {
@@ -2630,6 +2694,235 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         props.last === null ? t("cleanupNever") : t("cleanupLast", { removed: props.last.removed.length, kept: props.last.kept.length })
       ),
       cleanup.enabled ? null : h("p", { className: "ph-hint" }, t("cleanupOff"))
+    );
+  }
+
+  // src/client/auto-archive.tsx
+  var EMPTY_SETTINGS = {
+    enabled: true,
+    inactiveDays: 2,
+    checkMs: 36e5,
+    skipActive: true,
+    archiveRunning: false,
+    archiveBlank: true,
+    dryRun: false,
+    maxPerPass: 50
+  };
+  var MAX_DAYS = 3650;
+  var MIN_CHECK_MS = 6e4;
+  var MAX_CHECK_MS = 864e5;
+  function clamp(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    return Math.min(max, Math.max(min, Math.round(value)));
+  }
+  function AutoArchiveCard(props) {
+    const { api, t } = props;
+    const [settings, setSettings] = useState(void 0);
+    const [last, setLast] = useState(null);
+    const [writable, setWritable] = useState(false);
+    const [status, setStatus] = useState("loading");
+    const [error, setError] = useState("");
+    const [notice, setNotice] = useState("");
+    const [running, setRunning] = useState(false);
+    useEffect(() => {
+      let alive = true;
+      api.state({}).then((state) => {
+        if (!alive) return;
+        setSettings(state.settings);
+        setLast(state.last);
+        setWritable(state.writable);
+        setStatus("ready");
+      }).catch((failure) => {
+        if (!alive) return;
+        setError(`${t("aaLoadFailed")}: ${messageOf(failure)}`);
+        setStatus("error");
+      });
+      return () => {
+        alive = false;
+      };
+    }, [api, t]);
+    if (props.view === "summary") return h("span", null, t("aaSummary"));
+    const value = settings ?? EMPTY_SETTINGS;
+    const update = (patch) => {
+      setSettings((current) => ({ ...current ?? EMPTY_SETTINGS, ...patch }));
+    };
+    const save = async () => {
+      setStatus("saving");
+      setError("");
+      setNotice("");
+      try {
+        const answer = await api.settingsSet(value);
+        setSettings(answer.settings);
+        setStatus("ready");
+        setNotice(t("aaSaved"));
+      } catch (failure) {
+        setStatus("ready");
+        setError(`${t("aaSaveFailed")}: ${messageOf(failure)}`);
+      }
+    };
+    const run = async () => {
+      setRunning(true);
+      setError("");
+      setNotice("");
+      try {
+        const answer = await api.runNow({});
+        setLast(answer.last);
+        if (!answer.ran) setNotice(t("aaOff"));
+        else if (answer.last !== null) {
+          setNotice(t("aaRunDone", {
+            archived: answer.last.archivedCount,
+            failed: answer.last.failedCount
+          }));
+        }
+      } catch (failure) {
+        setError(`${t("aaRunFailed")}: ${messageOf(failure)}`);
+      } finally {
+        setRunning(false);
+      }
+    };
+    if (status === "loading") return h("p", { className: "ph-hint" }, t("gitLoading"));
+    return h(AutoArchiveForm, {
+      t,
+      settings: value,
+      last,
+      writable,
+      status,
+      error,
+      notice,
+      running,
+      onChange: update,
+      onSave: () => void save(),
+      onRun: () => void run()
+    });
+  }
+  function AutoArchiveForm(props) {
+    const { t, settings } = props;
+    const disabled = !props.writable || props.status === "saving";
+    const minutes = Math.round(settings.checkMs / 6e4);
+    return h(
+      "div",
+      { "data-personal-hub-auto-archive": true, className: "ph-setting" },
+      h("div", { className: "ph-setting-head" }, t("aaTitle")),
+      h("p", { className: "ph-hint" }, t("aaIntro")),
+      h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.enabled,
+          disabled,
+          onChange: (event) => props.onChange({ enabled: event.target.checked })
+        }),
+        h("span", null, t("aaEnabled"))
+      ),
+      h(
+        "label",
+        { className: "ph-field" },
+        h("span", { className: "ph-field-label" }, t("aaInactiveDays")),
+        h("input", {
+          className: "ph-input",
+          type: "number",
+          min: 0,
+          max: MAX_DAYS,
+          value: settings.inactiveDays,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({
+            inactiveDays: clamp(Number(event.target.value), 0, MAX_DAYS)
+          })
+        }),
+        h("span", { className: "ph-hint" }, t("aaInactiveDaysHint"))
+      ),
+      h(
+        "label",
+        { className: "ph-field" },
+        h("span", { className: "ph-field-label" }, t("aaCheckMinutes")),
+        h("input", {
+          className: "ph-input",
+          type: "number",
+          min: 1,
+          max: MAX_CHECK_MS / 6e4,
+          value: minutes,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({
+            checkMs: clamp(Number(event.target.value) * 6e4, MIN_CHECK_MS, MAX_CHECK_MS)
+          })
+        }),
+        h("span", { className: "ph-hint" }, t("aaCheckMinutesHint"))
+      ),
+      h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.skipActive,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({ skipActive: event.target.checked })
+        }),
+        h("span", null, t("aaSkipActive"))
+      ),
+      h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.archiveBlank,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({ archiveBlank: event.target.checked })
+        }),
+        h("span", null, t("aaBlank"))
+      ),
+      h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.archiveRunning,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({ archiveRunning: event.target.checked })
+        }),
+        h("span", null, t("aaRunning"))
+      ),
+      h(
+        "label",
+        { className: "ph-check-row" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.dryRun,
+          disabled: disabled || !settings.enabled,
+          onChange: (event) => props.onChange({ dryRun: event.target.checked })
+        }),
+        h("span", null, t("aaDryRun"))
+      ),
+      h(
+        "div",
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        h("button", {
+          type: "button",
+          className: "ph-primary",
+          disabled,
+          onClick: props.onSave
+        }, props.status === "saving" ? t("aaSaving") : t("aaSave")),
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: disabled || !settings.enabled || props.running,
+          onClick: props.onRun
+        }, props.running ? t("aaRunningNow") : t("aaRunNow"))
+      ),
+      h(
+        "p",
+        { className: "ph-hint" },
+        props.last === null ? t("aaNever") : props.last.dryRun ? t("aaLastDry", { scanned: props.last.scanned, due: props.last.due }) : t("aaLast", {
+          scanned: props.last.scanned,
+          archived: props.last.archivedCount,
+          failed: props.last.failedCount,
+          active: props.last.activeCount
+        })
+      ),
+      settings.enabled ? null : h("p", { className: "ph-hint" }, t("aaOffHint")),
+      h("p", { className: "ph-hint" }, t("aaRestoreHint")),
+      props.error.length > 0 ? h("p", { className: "ph-error-text" }, props.error) : null,
+      props.notice.length > 0 ? h("p", { className: "ph-ok" }, props.notice) : null
     );
   }
 
@@ -11077,6 +11370,8 @@ ${repo.root}` }, repo.name),
         WebRemoteCard,
         WebRemoteForm,
         MergeSettingsCard,
+        AutoArchiveCard,
+        AutoArchiveForm,
         WorktreeHero,
         WorktreeOption,
         WorktreeDock,
@@ -11115,6 +11410,7 @@ ${repo.root}` }, repo.name),
         }, "personal-hub: credential watch");
         const api = createGitApi(createGitCaller());
         const webRemote = createWebRemoteApi();
+        const autoArchive = createAutoArchiveApi();
         ctx.effect(() => installStyles(), "personal-hub: styles");
         ctx.effect(
           () => ctx.slots.inject("plugins.row.config", () => registerSlot(ctx, {
@@ -11131,7 +11427,8 @@ ${repo.root}` }, repo.name),
               save: controller.save,
               clear: controller.clear,
               api,
-              webRemote
+              webRemote,
+              autoArchive
             })
           }, PersonalHubCard)),
           "personal-hub: row config card"
@@ -11232,7 +11529,8 @@ ${repo.root}` }, repo.name),
         { style: { display: "flex", flexDirection: "column", gap: "4px" } },
         h("span", null, t("summary")),
         h("span", { className: "ph-hint" }, t("webRemoteSummary")),
-        h("span", { className: "ph-hint" }, t("gitSettingsSummary"))
+        h("span", { className: "ph-hint" }, t("gitSettingsSummary")),
+        h("span", { className: "ph-hint" }, t("aaSummary"))
       );
     }
     return h(
@@ -11242,7 +11540,9 @@ ${repo.root}` }, repo.name),
       h("div", { style: { borderTop: "1px solid var(--dsw-alias-border-l3)" } }),
       h(WebRemoteCard, { api: props.webRemote, t }),
       h("div", { style: { borderTop: "1px solid var(--dsw-alias-border-l3)" } }),
-      h(MergeSettingsCard, { api: props.api, t })
+      h(MergeSettingsCard, { api: props.api, t }),
+      h("div", { style: { borderTop: "1px solid var(--dsw-alias-border-l3)" } }),
+      h(AutoArchiveCard, { api: props.autoArchive, t })
     );
   }
   function registerSlot(ctx, options, component) {
