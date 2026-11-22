@@ -191,10 +191,27 @@ export interface SlotsService {
   register(options: Record<string, unknown>, component: unknown): Disposer
 }
 
+/** One language a language-pack plugin adds to the language selector. */
+export interface LanguageRegistration {
+  /** Stable BCP 47-style id stored as the locale preference. */
+  id: string
+  /** Display name written in the represented language. */
+  label: string
+  /** Registered language consulted when this language lacks a dictionary key. */
+  fallback: string
+}
+
 /** The `locale` service of the browser context. */
 export interface LocaleService {
   bind(namespace: string): (key: string, values?: Record<string, string | number>) => string
   register(namespace: string, dictionaries: Record<string, Record<string, string>>): Disposer
+  /**
+   * Single-locale form a language pack uses: register one translated
+   * dictionary for an existing namespace.
+   */
+  register(namespace: string, locale: string, dictionary: Record<string, string>): Disposer
+  /** Add one selectable language to the language row and the catalog. */
+  addLanguage(input: LanguageRegistration): Disposer
 }
 
 /** The `remote` service of the browser context. */

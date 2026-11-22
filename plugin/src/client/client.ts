@@ -24,6 +24,7 @@ import { DiffFileSection } from './git/diff-view.tsx'
 import { CommitComposer } from './git/commit-composer.tsx'
 import { WorktreesView, WorktreeRow } from './git/worktrees.tsx'
 import { Markdown } from './git/markdown.tsx'
+import { mountVietnamese } from './vi-language-pack.ts'
 
 /** The `plugins.row.config` key: bundle package name and row id. */
 const ROW_KEY = '@local/personal-hub#personal-hub'
@@ -80,6 +81,11 @@ export function createClient(): ClientModule {
     apply(ctx) {
       const t: Translate = ctx.locale.bind(NS)
       ctx.effect(() => ctx.locale.register(NS, dictionaries), 'personal-hub: dictionaries')
+
+      // Vietnamese is added as a selectable Harness language and every
+      // translated namespace is registered under it. The pack is passive: it
+      // changes nothing until the user selects Tiếng Việt in Settings.
+      mountVietnamese(ctx)
 
       const controller = createController(ctx, t)
       ctx.effect(() => {

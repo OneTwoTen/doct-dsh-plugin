@@ -1,0 +1,55 @@
+{
+  "namespaces": {
+    "common": {
+      "vi": {
+        "ok": "OK",
+        "cancel": "Hủy",
+        "close": "Đóng",
+        "copy": "Sao chép",
+        "copied": "Đã sao chép",
+        "codeBlock.title": "Khối mã",
+        "codeBlock.wrap": "Bọc dòng",
+        "codeBlock.unwrap": "Không bọc dòng",
+        "copy.failed": "Sao chép thất bại",
+        "copy.value": "Sao chép giá trị",
+        "copy.json": "Sao chép JSON",
+        "copy.path": "Sao chép đường dẫn thuộc tính",
+        "copy.prettyJson": "Sao chép JSON định dạng đẹp",
+        "copy.compactJson": "Sao chép JSON thu gọn",
+        "copy.optionsHint": "{action}; nhấp chuột phải để xem tùy chọn sao chép",
+        "retry": "Thử lại",
+        "loading": "Đang tải…",
+        "load.failed": "Tải thất bại",
+        "submit": "Gửi",
+        "submitting": "Đang gửi…",
+        "next": "Tiếp",
+        "previous": "Trước",
+        "skip": "Bỏ qua",
+        "delete": "Xóa",
+        "edit": "Sửa",
+        "save": "Lưu",
+        "search": "Tìm kiếm",
+        "more": "Thêm",
+        "collapse": "Thu gọn",
+        "expand": "Mở rộng",
+        "back": "Quay lại",
+        "brand.localBuild": "Bản dựng cục bộ DSH",
+        "workspace.defaultName": "Workspace mặc định",
+        "unknown": "Không rõ",
+        "none": "Không có",
+        "truncated": "Đã cắt ngắn",
+        "json.label": "JSON",
+        "markdown.footnotes": "Chú thích cuối trang",
+        "markdown.truncatedCharacters": "… đã cắt ngắn tại {total} ký tự",
+        "number.thousand": "{value}K",
+        "number.million": "{value}M"
+      }
+    },
+    "contextMenu": {
+      "vi": {
+        "back": "Quay lại",
+        "failed": "Không thể hoàn tất hành động. Hãy thử lại."
+      }
+    }
+  }
+}
