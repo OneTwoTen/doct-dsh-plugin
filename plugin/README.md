@@ -404,6 +404,13 @@ Việc dọn chỉ áp dụng cho **PR đúng nhánh checkout của phiên**. N�
 khi chat rời đi. Một PR đã gộp của nhánh khác (ví dụ nhánh của repo chính mà bảng Git đọc khi
 phiên đang đóng) không bao giờ được gắn vào phiên, nên không thể xoá worktree hay lưu trữ phiên.
 
+Ngoài liên kết do bảng Git tạo, plugin **đối soát** ngay khi nạp và mỗi 5 phút: với từng checkout đã
+ghi, nó đọc nhánh Git thật đang checkout (sửa lại record nếu nhánh bị đổi tên tại chỗ), rồi hỏi máy
+chủ mã nguồn các PR đã gộp trong 7 ngày gần nhất và gắn PR trùng đúng nhánh đó để dọn như trên. Nhờ
+vậy PR mở ngoài bảng Git — hoặc PR mà bảng Git chưa từng thấy — vẫn được dọn sau khi gộp. Nếu
+`git.json` ghi phiên đã lưu trữ nhưng danh sách lưu trữ của DSH không còn (một lần ghi bị mất),
+plugin lưu trữ lại; khôi phục phiên bằng tay sẽ xoá dấu đã lưu trữ nên lần đối soát sau không ẩn lại.
+
 ### Nguồn dữ liệu
 
 Git chạy qua dịch vụ `subprocess` của DSH (có dự phòng `child_process`), với timeout và giới hạn

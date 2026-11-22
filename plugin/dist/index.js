@@ -4002,6 +4002,63 @@ function mayAdoptBranchPull(facts) {
   if (state !== "open" && state !== "draft") return false;
   return checkoutOwnsBinding(facts, facts.checkout);
 }
+var ARCHIVE_REPAIR_WINDOW_MS = 30 * 24 * 60 * 60 * 1e3;
+function lostArchives(pulls, archivedIds, now, windowMs = ARCHIVE_REPAIR_WINDOW_MS) {
+  const archived = archivedIds instanceof Set ? archivedIds : new Set(archivedIds);
+  const lost = [];
+  for (const [sessionId, binding] of Object.entries(pulls ?? {})) {
+    if (binding === null || typeof binding !== "object") continue;
+    if (binding.state !== "merged" || binding.archived !== true) continue;
+    if (archived.has(sessionId)) continue;
+    const cleanedAt = Number(binding.cleanedAt ?? 0);
+    if (cleanedAt <= 0 || now - cleanedAt > windowMs) continue;
+    lost.push(sessionId);
+  }
+  return lost;
+}
+async function reconcileCheckouts(options) {
+  const { store, logger, currentBranch, mergedPulls, track } = options;
+  await store.load();
+  const byRoot = /* @__PURE__ */ new Map();
+  for (const [sessionId, raw] of Object.entries(store.state.worktrees ?? {})) {
+    if (raw === null || typeof raw !== "object") continue;
+    const record2 = raw;
+    const path = typeof record2.path === "string" ? record2.path : "";
+    const repositoryRoot = typeof record2.repositoryRoot === "string" ? record2.repositoryRoot : "";
+    if (path.length === 0 || repositoryRoot.length === 0) continue;
+    const branch = await currentBranch(path).catch(() => null);
+    if (branch === null || branch.length === 0) continue;
+    if (branch !== String(record2.branch ?? "")) {
+      await store.update((current) => {
+        const entry = current.worktrees?.[sessionId];
+        if (entry !== void 0) entry.branch = branch;
+      });
+      logger.info("git: the checkout of %s is on %s; updating its record", sessionId, branch);
+    }
+    const group = byRoot.get(repositoryRoot) ?? [];
+    group.push({ sessionId, branch });
+    byRoot.set(repositoryRoot, group);
+  }
+  let bound = 0;
+  for (const [repositoryRoot, entries] of byRoot) {
+    const pulls = await mergedPulls(repositoryRoot).catch(() => []);
+    if (pulls.length === 0) continue;
+    for (const entry of entries) {
+      const pull = pulls.find((candidate) => candidate.branch === entry.branch);
+      if (pull === void 0) continue;
+      await track(entry.sessionId, {
+        root: repositoryRoot,
+        remote: pull.remote,
+        number: pull.number,
+        url: pull.url,
+        branch: entry.branch,
+        base: pull.base ?? ""
+      });
+      bound += 1;
+    }
+  }
+  return bound;
+}
 function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.now }) {
   const merged = config.merged ?? {};
   const interval = Math.max(MIN_CHECK_MS, Number(merged.checkMs) || 6e4);
@@ -4608,6 +4665,9 @@ var GITLAB_CREDENTIAL_REF = "DSH_GITLAB_TOKEN";
 var ACTION_RETENTION_MS = 5 * 60 * 1e3;
 var ACTION_OUTPUT_LINES = 40;
 var COUNT_PAGE = 50;
+var RECONCILE_INTERVAL_MS = 5 * 60 * 1e3;
+var RECONCILE_MERGE_AGE_MS = 7 * 24 * 60 * 60 * 1e3;
+var RECONCILE_PULL_LIMIT = 50;
 function mountGit(ctx, config, deps) {
   const logger = deps.logger;
   const connection = ctx.get("connection");
@@ -4773,6 +4833,53 @@ function mountRoutes(ctx, connection, config, deps) {
       }
     }
   });
+  async function checkedOutBranch(path) {
+    const result = await runner.run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: path,
+      maxBytes: 64 * 1024
+    }).catch(() => void 0);
+    if (result === void 0 || result.code !== 0) return null;
+    const branch = String(result.stdout ?? "").trim();
+    return branch.length === 0 || branch === "HEAD" ? null : branch;
+  }
+  async function recentlyMergedPulls(root) {
+    const read = await readOverview(runner, { root, config });
+    const remote = read.repo.remote;
+    if (remote === null || remote === void 0) return [];
+    const answer = await forge.listPulls({
+      root,
+      remote,
+      state: "merged",
+      limit: RECONCILE_PULL_LIMIT,
+      refresh: true
+    });
+    const cutoff = Date.now() - RECONCILE_MERGE_AGE_MS;
+    return (answer.pulls ?? []).filter((pull) => String(pull.state) === "merged").filter((pull) => pull.mergedAt !== null && Date.parse(String(pull.mergedAt)) >= cutoff).map((pull) => ({ number: pull.number, url: pull.url, branch: pull.branch, base: pull.base, remote }));
+  }
+  async function reconcileMergedWork() {
+    if (config.merged.enabled !== true) return;
+    const registry = ctx.get("workspaceRegistry");
+    const value = await state();
+    for (const sessionId of lostArchives(value.pulls, registry?.archivedSessionIds ?? [], Date.now())) {
+      try {
+        await registry?.archiveSession?.(sessionId, { stopActivity: true });
+        logger.info("git: archived %s again: the archive set had lost it", sessionId);
+      } catch (error) {
+        logger.warn("git: cannot archive %s again: %s", sessionId, messageOf5(error));
+      }
+    }
+    const bound = await reconcileCheckouts({
+      store,
+      logger,
+      currentBranch: checkedOutBranch,
+      mergedPulls: recentlyMergedPulls,
+      track: (sessionId, record2) => watcher.track(sessionId, record2)
+    });
+    if (bound > 0) {
+      logger.info("git: settling %d merged change request(s) found in recorded checkouts", bound);
+      await watcher.runOnce();
+    }
+  }
   const cleanup = createWorktreeCleanup({
     runner,
     config,
@@ -5392,6 +5499,14 @@ function mountRoutes(ctx, connection, config, deps) {
         }).catch(() => null);
       }
       const read = await readOverview(runner, { root, config, signal });
+      if (stored !== null && typeof stored.path === "string" && pathKey(stored.path) === pathKey(root) && read.repo.branch !== null && String(stored.branch ?? "") !== read.repo.branch) {
+        const branch = read.repo.branch;
+        await store.update((current) => {
+          const entry = current.worktrees?.[sessionId];
+          if (entry !== void 0) entry.branch = branch;
+        });
+        stored.branch = branch;
+      }
       const value = {
         ...read,
         forge: await describeForge(read.repo.remote, root, signal),
@@ -6534,6 +6649,31 @@ ${result.stderr ?? ""}`;
   }
   watcher.start();
   cleanup.start();
+  const reconciling = () => {
+    void reconcileMergedWork().catch((error) => {
+      logger.warn("git: checkout reconciliation failed: %s", messageOf5(error));
+    });
+  };
+  reconciling();
+  const reconcileTimer = setInterval(reconciling, RECONCILE_INTERVAL_MS);
+  reconcileTimer.unref?.();
+  let stopUnarchive;
+  if (typeof ctx.on === "function") {
+    try {
+      stopUnarchive = ctx.on("workspace/session-unarchiving", ((request) => {
+        const sessionId = String(request?.sessionId ?? "");
+        if (sessionId.length === 0) return;
+        void store.update((current) => {
+          const binding = current.pulls?.[sessionId];
+          if (binding === void 0) return;
+          binding.archived = void 0;
+          binding.archiveError = void 0;
+        }).catch(() => void 0);
+      }));
+    } catch (error) {
+      logger.warn("git: cannot watch session unarchive: %s", messageOf5(error));
+    }
+  }
   let stopWorktrees;
   if (typeof ctx.on === "function" && (config.worktree.enabled === true || config.worktree.naming === "semantic")) {
     try {
@@ -6557,6 +6697,13 @@ ${result.stderr ?? ""}`;
   return () => {
     watcher.stop();
     cleanup.stop();
+    clearInterval(reconcileTimer);
+    if (typeof stopUnarchive === "function") {
+      try {
+        stopUnarchive();
+      } catch {
+      }
+    }
     for (const progress of actions.values()) {
       try {
         progress.controller.abort();

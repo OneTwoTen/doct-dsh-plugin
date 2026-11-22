@@ -57,7 +57,7 @@ import type { ForgeRemote } from '../lib/forge.ts'
 import { draftCommitMessage } from '../lib/commit-draft.ts'
 import { draftChangeRequest as draftModelChangeRequest, offlineDraft } from '../lib/pr-draft.ts'
 import type { ChangeRequestFacts } from '../lib/pr-draft.ts'
-import { createMergeWatcher, mayAdoptBranchPull } from '../lib/merge-watch.ts'
+import { createMergeWatcher, lostArchives, mayAdoptBranchPull, reconcileCheckouts } from '../lib/merge-watch.ts'
 import type { MergeStoreState } from '../lib/merge-watch.ts'
 import { pluginDataDir } from '../lib/paths.ts'
 import { jsonResponse, readJsonPayload } from '../lib/host-http.ts'
@@ -134,6 +134,18 @@ const ACTION_RETENTION_MS = 5 * 60 * 1000
 const ACTION_OUTPUT_LINES = 40
 /** The page size the tab counters read from the code host. */
 const COUNT_PAGE = 50
+/**
+ * How often recorded checkouts are compared with the code host again.
+ *
+ * A change request opened outside the panel — or one whose branch was renamed
+ * after its checkout was recorded — leaves no binding, so the merge watcher
+ * never polls it. This pass notices the merge and settles the chat anyway.
+ */
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000
+/** Only a merge this recent is settled by reconciliation; older history is left to the cleanup policy. */
+const RECONCILE_MERGE_AGE_MS = 7 * 24 * 60 * 60 * 1000
+/** How many merged change requests one repository is asked for during reconciliation. */
+const RECONCILE_PULL_LIMIT = 50
 
 /** The durable state this feature keeps between restarts. */
 type GitState = MergeStoreState & {
@@ -421,6 +433,83 @@ function mountRoutes(
       },
     },
   })
+
+  /** The branch Git has checked out in one directory, or null when it cannot answer. */
+  async function checkedOutBranch(path: string): Promise<string | null> {
+    const result = await runner.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: path,
+      maxBytes: 64 * 1024,
+    }).catch(() => undefined)
+    if (result === undefined || result.code !== 0) return null
+    const branch = String(result.stdout ?? '').trim()
+    return branch.length === 0 || branch === 'HEAD' ? null : branch
+  }
+
+  /**
+   * Recently merged change requests of one repository, with the remote that answers for it.
+   * @param root repository root.
+   */
+  async function recentlyMergedPulls(root: string): Promise<Array<{
+    number: number
+    url: string
+    branch: string
+    base?: string
+    remote?: unknown
+  }>> {
+    const read = await readOverview(runner, { root, config })
+    const remote = read.repo.remote
+    if (remote === null || remote === undefined) return []
+    const answer = await forge.listPulls({
+      root,
+      remote: remote as unknown as ForgeRemote,
+      state: 'merged',
+      limit: RECONCILE_PULL_LIMIT,
+      refresh: true,
+    })
+    const cutoff = Date.now() - RECONCILE_MERGE_AGE_MS
+    return (answer.pulls ?? [])
+      .filter((pull) => String(pull.state) === 'merged')
+      .filter((pull) => pull.mergedAt !== null && Date.parse(String(pull.mergedAt)) >= cutoff)
+      .map((pull) => ({ number: pull.number, url: pull.url, branch: pull.branch, base: pull.base, remote }))
+  }
+
+  /**
+   * Settle merged work nobody is watching.
+   *
+   * Two things can leave a merged chat visible. A record can claim its Session
+   * was archived while the registry's archive set lost it, which a settled
+   * binding never notices; and a checkout can carry a merged change request
+   * that was never bound because the panel never saw it or its branch was
+   * renamed. Both are repaired from evidence the plugin already owns — the
+   * durable archive set and the branch Git really has checked out.
+   */
+  async function reconcileMergedWork(): Promise<void> {
+    if (config.merged.enabled !== true) return
+    const registry = ctx.get<{
+      archivedSessionIds?: readonly string[]
+      archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
+    }>('workspaceRegistry')
+    const value = await state()
+    for (const sessionId of lostArchives(value.pulls, registry?.archivedSessionIds ?? [], Date.now())) {
+      try {
+        await registry?.archiveSession?.(sessionId, { stopActivity: true })
+        logger.info('git: archived %s again: the archive set had lost it', sessionId)
+      } catch (error) {
+        logger.warn('git: cannot archive %s again: %s', sessionId, messageOf(error))
+      }
+    }
+    const bound = await reconcileCheckouts({
+      store,
+      logger,
+      currentBranch: checkedOutBranch,
+      mergedPulls: recentlyMergedPulls,
+      track: (sessionId, record) => watcher.track(sessionId, record),
+    })
+    if (bound > 0) {
+      logger.info('git: settling %d merged change request(s) found in recorded checkouts', bound)
+      await watcher.runOnce()
+    }
+  }
 
   const cleanup = createWorktreeCleanup({
     runner,
@@ -1285,6 +1374,22 @@ function mountRoutes(
         }).catch(() => null)
       }
       const read = await readOverview(runner, { root, config, signal })
+      // A checkout whose branch was renamed in place keeps a stale record; the
+      // panel must show and adopt by the branch Git really has.
+      if (
+        stored !== null
+        && typeof stored.path === 'string'
+        && pathKey(stored.path) === pathKey(root)
+        && read.repo.branch !== null
+        && String(stored.branch ?? '') !== read.repo.branch
+      ) {
+        const branch = read.repo.branch
+        await store.update((current) => {
+          const entry = current.worktrees?.[sessionId]
+          if (entry !== undefined) entry.branch = branch
+        })
+        stored.branch = branch
+      }
       const value: GitOverview = {
         ...read,
         forge: await describeForge(read.repo.remote, root, signal),
@@ -2574,6 +2679,38 @@ function mountRoutes(
   watcher.start()
   cleanup.start()
 
+  // Settle what happened while nobody watched — a merged request that was never
+  // bound, or an archive the registry's set lost — then keep checking, because a
+  // request merged outside the panel writes no binding for the watcher to poll.
+  const reconciling = (): void => {
+    void reconcileMergedWork().catch((error) => {
+      logger.warn('git: checkout reconciliation failed: %s', messageOf(error))
+    })
+  }
+  reconciling()
+  const reconcileTimer = setInterval(reconciling, RECONCILE_INTERVAL_MS)
+  reconcileTimer.unref?.()
+
+  // A user who unarchives a merged chat means it: clearing the record's flag
+  // stops the next reconciliation from archiving the chat again.
+  let stopUnarchive: (() => void) | undefined
+  if (typeof ctx.on === 'function') {
+    try {
+      stopUnarchive = ctx.on('workspace/session-unarchiving' as never, ((request: { sessionId?: string }) => {
+        const sessionId = String(request?.sessionId ?? '')
+        if (sessionId.length === 0) return
+        void store.update((current) => {
+          const binding = current.pulls?.[sessionId]
+          if (binding === undefined) return
+          binding.archived = undefined
+          binding.archiveError = undefined
+        }).catch(() => undefined)
+      }) as never)
+    } catch (error) {
+      logger.warn('git: cannot watch session unarchive: %s', messageOf(error))
+    }
+  }
+
   // The first message both prepares the Session's checkout and lets its branch
   // be named after the task. The hold has to be claimed synchronously, so this
   // listener starts no work of its own before `holdForWorktree` decides.
@@ -2603,6 +2740,14 @@ function mountRoutes(
   return () => {
     watcher.stop()
     cleanup.stop()
+    clearInterval(reconcileTimer)
+    if (typeof stopUnarchive === 'function') {
+      try {
+        stopUnarchive()
+      } catch {
+        // The event already detached.
+      }
+    }
     for (const progress of actions.values()) {
       try {
         progress.controller.abort()

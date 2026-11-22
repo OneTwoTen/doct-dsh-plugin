@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { createMergeWatcher, mayAdoptBranchPull, mergedCleanup } from '../src/lib/merge-watch.ts'
+import { createMergeWatcher, lostArchives, mayAdoptBranchPull, mergedCleanup, reconcileCheckouts } from '../src/lib/merge-watch.ts'
 
 const quietLogger = { info: () => {}, warn: () => {}, error: () => {} }
 
@@ -334,4 +334,66 @@ test('only an open request of the Session own checkout is adopted', () => {
   assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, branch: 't3/better-auth-cutover' }), false)
   assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, root: 'C:/elsewhere' }), false)
   assert.equal(mayAdoptBranchPull({ ...base, pull: { state: 'open' }, checkout: null }), false)
+})
+
+test('only a lost archive of a recent merge is repaired', () => {
+  const now = 1_800_000_000_000
+  const day = 24 * 60 * 60 * 1000
+  const pulls = {
+    'session-recent': { state: 'merged', archived: true, cleanedAt: now - 1000 },
+    'session-old': { state: 'merged', archived: true, cleanedAt: now - 40 * day },
+    'session-kept': { state: 'merged', archived: true, cleanedAt: now - 1000 },
+    'session-open': { state: 'open', archived: true, cleanedAt: now - 1000 },
+    'session-unsettled': { state: 'merged', cleanedAt: now - 1000 },
+  }
+
+  assert.deepEqual(lostArchives(pulls, new Set(['session-kept']), now), ['session-recent'])
+  // A record without a settlement time is old history, not a lost write.
+  assert.deepEqual(lostArchives({ 'session-x': { state: 'merged', archived: true } }, [], now), [])
+})
+
+test('reconciliation binds a merged request whose checkout branch was renamed', async () => {
+  const store = fakeStore({
+    worktrees: {
+      'session-a': { path: 'C:/repo/.agents/worktrees/x', repositoryRoot: 'C:/repo', branch: 'dsh-a-old' },
+      'session-b': { path: 'C:/repo/.agents/worktrees/y', repositoryRoot: 'C:/repo', branch: 'feat/b' },
+    },
+  })
+  const tracked: Array<{ sessionId: string; record: Record<string, unknown> }> = []
+  const bound = await reconcileCheckouts({
+    store,
+    logger: quietLogger,
+    currentBranch: async (path) => (path.endsWith('/x') ? 'feat/a' : 'feat/b'),
+    mergedPulls: async () => [{ number: 12, url: 'https://host/pr/12', branch: 'feat/a', base: 'main', remote: { slug: 'o/r' } }],
+    track: async (sessionId, record) => { tracked.push({ sessionId, record }) },
+  })
+
+  assert.equal(bound, 1)
+  assert.equal(tracked[0]?.sessionId, 'session-a')
+  assert.equal(tracked[0]?.record.branch, 'feat/a')
+  assert.equal(tracked[0]?.record.number, 12)
+  assert.equal((store.state.worktrees['session-a'] as { branch?: string }).branch, 'feat/a')
+})
+
+test('reconciliation leaves checkouts with no matching merge alone', async () => {
+  const store = fakeStore({
+    worktrees: {
+      'session-a': { path: 'C:/repo/.agents/worktrees/x', repositoryRoot: 'C:/repo', branch: 'feat/a' },
+      'session-b': { path: 'C:/repo/.agents/worktrees/y', repositoryRoot: 'C:/repo', branch: 'feat/b' },
+      'session-c': { path: 'C:/repo/.agents/worktrees/z', repositoryRoot: 'C:/repo', branch: 'feat/c' },
+    },
+  })
+  const tracked: string[] = []
+  const bound = await reconcileCheckouts({
+    store,
+    logger: quietLogger,
+    currentBranch: async (path) => (path.endsWith('/z') ? null : path.endsWith('/x') ? 'feat/a-renamed' : 'feat/b'),
+    mergedPulls: async () => [{ number: 12, url: 'u', branch: 'feat/a' }],
+    track: async (sessionId) => { tracked.push(sessionId) },
+  })
+
+  assert.equal(bound, 0)
+  assert.deepEqual(tracked, [])
+  // A branch Git cannot report keeps its recorded name.
+  assert.equal((store.state.worktrees['session-c'] as { branch?: string }).branch, 'feat/c')
 })

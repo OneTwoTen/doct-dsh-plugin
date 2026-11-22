@@ -238,6 +238,126 @@ export function mayAdoptBranchPull(facts: {
   return checkoutOwnsBinding(facts, facts.checkout)
 }
 
+/** How far back a settlement's lost archive may be repaired. */
+export const ARCHIVE_REPAIR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * Merged bindings whose Session the registry's archive set no longer holds.
+ *
+ * A settled record says the plugin archived its Session, but the durable
+ * archive set is what the sidebar reads. When a write was lost, the chat stays
+ * visible forever: a settled binding is never polled again. Repairing means
+ * re-applying a decision already made, so it is bounded to recent settlements —
+ * an old record is history, and re-archiving it would fight a user who
+ * unarchived the chat on purpose.
+ *
+ * @param pulls tracked change requests by Session.
+ * @param archivedIds the registry's archive set.
+ * @param now current time.
+ * @param windowMs how far back a settlement may be repaired.
+ * @returns ids to archive again.
+ */
+export function lostArchives(
+  pulls: Record<string, PullBinding> | undefined,
+  archivedIds: ReadonlySet<string> | readonly string[],
+  now: number,
+  windowMs: number = ARCHIVE_REPAIR_WINDOW_MS,
+): string[] {
+  const archived = archivedIds instanceof Set ? archivedIds : new Set(archivedIds)
+  const lost: string[] = []
+  for (const [sessionId, binding] of Object.entries(pulls ?? {})) {
+    if (binding === null || typeof binding !== 'object') continue
+    if (binding.state !== 'merged' || binding.archived !== true) continue
+    if (archived.has(sessionId)) continue
+    const cleanedAt = Number(binding.cleanedAt ?? 0)
+    // Without a settlement time the record is history, not a lost write.
+    if (cleanedAt <= 0 || now - cleanedAt > windowMs) continue
+    lost.push(sessionId)
+  }
+  return lost
+}
+
+/** A merged change request reduced to what checkout reconciliation matches. */
+export interface ReconciledPull {
+  number: number
+  url: string
+  branch: string
+  base?: string
+  /** The code-host remote that answers for the repository. */
+  remote?: unknown
+}
+
+/** What checkout reconciliation reads and writes. */
+export interface CheckoutReconcileOptions {
+  store: MergeWatcherStore
+  logger: Logger
+  /** The branch Git really has checked out at one path, or null when it cannot answer. */
+  currentBranch(path: string): Promise<string | null>
+  /** Recently merged change requests of one repository. */
+  mergedPulls(root: string): Promise<readonly ReconciledPull[]>
+  /** Bind one change request so the next poll settles it. */
+  track(sessionId: string, record: Record<string, unknown>): Promise<void>
+}
+
+/**
+ * Bind merged change requests that belong to a recorded checkout but were never tracked.
+ *
+ * A checkout can outlive its change request unnoticed: the request may have
+ * been opened outside the panel, or its branch renamed in place after the
+ * checkout was recorded. No binding was written, so the merge watcher never
+ * polled it and the merged chat stayed in the list. Reconciliation reads the
+ * branch Git really has checked out, repairs a stale record, and binds the
+ * merged request that names it — the ownership proof every other cleanup step
+ * relies on.
+ *
+ * @param options the store, the evidence readers, and the binding sink.
+ * @returns how many change requests were newly bound.
+ */
+export async function reconcileCheckouts(options: CheckoutReconcileOptions): Promise<number> {
+  const { store, logger, currentBranch, mergedPulls, track } = options
+  await store.load()
+  const byRoot = new Map<string, Array<{ sessionId: string; branch: string }>>()
+  for (const [sessionId, raw] of Object.entries(store.state.worktrees ?? {})) {
+    if (raw === null || typeof raw !== 'object') continue
+    const record = raw as { path?: unknown; repositoryRoot?: unknown; branch?: unknown }
+    const path = typeof record.path === 'string' ? record.path : ''
+    const repositoryRoot = typeof record.repositoryRoot === 'string' ? record.repositoryRoot : ''
+    if (path.length === 0 || repositoryRoot.length === 0) continue
+    const branch = await currentBranch(path).catch(() => null)
+    if (branch === null || branch.length === 0) continue
+    if (branch !== String(record.branch ?? '')) {
+      // The checkout's branch was renamed after the record was written.
+      await store.update((current) => {
+        const entry = current.worktrees?.[sessionId] as { branch?: string } | undefined
+        if (entry !== undefined) entry.branch = branch
+      })
+      logger.info('git: the checkout of %s is on %s; updating its record', sessionId, branch)
+    }
+    const group = byRoot.get(repositoryRoot) ?? []
+    group.push({ sessionId, branch })
+    byRoot.set(repositoryRoot, group)
+  }
+  let bound = 0
+  for (const [repositoryRoot, entries] of byRoot) {
+    const pulls = await mergedPulls(repositoryRoot).catch(() => [])
+    if (pulls.length === 0) continue
+    for (const entry of entries) {
+      const pull = pulls.find((candidate) => candidate.branch === entry.branch)
+      if (pull === undefined) continue
+      await track(entry.sessionId, {
+        root: repositoryRoot,
+        remote: pull.remote,
+        number: pull.number,
+        url: pull.url,
+        branch: entry.branch,
+        base: pull.base ?? '',
+      })
+      bound += 1
+    }
+  }
+  return bound
+}
+
 /**
  * Track change requests and settle each one once.
  *
