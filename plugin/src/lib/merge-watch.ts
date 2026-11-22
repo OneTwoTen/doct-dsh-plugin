@@ -16,6 +16,16 @@ import type { MergeSettings } from '../shared/protocol.ts'
 /** Milliseconds a merged check waits before its next poll when nothing settles. */
 const MIN_CHECK_MS = 15000
 
+/**
+ * Failed cleanup passes a merged binding retries before it gives up.
+ *
+ * Archiving a Session whose turn had just started used to fail once and mark
+ * the binding settled, which left the merged chat visible forever. A transient
+ * refusal now keeps the binding open, but a permanent one must not be retried
+ * on every poll for the life of the profile.
+ */
+const SETTLE_RETRY_LIMIT = 5
+
 /** The facts the cleanup decision needs. */
 export interface MergedCleanupFacts {
   hasWorktree?: boolean
@@ -55,6 +65,8 @@ export interface PullBinding {
   worktreeError?: string
   archived?: boolean
   archiveError?: string
+  /** Failed cleanup passes so far, so a broken effect is retried a few times, not forever. */
+  attempts?: number
   /**
    * Why a settled binding did not touch its Session: the tracked change request
    * belongs to another checkout, so nothing may be removed or archived.
@@ -113,6 +125,12 @@ export interface WorktreeRemovalOutcome {
 /** The two effects the watcher applies, supplied by the composition. */
 export interface MergeWatchRuntime {
   removeSessionWorktree(record: unknown, sessionId: string): Promise<WorktreeRemovalOutcome>
+  /**
+   * Archive one merged Session. The runtime stops any work still running for it
+   * (a turn, a job) the way the UI's "stop and archive" action does, because a
+   * merged Session is done by definition. Returns false only when the build
+   * exposes no way to archive.
+   */
   archiveSession(sessionId: string): Promise<boolean>
   /** Whether the Session is standing in that checkout right now, so cleanup waits. */
   isSessionActive?(sessionId: string, record: unknown): boolean
@@ -273,6 +291,20 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
         trackedAt: previous?.trackedAt ?? now(),
         done: false,
         checkedAt: now(),
+        // A different change request starts a new settlement cycle: what the
+        // previous one recorded about archiving this Session must not decide
+        // this one (a stale `archived: true` hid a chat that was later reopened).
+        state: undefined,
+        archived: undefined,
+        archiveError: undefined,
+        worktreeRemoved: undefined,
+        branchDeleted: undefined,
+        worktreeError: undefined,
+        cleanedAt: undefined,
+        mergedUrl: undefined,
+        attempts: undefined,
+        deferred: undefined,
+        skipped: undefined,
       }
     })
   }
@@ -286,8 +318,16 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
       await store.load()
       const pulls = store.state.pulls ?? {}
       for (const [sessionId, record] of Object.entries(pulls)) {
-        if (record === null || typeof record !== 'object' || record.done === true) continue
+        if (record === null || typeof record !== 'object') continue
         try {
+          // A binding settled by an older build may still show its merged chat:
+          // that build archived before stopping the Session's work, so the
+          // registry refused while a turn ran and the error was final. Retrying
+          // here repairs those records instead of leaving them visible.
+          if (record.done === true) {
+            await retrySettledArchive(sessionId, record)
+            continue
+          }
           await settle(sessionId, record)
         } catch (error) {
           logger.warn('git: merge check for %s failed: %s', sessionId, messageOf(error))
@@ -296,6 +336,44 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
     } finally {
       running = false
     }
+  }
+
+  /**
+   * Archive one Session, turning a refusal into a recorded reason.
+   * @param sessionId Session to archive.
+   */
+  async function archiveNow(sessionId: string): Promise<{ archived: boolean; error?: string }> {
+    try {
+      return { archived: (await runtime.archiveSession(sessionId)) === true }
+    } catch (error) {
+      logger.warn('git: could not archive %s: %s', sessionId, messageOf(error))
+      return { archived: false, error: messageOf(error) }
+    }
+  }
+
+  /**
+   * Retry the archive of a record settled by an older build with a refused one.
+   * @param sessionId owning Session.
+   * @param record settled binding, carrying the recorded archive error.
+   */
+  async function retrySettledArchive(sessionId: string, record: PullBinding): Promise<void> {
+    if (record.state !== 'merged') return
+    if (typeof record.archiveError !== 'string') return
+    if (!mergedCleanup(merged, {}).archiveSession) return
+    const attempts = Number(record.attempts) || 0
+    if (attempts >= SETTLE_RETRY_LIMIT) return
+    const result = await archiveNow(sessionId)
+    await store.update((value) => {
+      const entry = value.pulls?.[sessionId]
+      if (entry === undefined) return
+      entry.attempts = attempts + 1
+      entry.checkedAt = now()
+      if (result.archived) {
+        entry.archived = true
+        entry.archiveError = undefined
+      }
+    })
+    if (result.archived) logger.info('git: archived %s after its change request merged', sessionId)
   }
 
   /**
@@ -337,9 +415,32 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
         })
         return
       }
-      if (checkout !== undefined && runtime.isSessionActive?.(sessionId, checkout) === true) {
-        // Removing the checkout under a live Session is exactly the damage this
-        // watcher must not do; the next pass retries once the chat has left it.
+      const action = mergedCleanup(merged, { hasWorktree: checkout !== undefined })
+      // Explicit `undefined` values clear fields left by a failed earlier pass.
+      const outcome: PullBinding = {
+        cleanedAt: now(),
+        mergedUrl: state.url ?? record.url ?? '',
+        attempts: (Number(record.attempts) || 0) + 1,
+        deferred: undefined,
+        skipped: undefined,
+        archiveError: undefined,
+        worktreeError: undefined,
+      }
+      // Archive first: a merged chat is finished work, and the archive is what
+      // stops a still-running turn or job. Older builds archived with an
+      // activity check, so a merge during a turn left the chat in the list.
+      let archived = false
+      if (action.archiveSession) {
+        const result = await archiveNow(sessionId)
+        archived = result.archived
+        if (result.error === undefined) outcome.archived = result.archived
+        else outcome.archiveError = result.error
+      }
+      // Removing the checkout under a live Session is exactly the damage this
+      // watcher must not do. An archived Session no longer works in it, so the
+      // runtime may return that chat to the repository and drop the checkout.
+      const busy = checkout !== undefined && runtime.isSessionActive?.(sessionId, checkout) === true
+      if (busy && !archived) {
         logger.info('git: %s merged but its Session is still in the checkout; cleanup waits', sessionId)
         await store.update((value) => {
           value.pulls ??= {}
@@ -353,8 +454,6 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
         })
         return
       }
-      const action = mergedCleanup(merged, { hasWorktree: checkout !== undefined })
-      const outcome: PullBinding = { cleanedAt: now(), mergedUrl: state.url ?? record.url ?? '' }
       if (action.removeWorktree) {
         try {
           const removed = await runtime.removeSessionWorktree(worktrees[sessionId], sessionId)
@@ -366,17 +465,13 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
           logger.warn('git: could not remove the worktree of %s: %s', sessionId, messageOf(error))
         }
       }
-      if (action.archiveSession) {
-        try {
-          outcome.archived = await runtime.archiveSession(sessionId)
-        } catch (error) {
-          outcome.archiveError = messageOf(error)
-          logger.warn('git: could not archive %s: %s', sessionId, messageOf(error))
-        }
-      }
+      // A refused effect keeps the binding open for the next pass; after a few
+      // passes it settles anyway, so a permanent failure does not poll forever.
+      const failed = outcome.archiveError !== undefined || outcome.worktreeError !== undefined
+      const settled = !failed || (outcome.attempts ?? 0) >= SETTLE_RETRY_LIMIT
       await store.update((value) => {
         value.pulls ??= {}
-        value.pulls[sessionId] = { ...value.pulls[sessionId], ...outcome, state: 'merged', done: true, checkedAt: now() }
+        value.pulls[sessionId] = { ...value.pulls[sessionId], ...outcome, state: 'merged', done: settled, checkedAt: now() }
       })
       return
     }

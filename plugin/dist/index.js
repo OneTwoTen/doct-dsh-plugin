@@ -3968,6 +3968,7 @@ function messageOf3(error) {
 // src/lib/merge-watch.ts
 import { resolve as resolve3 } from "node:path";
 var MIN_CHECK_MS = 15e3;
+var SETTLE_RETRY_LIMIT = 5;
 function mergedCleanup(config, facts = {}) {
   const settings = config ?? {};
   const active = settings.enabled === true;
@@ -4036,7 +4037,21 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
         sessionId,
         trackedAt: previous?.trackedAt ?? now(),
         done: false,
-        checkedAt: now()
+        checkedAt: now(),
+        // A different change request starts a new settlement cycle: what the
+        // previous one recorded about archiving this Session must not decide
+        // this one (a stale `archived: true` hid a chat that was later reopened).
+        state: void 0,
+        archived: void 0,
+        archiveError: void 0,
+        worktreeRemoved: void 0,
+        branchDeleted: void 0,
+        worktreeError: void 0,
+        cleanedAt: void 0,
+        mergedUrl: void 0,
+        attempts: void 0,
+        deferred: void 0,
+        skipped: void 0
       };
     });
   }
@@ -4048,8 +4063,12 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       await store.load();
       const pulls = store.state.pulls ?? {};
       for (const [sessionId, record2] of Object.entries(pulls)) {
-        if (record2 === null || typeof record2 !== "object" || record2.done === true) continue;
+        if (record2 === null || typeof record2 !== "object") continue;
         try {
+          if (record2.done === true) {
+            await retrySettledArchive(sessionId, record2);
+            continue;
+          }
           await settle(sessionId, record2);
         } catch (error) {
           logger.warn("git: merge check for %s failed: %s", sessionId, messageOf4(error));
@@ -4058,6 +4077,33 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     } finally {
       running = false;
     }
+  }
+  async function archiveNow(sessionId) {
+    try {
+      return { archived: await runtime.archiveSession(sessionId) === true };
+    } catch (error) {
+      logger.warn("git: could not archive %s: %s", sessionId, messageOf4(error));
+      return { archived: false, error: messageOf4(error) };
+    }
+  }
+  async function retrySettledArchive(sessionId, record2) {
+    if (record2.state !== "merged") return;
+    if (typeof record2.archiveError !== "string") return;
+    if (!mergedCleanup(merged, {}).archiveSession) return;
+    const attempts = Number(record2.attempts) || 0;
+    if (attempts >= SETTLE_RETRY_LIMIT) return;
+    const result = await archiveNow(sessionId);
+    await store.update((value) => {
+      const entry = value.pulls?.[sessionId];
+      if (entry === void 0) return;
+      entry.attempts = attempts + 1;
+      entry.checkedAt = now();
+      if (result.archived) {
+        entry.archived = true;
+        entry.archiveError = void 0;
+      }
+    });
+    if (result.archived) logger.info("git: archived %s after its change request merged", sessionId);
   }
   async function settle(sessionId, record2) {
     const state = await forge.pullState({
@@ -4090,7 +4136,25 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
         });
         return;
       }
-      if (checkout !== void 0 && runtime.isSessionActive?.(sessionId, checkout) === true) {
+      const action = mergedCleanup(merged, { hasWorktree: checkout !== void 0 });
+      const outcome = {
+        cleanedAt: now(),
+        mergedUrl: state.url ?? record2.url ?? "",
+        attempts: (Number(record2.attempts) || 0) + 1,
+        deferred: void 0,
+        skipped: void 0,
+        archiveError: void 0,
+        worktreeError: void 0
+      };
+      let archived = false;
+      if (action.archiveSession) {
+        const result = await archiveNow(sessionId);
+        archived = result.archived;
+        if (result.error === void 0) outcome.archived = result.archived;
+        else outcome.archiveError = result.error;
+      }
+      const busy = checkout !== void 0 && runtime.isSessionActive?.(sessionId, checkout) === true;
+      if (busy && !archived) {
         logger.info("git: %s merged but its Session is still in the checkout; cleanup waits", sessionId);
         await store.update((value) => {
           value.pulls ??= {};
@@ -4104,8 +4168,6 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
         });
         return;
       }
-      const action = mergedCleanup(merged, { hasWorktree: checkout !== void 0 });
-      const outcome = { cleanedAt: now(), mergedUrl: state.url ?? record2.url ?? "" };
       if (action.removeWorktree) {
         try {
           const removed = await runtime.removeSessionWorktree(worktrees[sessionId], sessionId);
@@ -4117,17 +4179,11 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
           logger.warn("git: could not remove the worktree of %s: %s", sessionId, messageOf4(error));
         }
       }
-      if (action.archiveSession) {
-        try {
-          outcome.archived = await runtime.archiveSession(sessionId);
-        } catch (error) {
-          outcome.archiveError = messageOf4(error);
-          logger.warn("git: could not archive %s: %s", sessionId, messageOf4(error));
-        }
-      }
+      const failed = outcome.archiveError !== void 0 || outcome.worktreeError !== void 0;
+      const settled2 = !failed || (outcome.attempts ?? 0) >= SETTLE_RETRY_LIMIT;
       await store.update((value) => {
         value.pulls ??= {};
-        value.pulls[sessionId] = { ...value.pulls[sessionId], ...outcome, state: "merged", done: true, checkedAt: now() };
+        value.pulls[sessionId] = { ...value.pulls[sessionId], ...outcome, state: "merged", done: settled2, checkedAt: now() };
       });
       return;
     }
@@ -4675,6 +4731,14 @@ function mountRoutes(ctx, connection, config, deps) {
         const target = typeof record2?.path === "string" ? record2.path : "";
         if (target.length === 0) return { removed: false, branchDeleted: false };
         const repoRoot = typeof record2.repositoryRoot === "string" ? record2.repositoryRoot : "";
+        const live = liveSessionDirectory(ctx, sessionId);
+        if (live !== void 0 && isInside(target, live)) {
+          const agent = agentFor(sessionId);
+          const workingDirectory = ctx.get("workingDirectory");
+          if (agent !== void 0 && repoRoot.length > 0 && typeof workingDirectory?.set === "function") {
+            await workingDirectory.set(agent, repoRoot).catch(() => void 0);
+          }
+        }
         const result = await removeWorktree(runner, {
           repoRoot,
           path: target,
@@ -4691,7 +4755,7 @@ function mountRoutes(ctx, connection, config, deps) {
       async archiveSession(sessionId) {
         const registry = ctx.get("workspaceRegistry");
         if (typeof registry?.archiveSession !== "function") return false;
-        await registry.archiveSession(sessionId);
+        await registry.archiveSession(sessionId, { stopActivity: true });
         return true;
       },
       /**

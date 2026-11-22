@@ -58,12 +58,13 @@ test('every cleanup switch is independent and off means off', () => {
 })
 
 /** One watcher over a fixed code-host answer. */
-function makeWatcher({ state, worktrees = {}, config = merged, active = false, pullState }: {
+function makeWatcher({ state, worktrees = {}, config = merged, active = false, pullState, archive }: {
   state: string
   worktrees?: Record<string, unknown>
   config?: typeof merged
   active?: boolean
   pullState?: () => Promise<{ number?: number; state?: string; url?: string }>
+  archive?: () => Promise<boolean>
 }) {
   const store = fakeStore({
     pulls: { 'session-a': { root: 'C:/repo/.agents/worktrees/x', remote: { slug: 'o/r' }, number: 7, url: 'u', branch: 'b', done: false } },
@@ -83,7 +84,7 @@ function makeWatcher({ state, worktrees = {}, config = merged, active = false, p
       },
       async archiveSession(sessionId) {
         effects.archived.push(sessionId)
-        return true
+        return archive === undefined ? true : await archive()
       },
     },
   })
@@ -120,18 +121,98 @@ test('a merged request for another branch never touches the Session checkout', a
   assert.equal(store.state.pulls['session-a'].state, 'merged')
 })
 
-test('a merged request waits while its Session still stands in the checkout', async () => {
+test('a merged change request archives the chat even while its Session is active', async () => {
   const { watcher, store, effects } = makeWatcher({
     state: 'merged',
     active: true,
     worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'b', repositoryRoot: 'C:/repo' } },
   })
   await watcher.runOnce()
+  // Archiving is what stops the running work; the checkout then leaves with it.
+  assert.deepEqual(effects.archived, ['session-a'])
+  assert.equal(effects.removed.length, 1)
+  assert.equal(store.state.pulls['session-a'].done, true)
+  assert.equal(store.state.pulls['session-a'].archived, true)
+})
+
+test('a merged request waits while its Session stays in the checkout when archiving is unavailable', async () => {
+  const { watcher, store, effects } = makeWatcher({
+    state: 'merged',
+    active: true,
+    archive: async () => false,
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'b', repositoryRoot: 'C:/repo' } },
+  })
+  await watcher.runOnce()
   assert.equal(effects.removed.length, 0)
-  assert.equal(effects.archived.length, 0)
+  assert.equal(effects.archived.length, 1)
   assert.equal(store.state.pulls['session-a'].done, false)
   assert.equal(store.state.pulls['session-a'].deferred, 'session-active')
 })
+
+test('a refused archive keeps the binding open and succeeds on a later pass', async () => {
+  let refusals = 1
+  const { watcher, store, effects } = makeWatcher({
+    state: 'merged',
+    archive: async () => {
+      if (refusals > 0) {
+        refusals -= 1
+        throw new Error('the session is active (turn)')
+      }
+      return true
+    },
+    worktrees: { 'session-a': { path: 'C:/repo/.agents/worktrees/x', branch: 'b', repositoryRoot: 'C:/repo' } },
+  })
+  await watcher.runOnce()
+  assert.equal(store.state.pulls['session-a'].done, false)
+  assert.match(String(store.state.pulls['session-a'].archiveError), /active/)
+  await watcher.runOnce()
+  assert.equal(store.state.pulls['session-a'].done, true)
+  assert.equal(store.state.pulls['session-a'].archived, true)
+  assert.equal(store.state.pulls['session-a'].archiveError, undefined)
+  assert.equal(effects.archived.length, 2)
+})
+
+test('a settled record with a refused archive is repaired on the next pass', async () => {
+  const { watcher, store, effects } = makeWatcher({ state: 'merged' })
+  store.state.pulls['session-a'] = {
+    ...store.state.pulls['session-a'],
+    state: 'merged',
+    done: true,
+    archiveError: 'cannot archive session: the session is active (job, turn)',
+  }
+  await watcher.runOnce()
+  assert.deepEqual(effects.archived, ['session-a'])
+  assert.equal(store.state.pulls['session-a'].archived, true)
+  assert.equal(store.state.pulls['session-a'].archiveError, undefined)
+})
+
+test('a settled repair stops after its retry budget', async () => {
+  const { watcher, store, effects } = makeWatcher({ state: 'merged' })
+  store.state.pulls['session-a'] = {
+    ...store.state.pulls['session-a'],
+    state: 'merged',
+    done: true,
+    attempts: 5,
+    archiveError: 'cannot archive session: the session is active (turn)',
+  }
+  await watcher.runOnce()
+  assert.equal(effects.archived.length, 0)
+  assert.equal(store.state.pulls['session-a'].done, true)
+})
+
+test('a permanent archive refusal settles after the retry budget', async () => {
+  const { watcher, store, effects } = makeWatcher({
+    state: 'merged',
+    archive: async () => {
+      throw new Error('cannot archive session: unknown')
+    },
+  })
+  for (let pass = 0; pass < 6; pass += 1) await watcher.runOnce()
+  assert.equal(effects.archived.length, 5)
+  assert.equal(store.state.pulls['session-a'].done, true)
+  assert.match(String(store.state.pulls['session-a'].archiveError), /unknown/)
+})
+
 
 test('a merged change request without a worktree only archives', async () => {
   const { watcher, store, effects } = makeWatcher({ state: 'merged' })
@@ -202,6 +283,23 @@ test('a binding without a number is ignored', async () => {
   const { watcher, store } = makeWatcher({ state: 'open' })
   await watcher.track('session-b', { root: 'C:/repo', number: 0 })
   assert.equal(store.state.pulls['session-b'], undefined)
+})
+
+test('tracking a different change request clears the previous settlement', async () => {
+  const { watcher, store } = makeWatcher({ state: 'open' })
+  store.state.pulls['session-a'] = {
+    ...store.state.pulls['session-a'],
+    state: 'merged',
+    done: true,
+    archived: true,
+    archiveError: 'cannot archive session: the session is active (turn)',
+  }
+  await watcher.track('session-a', { root: 'C:/repo', remote: { slug: 'o/r' }, number: 9, url: 'u9', branch: 'b', base: 'main' })
+  assert.equal(store.state.pulls['session-a'].number, 9)
+  assert.equal(store.state.pulls['session-a'].done, false)
+  assert.equal(store.state.pulls['session-a'].archived, undefined)
+  assert.equal(store.state.pulls['session-a'].archiveError, undefined)
+  assert.equal(store.state.pulls['session-a'].state, undefined)
 })
 
 test('tracking refuses a change request that names another branch', async () => {

@@ -167,7 +167,10 @@ export interface LlmService {
 
 /** The `workspaceRegistry` service. */
 export interface WorkspaceRegistryService {
-  archiveSession?(sessionId: string): Promise<unknown>
+  /** `stopActivity` archives even while a turn or a job still runs. */
+  archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
+  /** The registry-global archive set, when this build exposes it. */
+  archivedSessionIds?: readonly string[]
 }
 
 /** The `sessionController` service: creating a Session for a new chat. */

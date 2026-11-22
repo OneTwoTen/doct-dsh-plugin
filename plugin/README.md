@@ -391,13 +391,17 @@ git:
 ```
 
 Plugin giữ liên kết phiên ↔ pull request trong `git.json` và hỏi máy chủ mã nguồn theo
-`checkMs`. Khi PR **đã gộp**: xoá worktree (và nhánh nếu bật), rồi lưu trữ phiên — phiên biến khỏi
-danh sách đang hoạt động nhưng vẫn khôi phục được. PR **đã đóng** thì ngừng theo dõi mà không dọn.
-Mỗi liên kết chỉ xử lý một lần, nên khởi động lại DSH không lặp lại thao tác. Nếu worktree còn thay
-đổi chưa commit, plugin **không** xoá: nó ghi lý do vào `git.json` và để bạn quyết định.
+`checkMs`. Khi PR **đã gộp**: lưu trữ phiên trước (dừng lượt hoặc job còn chạy, đúng như thao tác
+**Dừng và lưu trữ** trong giao diện), rồi xoá worktree (và nhánh nếu bật) — phiên biến khỏi danh sách
+đang hoạt động nhưng vẫn khôi phục được; nếu phiên còn mở trong checkout thì nó được đưa về repo
+chính trước khi thư mục bị xoá. PR **đã đóng** thì ngừng theo dõi mà không dọn. Một lượt lỗi (ví dụ
+thư mục còn bị khoá trên Windows) được thử lại ở các lượt sau, tối đa 5 lần, thay vì bỏ luôn. Khi
+PR đã gộp mà bản cũ từng không lưu trữ được phiên, lượt kiểm tra kế tiếp tự sửa lại. Nếu worktree còn
+thay đổi chưa commit, plugin **không** xoá: nó ghi lý do vào `git.json` và để bạn quyết định.
 
-Việc dọn chỉ áp dụng cho **PR đúng nhánh checkout của phiên**, và chỉ khi phiên không còn đứng
-trong checkout đó: một PR đã gộp của nhánh khác (ví dụ nhánh của repo chính mà bảng Git đọc khi
+Việc dọn chỉ áp dụng cho **PR đúng nhánh checkout của phiên**. Nếu bản DSH đang dùng không có
+`workspaceRegistry.archiveSession` và phiên còn đứng trong checkout, plugin hoãn việc xoá cho tới
+khi chat rời đi. Một PR đã gộp của nhánh khác (ví dụ nhánh của repo chính mà bảng Git đọc khi
 phiên đang đóng) không bao giờ được gắn vào phiên, nên không thể xoá worktree hay lưu trữ phiên.
 
 ### Nguồn dữ liệu
