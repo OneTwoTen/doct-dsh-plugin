@@ -92,7 +92,7 @@ test('the client module registers the row card, the Git tab type, its body, and 
       return () => {}
     },
   }
-  const locale = { bind: () => (key: string) => key, register: () => () => {} }
+  const locale = { bind: () => (key: string) => key, register: () => () => {}, addLanguage: () => () => {} }
   const gitContext = {
     get: (name: string) => name === 'sidebarRightTabs'
       ? { register: (definition: Record<string, unknown>) => { tabTypes.push(definition); return () => {} } }
@@ -177,7 +177,7 @@ test('the caller posts to the Host route and unwraps the envelope', async () => 
       return () => {}
     },
   }
-  const locale = { bind: () => (key: string) => key, register: () => () => {} }
+  const locale = { bind: () => (key: string) => key, register: () => () => {}, addLanguage: () => () => {} }
   const gitContext = {
     get: (name: string) => name === 'sidebarRightTabs' ? { register: () => () => {} } : name === 'sidebarRight' ? { openTab: () => {} } : undefined,
     slots,

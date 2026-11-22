@@ -20,6 +20,9 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 - **Web Remote** — điều khiển DSH từ điện thoại qua WebChat: plugin nối ra ngoài tới relay, không
   mở port trên máy. Phase 1 (bridge Host + giao thức v1 + thẻ cấu hình/ghép cặp trong DSH), dev
   relay và **relay production bằng Zig (`server/`)** đã có; web client SvelteKit là Phase 3.
+- **Tiếng Việt cho giao diện DSH** — thêm ngôn ngữ `vi` vào Settings → General → Language và đăng
+  ký bản dịch cho 76 namespace giao diện (hơn 4.200 chuỗi). Chọn **Tiếng Việt** là toàn bộ DSH đổi
+  ngôn ngữ ngay; khoá chưa dịch tự rơi về tiếng Anh.
 
 ## Cấu trúc
 
@@ -27,7 +30,7 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
 |---|---|
 | [`plugin/`](plugin/) | Package cài được: `@local/personal-hub` (Host + Client + bundle patch + locale + icon + test); mã TypeScript trong `src/`, sản phẩm build trong `dist/` |
 | [`protocol/`](protocol/) | Giao thức Web Remote v1: schema, fixture dùng chung, đặc tả frame/thao tác/lỗi |
-| [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH, và **dev relay** Web Remote (`tools/dev-relay/`) |
+| [`tools/`](tools/) | Hai script đọc thông tin nội bộ của DSH, **dev relay** Web Remote (`tools/dev-relay/`), và **công cụ gói tiếng Việt** (`tools/vi-locale/`) |
 | [`docs/`](docs/) | Nghiên cứu kiến trúc, đặc tả ghép cặp/xác thực, ADR bố trí repo |
 | [`server/`](server/) | **Relay Web Remote bằng Zig 0.17.1** (Phase 2): SQLite, pairing, token, WebSocket, test e2e |
 | [`deploy/`](deploy/) | Mẫu Caddyfile và systemd unit cho relay — xem [ADR-001](docs/adr-001-repo-layout.md) |
@@ -83,6 +86,11 @@ plugin_manager install_bundle  →  <đường dẫn tuyệt đối>/plugin
 Cài xong, hàng `personal-hub` xuất hiện trong profile và các tính năng tự chạy
 (Telegram ở trạng thái chờ token cho tới khi bạn cấu hình; bảng Git đọc kho mã của phiên đang mở;
 Web Remote chờ `relayUrl`).
+
+Bật tiếng Việt: **Settings → General → Language → Tiếng Việt**. Ngôn ngữ đổi ngay và được lưu cho
+lần mở sau; không cần cấu hình gì thêm. Chi tiết và cách cập nhật bản dịch sau khi nâng cấp DSH:
+[`plugin/README.md`](plugin/README.md#11-tiếng-việt-cho-giao-diện-dsh) và
+[`tools/vi-locale/README.md`](tools/vi-locale/README.md).
 
 ## Cấu hình token
 

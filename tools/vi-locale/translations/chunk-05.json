@@ -1,0 +1,50 @@
+{
+  "namespaces": {
+    "feedback": {
+      "vi": {
+        "action.like": "Phản hồi tốt",
+        "action.likeActive": "Xóa đánh giá",
+        "action.dislike": "Phản hồi kém",
+        "action.dislikeActive": "Xóa đánh giá",
+        "dialog.title": "Gửi phản hồi",
+        "dialog.categories": "Danh mục phản hồi",
+        "dialog.detail": "Chi tiết phản hồi",
+        "dialog.hint": "Thêm chi tiết để giúp chúng tôi cải thiện. Nội dung gửi đi sẽ bao gồm nhật ký hội thoại hiện tại.",
+        "category.task-result": "Kết quả tác vụ",
+        "category.instruction-following": "Hiểu và tuân theo chỉ dẫn",
+        "category.product-interaction": "Tính năng và tương tác sản phẩm",
+        "category.service-stability": "Độ ổn định và tốc độ",
+        "category.resource-cost": "Mức sử dụng tài nguyên và chi phí",
+        "category.security-privacy-permission": "Bảo mật, quyền riêng tư và quyền",
+        "category.other": "Khác",
+        "toast.recorded": "Cảm ơn phản hồi của bạn",
+        "error.conflict": "Phản hồi này đã được thay đổi ở nơi khác; trạng thái mới nhất được hiển thị",
+        "error.load": "Không thể tải phản hồi",
+        "error.generic": "Không thể lưu phản hồi",
+        "error.noteTooLarge": "Mô tả quá dài; hãy rút ngắn rồi gửi lại"
+      }
+    },
+    "fileActions": {
+      "vi": {
+        "menu.finder": "Hiện trong Finder",
+        "menu.reveal": "Hiện trong thư mục",
+        "menu.saveAs": "Lưu thành…",
+        "menu.copied": "Đã sao chép",
+        "menu.copyImage": "Sao chép ảnh",
+        "menu.download": "Tải xuống",
+        "menu.saveFailed": "Không thể lưu. Hãy kiểm tra nguồn và đích rồi thử lại.",
+        "menu.copyFailed": "Không thể sao chép. Hãy kiểm tra nội dung có sẵn rồi thử lại.",
+        "menu.saved": "Đã lưu",
+        "menu.downloadStarted": "Đã bắt đầu tải xuống",
+        "menu.downloaded": "Tải xuống hoàn tất",
+        "path.revealError": "Không thể hiển thị vị trí tệp. Hãy thử lại."
+      }
+    },
+    "fileDrag": {
+      "vi": {
+        "failed": "Kéo thả thất bại. Hãy thử lại."
+      }
+    }
+  },
+  "keyCount": 33
+}

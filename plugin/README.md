@@ -8,6 +8,9 @@ Bảng Git còn **tạo pull request bằng model của phiên** (effort thấp 
 phiên mới — tự tạo khi bạn gửi tin nhắn đầu tiên, bắt đầu từ nhánh remote mới nhất** (không cần bấm
 gì), và **dọn dẹp sau khi PR được gộp**.
 
+Bundle cũng **bổ sung tiếng Việt cho toàn bộ giao diện DSH**: ngôn ngữ `vi` xuất hiện trong
+Settings → General → Language, và 76 namespace giao diện (hơn 4.200 chuỗi) được dịch sẵn.
+
 Toàn bộ mã là TypeScript trong `src/`; `npm run build` tạo `dist/` mà Host và trình duyệt nạp.
 
 Gửi tin nhắn trong chat Telegram đã ghép nối → tin nhắn thành prompt cho một phiên DSH →
@@ -654,6 +657,8 @@ Toàn bộ mã nằm trong `src/` và viết bằng TypeScript:
 | `src/shared/protocol.ts` | Kiểu dữ liệu dùng chung giữa Host và trình duyệt |
 | `src/client/` | Giao diện: panel Git, hành động, diff, worktree, thẻ cấu hình |
 | `src/client/git/markdown.tsx` | Renderer Markdown cho mô tả/bình luận PR và issue (không phụ thuộc) |
+| `src/client/vi-language-pack.ts` | Gói tiếng Việt: thêm ngôn ngữ `vi` và đăng ký từ điển theo namespace |
+| `src/client/vi-dictionaries.ts` | Từ điển tiếng Việt sinh tự động (76 namespace, 4.253 chuỗi) |
 | `src/host/dsh.ts` | Kiểu structural của API Harness mà plugin gọi |
 | `dist/index.js`, `dist/client.js` | Sản phẩm build (Host ESM và bundle trình duyệt) |
 | `test/*.test.ts` | Test chạy bằng `node --test` (Node 24 strip types) |
@@ -671,7 +676,29 @@ npm test             # build rồi chạy toàn bộ test
 Thêm tính năng mới: tạo `src/features/<tên>.ts` export `mount(ctx, config, deps)` trả về hàm dọn
 dẹp, thêm một mục vào `FEATURES` trong `src/index.ts` và một khoá cấu hình trong `src/lib/config.ts`.
 
-## 10. Kiểm thử
+## 11. Tiếng Việt cho giao diện DSH
+
+Gói ngôn ngữ nằm trong nửa Client của bundle: `src/client/vi-language-pack.ts` gọi
+`ctx.locale.addLanguage({ id: 'vi', label: 'Tiếng Việt', fallback: 'en' })`, rồi đăng ký từng
+namespace đã dịch bằng `ctx.locale.register(ns, 'vi', dict)`.
+
+- **Bật**: Settings → General → Language → **Tiếng Việt**. Áp dụng ngay, không cần khởi động lại;
+  lựa chọn được lưu vào `locale.preference` của profile và giữ cho lần mở sau.
+- **Phạm vi**: 76 namespace giao diện, 4.253 chuỗi — gồm `common`, `conversation`, `chat`,
+  `settings.*`, `pluginManager`, `workspace`, `sidebar*`, `forgePanel`, `trajectory`, import/export,
+  hộp thoại chọn thư mục, v.v.
+- **Chuỗi chưa dịch** (DSH mới thêm khoá) tự rơi về tiếng Anh theo chuỗi fallback `vi → en`.
+  Danh sách không cần cấu hình: gói luôn thụ động, chỉ có tác dụng sau khi bạn chọn tiếng Việt.
+- **Chuỗi của chính bundle** (bảng Git, Web Remote, Telegram) đã có bản dịch riêng trong
+  `src/client/i18n.ts` và đổi theo ngôn ngữ đang chọn.
+- Gỡ bundle hoặc tắt nó thì ngôn ngữ và toàn bộ từ điển bị thu hồi; nếu đang chọn `vi`, giao diện
+  quay về ngôn ngữ mặc định của trình duyệt.
+
+Từ điển sinh ra từ bản cài DSH đang chạy: `src/client/vi-dictionaries.ts` là sản phẩm sinh tự động
+của [`tools/vi-locale/`](../tools/vi-locale/README.md). Khi nâng cấp DSH, chạy lại công cụ đó để lấy
+các khoá mới rồi dịch; xem hướng dẫn trong `tools/vi-locale/README.md`.
+
+## 12. Kiểm thử
 
 ```powershell
 cd plugin
@@ -693,6 +720,10 @@ Test Web Remote dùng fixture trong `protocol/fixtures/`: codec frame, chữ ký
 `sessionController` giả. Thẻ Web Remote có test riêng: mount Host trên Connection giả rồi gọi các
 route `/api/personal-hub-web-remote/*` (trạng thái, lưu thiết lập, ghép cặp, huỷ, ngắt) và render
 thẻ bằng React giả. Không có test nào cần relay hay mạng thật.
+
+Gói tiếng Việt có test riêng trong `test/vi-language-pack.test.ts`: ngôn ngữ được thêm đúng id/label/
+fallback, mọi namespace đăng ký ở locale `vi`, placeholder giữ nguyên, không có ký tự zero-width,
+và một đăng ký lỗi không làm hỏng phần còn lại của gói.
 
 ## Giới hạn hiện tại
 
