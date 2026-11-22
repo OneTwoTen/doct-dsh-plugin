@@ -4867,12 +4867,15 @@ function mountRoutes(ctx, connection, config, deps) {
     if (config.merged.enabled !== true) return;
     const registry = ctx.get("workspaceRegistry");
     const value = await state();
-    for (const sessionId of lostArchives(value.pulls, registry?.archivedSessionIds ?? [], Date.now())) {
-      try {
-        await registry?.archiveSession?.(sessionId, { stopActivity: true });
-        logger.info("git: archived %s again: the archive set had lost it", sessionId);
-      } catch (error) {
-        logger.warn("git: cannot archive %s again: %s", sessionId, messageOf5(error));
+    const archivedIds = registry?.archivedSessionIds;
+    if (archivedIds !== void 0 && typeof registry?.archiveSession === "function") {
+      for (const sessionId of lostArchives(value.pulls, archivedIds, Date.now())) {
+        try {
+          await registry.archiveSession(sessionId, { stopActivity: true });
+          logger.info("git: archived %s again: the archive set had lost it", sessionId);
+        } catch (error) {
+          logger.warn("git: cannot archive %s again: %s", sessionId, messageOf5(error));
+        }
       }
     }
     const bound = await reconcileCheckouts({

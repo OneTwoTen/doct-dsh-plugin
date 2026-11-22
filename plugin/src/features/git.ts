@@ -504,12 +504,17 @@ function mountRoutes(
       archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
     }>('workspaceRegistry')
     const value = await state()
-    for (const sessionId of lostArchives(value.pulls, registry?.archivedSessionIds ?? [], Date.now())) {
-      try {
-        await registry?.archiveSession?.(sessionId, { stopActivity: true })
-        logger.info('git: archived %s again: the archive set had lost it', sessionId)
-      } catch (error) {
-        logger.warn('git: cannot archive %s again: %s', sessionId, messageOf(error))
+    // Only a composition that can both read the archive set and archive again
+    // may repair it; an absent service must not look like an empty set.
+    const archivedIds = registry?.archivedSessionIds
+    if (archivedIds !== undefined && typeof registry?.archiveSession === 'function') {
+      for (const sessionId of lostArchives(value.pulls, archivedIds, Date.now())) {
+        try {
+          await registry.archiveSession(sessionId, { stopActivity: true })
+          logger.info('git: archived %s again: the archive set had lost it', sessionId)
+        } catch (error) {
+          logger.warn('git: cannot archive %s again: %s', sessionId, messageOf(error))
+        }
       }
     }
     const bound = await reconcileCheckouts({
