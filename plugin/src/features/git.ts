@@ -366,6 +366,19 @@ function mountRoutes(
         const target = typeof record?.path === 'string' ? record.path : ''
         if (target.length === 0) return { removed: false, branchDeleted: false }
         const repoRoot = typeof record.repositoryRoot === 'string' ? record.repositoryRoot : ''
+        // A live Session must leave the checkout before the folder disappears:
+        // an unarchived chat can resume in the project root instead of pointing
+        // at a deleted directory.
+        const live = liveSessionDirectory(ctx, sessionId)
+        if (live !== undefined && isInside(target, live)) {
+          const agent = agentFor(sessionId)
+          const workingDirectory = ctx.get<{
+            set(agent: { session?: SessionLike }, directory: string, signal?: AbortSignal): Promise<unknown>
+          }>('workingDirectory')
+          if (agent !== undefined && repoRoot.length > 0 && typeof workingDirectory?.set === 'function') {
+            await workingDirectory.set(agent, repoRoot).catch(() => undefined)
+          }
+        }
         const result = await removeWorktree(runner, {
           repoRoot,
           path: target,
@@ -380,9 +393,15 @@ function mountRoutes(
         return result
       },
       async archiveSession(sessionId: string) {
-        const registry = ctx.get<{ archiveSession?(sessionId: string): Promise<unknown> }>('workspaceRegistry')
+        const registry = ctx.get<{
+          archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
+        }>('workspaceRegistry')
         if (typeof registry?.archiveSession !== 'function') return false
-        await registry.archiveSession(sessionId)
+        // The change request merged, so the Session's work is finished: archive
+        // it the way the UI's "stop and archive" action does. Without
+        // `stopActivity` the registry refuses while a turn or a job runs, and the
+        // merged chat stayed in the list forever.
+        await registry.archiveSession(sessionId, { stopActivity: true })
         return true
       },
       /**
