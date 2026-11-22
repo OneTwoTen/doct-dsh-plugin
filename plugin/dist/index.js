@@ -4834,6 +4834,13 @@ function mountRoutes(ctx, connection, config, deps) {
     }
   });
   async function checkedOutBranch(path) {
+    const top = await runner.run("git", ["rev-parse", "--show-toplevel"], {
+      cwd: path,
+      maxBytes: 64 * 1024
+    }).catch(() => void 0);
+    if (top === void 0 || top.code !== 0) return null;
+    const root = String(top.stdout ?? "").trim();
+    if (root.length === 0 || pathKey(root) !== pathKey(path)) return null;
     const result = await runner.run("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: path,
       maxBytes: 64 * 1024

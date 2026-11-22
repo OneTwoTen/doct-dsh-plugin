@@ -434,8 +434,22 @@ function mountRoutes(
     },
   })
 
-  /** The branch Git has checked out in one directory, or null when it cannot answer. */
+  /**
+   * The branch Git has checked out in one directory, or null when it cannot answer.
+   *
+   * A recorded checkout can be gone while a plain directory of the same name
+   * sits inside the repository: Git then answers for the enclosing checkout.
+   * Only a directory that is its own worktree root is read, so a stale record
+   * is never "repaired" with the main checkout's branch.
+   */
   async function checkedOutBranch(path: string): Promise<string | null> {
+    const top = await runner.run('git', ['rev-parse', '--show-toplevel'], {
+      cwd: path,
+      maxBytes: 64 * 1024,
+    }).catch(() => undefined)
+    if (top === undefined || top.code !== 0) return null
+    const root = String(top.stdout ?? '').trim()
+    if (root.length === 0 || pathKey(root) !== pathKey(path)) return null
     const result = await runner.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: path,
       maxBytes: 64 * 1024,
