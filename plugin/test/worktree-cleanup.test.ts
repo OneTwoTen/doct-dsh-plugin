@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
+import { ensureContext, materializeRepo, readContext } from '../src/lib/context.ts'
 import { createCommandRunner } from '../src/lib/git-run.ts'
+import { resolveRepoSet } from '../src/lib/repo-set.ts'
 import { cleanupDecision, createWorktreeCleanup, inspectWorktree } from '../src/lib/worktree-cleanup.ts'
 import { createWorktree } from '../src/lib/worktree.ts'
 
@@ -157,6 +159,73 @@ test('a cleanup pass removes an old empty checkout and keeps a live one', async 
     assert.equal(store.state.cleanup.at > 0, true)
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+/** A plain directory holding one Git repo, for context-style checkouts. */
+async function makeWorkspaceRepo(root: string, name: string): Promise<string> {
+  const directory = join(root, name)
+  await mkdir(directory, { recursive: true })
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 'cleanup@example.com')
+  git('config', 'user.name', 'Cleanup Tester')
+  git('config', 'commit.gpgsign', 'false')
+  await writeFile(join(directory, 'README.md'), `${name}\n`, 'utf8')
+  git('add', '-A')
+  git('commit', '-qm', 'first')
+  return directory
+}
+
+test('cleanup rewrites the context manifest when it removes a context checkout', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-cleanup-context-'))
+  const exec = runner()
+  try {
+    await makeWorkspaceRepo(workspace, 'be')
+    const set = await resolveRepoSet(exec, workspace)
+    const repo = set.repos.find((item) => item.id === 'be')
+    assert.ok(repo)
+    const context = await ensureContext({ workspaceRoot: workspace, sessionId: 'session-context', name: 'dsh-context' })
+    const made = await materializeRepo({
+      runner: exec,
+      context,
+      repo,
+      set,
+      config: { source: 'local', dirtyMain: 'warn' },
+      timeoutMs: 30000,
+    })
+    assert.ok((await readContext(context.path))?.repos.be)
+
+    const record = {
+      kind: 'context' as const,
+      path: context.path,
+      branch: '',
+      name: context.name,
+      repositoryRoot: context.workspaceRoot,
+      sessionId: context.sessionId,
+      createdAt: context.createdAt,
+      workspaceRoot: context.workspaceRoot,
+      repos: { ...context.repos },
+    }
+    const store = fakeStore({ worktrees: { [context.sessionId]: record } })
+    const cleanup = createWorktreeCleanup({
+      runner: exec,
+      config: { worktree: { ...config, cleanup: { ...enabled, checkMs: 300000 } }, worktreeTimeoutMs: 30000 },
+      logger: quietLogger,
+      store,
+      runtime: { isSessionActive: () => false },
+      now: () => Date.now() + 30 * DAY,
+    })
+    const result = (await cleanup.runOnce())!
+    assert.equal(result.removed.length, 1)
+    // The JSON store and the context's own manifest must agree.
+    assert.equal(store.state.worktrees[context.sessionId].repos.be, undefined)
+    const onDisk = await readContext(context.path)
+    assert.ok(onDisk)
+    assert.equal(onDisk.repos.be, undefined)
+    await assert.rejects(() => stat(made.checkout.path))
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
   }
 })
 

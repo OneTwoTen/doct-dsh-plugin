@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { createMergeWatcher, lostArchives, mayAdoptBranchPull, mergedCleanup, reconcileCheckouts } from '../src/lib/merge-watch.ts'
+import { createMergeWatcher, isPullSet, lostArchives, mayAdoptBranchPull, mergedCleanup, reconcileCheckouts } from '../src/lib/merge-watch.ts'
 
 const quietLogger = { info: () => {}, warn: () => {}, error: () => {} }
 
@@ -396,4 +396,144 @@ test('reconciliation leaves checkouts with no matching merge alone', async () =>
   assert.deepEqual(tracked, [])
   // A branch Git cannot report keeps its recorded name.
   assert.equal((store.state.worktrees['session-c'] as { branch?: string }).branch, 'feat/c')
+})
+
+/** A multi-repo chat with one binding per repository. */
+function makeSetWatcher({ states, active = false, withThirdRepo = false }: {
+  states: Record<number, string>
+  active?: boolean
+  withThirdRepo?: boolean
+}) {
+  const repos = {
+    be: { path: 'C:/ws/.agents/worktrees/x/be', branch: 'dsh-be', repositoryRoot: 'C:/ws/be' },
+    fe: { path: 'C:/ws/.agents/worktrees/x/fe', branch: 'dsh-fe', repositoryRoot: 'C:/ws/fe' },
+    ...(withThirdRepo
+      ? { docs: { path: 'C:/ws/.agents/worktrees/x/docs', branch: 'dsh-docs', repositoryRoot: 'C:/ws/docs' } }
+      : {}),
+  }
+  const store = fakeStore({
+    pulls: {
+      'session-m': {
+        repos: {
+          be: { root: 'C:/ws/be', number: 1, branch: 'dsh-be', remote: {}, url: 'u1', done: false },
+          fe: { root: 'C:/ws/fe', number: 2, branch: 'dsh-fe', remote: {}, url: 'u2', done: false },
+        },
+      },
+    },
+    worktrees: { 'session-m': { kind: 'context', repos } },
+  })
+  const effects: { removed: unknown[]; archived: string[] } = { removed: [], archived: [] }
+  const watcher = createMergeWatcher({
+    config: { merged },
+    logger: quietLogger,
+    store,
+    forge: {
+      pullState: async ({ number }) => ({ number, state: states[number] ?? 'open', url: `u${number}` }),
+    },
+    runtime: {
+      isSessionActive: () => active,
+      async removeSessionWorktree(record) {
+        effects.removed.push(record)
+        return { removed: true, branchDeleted: false }
+      },
+      async archiveSession(sessionId) {
+        effects.archived.push(sessionId)
+        return true
+      },
+    },
+  })
+  return { watcher, store, effects }
+}
+
+test('tracked change requests of different repos become separate bindings', async () => {
+  const store = fakeStore({ pulls: { 'session-m': { number: 1, branch: 'single' } }, worktrees: {} })
+  const watcher = createMergeWatcher({
+    config: { merged }, logger: quietLogger, store,
+    forge: { pullState: async () => ({ state: 'open' }) },
+    runtime: {
+      async removeSessionWorktree() { return { removed: false } },
+      async archiveSession() { return true },
+    },
+  })
+  await watcher.track('session-m', { number: 2, branch: 'be', root: 'C:/ws/be', repoId: 'be' })
+  await watcher.track('session-m', { number: 3, branch: 'fe', root: 'C:/ws/fe', repoId: 'fe' })
+  const value = store.state.pulls['session-m']
+  assert.equal(isPullSet(value), true)
+  assert.ok(isPullSet(value))
+  assert.deepEqual(Object.keys(value.repos), ['primary', 'be', 'fe'])
+  assert.equal(value.repos.primary.number, 1)
+  assert.equal(value.repos.be.repoId, 'be')
+})
+
+test('one merged repository of a multi-repo chat does not archive it', async () => {
+  const { watcher, store, effects } = makeSetWatcher({ states: { 1: 'merged', 2: 'open' } })
+  await watcher.runOnce()
+  assert.equal(store.state.pulls['session-m'].repos.be.state, 'merged')
+  assert.equal(store.state.pulls['session-m'].repos.be.done, true)
+  assert.equal(store.state.pulls['session-m'].repos.fe.state, 'open')
+  assert.deepEqual(effects.archived, [])
+  assert.deepEqual(effects.removed, [])
+  assert.ok(isPullSet(store.state.pulls['session-m']))
+  assert.notEqual(store.state.pulls['session-m'].archived, true)
+})
+
+test('a multi-repo chat archives once all of its repositories merged', async () => {
+  const { watcher, store, effects } = makeSetWatcher({ states: { 1: 'merged', 2: 'merged' } })
+  await watcher.runOnce()
+  assert.deepEqual(effects.archived, ['session-m'])
+  assert.equal(effects.removed.length, 1)
+  assert.equal((effects.removed[0] as { kind?: string }).kind, 'context')
+  const set = store.state.pulls['session-m']
+  assert.ok(isPullSet(set))
+  assert.equal(set.archived, true)
+})
+
+test('a materialized repository without a change request blocks the archive', async () => {
+  const { watcher, store, effects } = makeSetWatcher({ states: { 1: 'merged', 2: 'merged' }, withThirdRepo: true })
+  await watcher.runOnce()
+  assert.deepEqual(effects.archived, [])
+  assert.deepEqual(effects.removed, [])
+  const set = store.state.pulls['session-m']
+  assert.ok(isPullSet(set))
+  assert.notEqual(set.archived, true)
+})
+
+test('a deferred multi-repo archive is retried on the next pass', async () => {
+  const { store, effects } = makeSetWatcher({ states: { 1: 'merged', 2: 'merged' } })
+  let refusals = 1
+  const retry = createMergeWatcher({
+    config: { merged }, logger: quietLogger, store,
+    forge: { pullState: async ({ number }) => ({ number, state: 'merged' }) },
+    runtime: {
+      isSessionActive: () => false,
+      async removeSessionWorktree() { return { removed: true } },
+      async archiveSession() {
+        if (refusals > 0) {
+          refusals -= 1
+          throw new Error('busy')
+        }
+        effects.archived.push('session-m')
+        return true
+      },
+    },
+  })
+  await retry.runOnce()
+  assert.equal(effects.archived.length, 0)
+  const first = store.state.pulls['session-m']
+  assert.ok(isPullSet(first))
+  assert.match(String(first.archiveError), /busy/)
+  await retry.runOnce()
+  assert.deepEqual(effects.archived, ['session-m'])
+  const second = store.state.pulls['session-m']
+  assert.ok(isPullSet(second))
+  assert.equal(second.archived, true)
+})
+
+test('lostArchives repairs a lost set-level archive but respects the window', () => {
+  const pulls = {
+    'session-m': { repos: {}, archived: true, cleanedAt: Date.now() - 1000 },
+    'session-old': { repos: {}, archived: true, cleanedAt: Date.now() - 40 * 24 * 60 * 60 * 1000 },
+    'session-open': { repos: { be: { state: 'open' } }, archived: false, cleanedAt: Date.now() },
+  }
+  assert.deepEqual(lostArchives(pulls, [], Date.now()), ['session-m'])
 })

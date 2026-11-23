@@ -1106,7 +1106,12 @@ function normalizeRelativePath(root: string, path: string): string {
   const target = resolve(root, normalized)
   const inside = relative(root, target)
   if (inside.startsWith('..') || isAbsolute(inside)) {
-    throw new CommandError('input/invalid', 'File path is outside the repository', { path: text })
+    // In a multi-repo workspace a sibling checkout is a repository of its own;
+    // saying only "the repository" made this look like a bug in the path.
+    const message = root
+      ? `File path is outside this repository (${root})`
+      : 'File path is outside this repository'
+    throw new CommandError('input/invalid', message, { path: text })
   }
   return normalized
 }

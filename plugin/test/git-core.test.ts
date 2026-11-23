@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { createCommandRunner, readFilePatch } from '../src/lib/git-run.ts'
 import {
   mergeLineCounts,
   parseBranches,
@@ -238,4 +239,22 @@ test('parseBranches reads for-each-ref rows', () => {
   assert.equal(branches[0].name, 'main')
   assert.equal(branches[0].upstream, 'origin/main')
   assert.equal(branches[0].current, true)
+})
+
+test('a path escaping a repo names THIS repository in the refusal', async () => {
+  const exec = createCommandRunner({ ctx: { get: () => undefined }, logger: { warn: () => {} } })
+  await assert.rejects(
+    () => readFilePatch(exec, {
+      root: '/workspace/be',
+      path: '../fe/src/index.ts',
+      config: { maxDiffBytes: 1024, maxUntrackedBytes: 1024 },
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'input/invalid')
+      assert.match(error.message, /outside this repository/)
+      assert.match(error.message, /\/workspace\/be/)
+      assert.equal(error.details.path, '../fe/src/index.ts')
+      return true
+    },
+  )
 })

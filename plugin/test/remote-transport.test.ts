@@ -8,6 +8,18 @@ import { RemoteTransport } from '../src/lib/remote-transport.ts'
 import { verifyHello } from '../src/lib/remote-device.ts'
 import { FakeWebSocket, tick, waitFor } from '../test-support/fake-websocket.ts'
 
+/**
+ * The transport unrefs its timers so an idle relay client cannot hold the
+ * process open. A test that waits for a timeout would then finish before its
+ * own promise settles, so keep these timers referenced until `stop()` clears
+ * them.
+ */
+function referencedSetTimeout(fn: (...args: unknown[]) => void, ms: number, ...args: unknown[]) {
+  const timer = setTimeout(fn, ms, ...args) as NodeJS.Timeout
+  timer.unref = () => timer
+  return timer
+}
+
 function identityFixture() {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   return {
@@ -25,6 +37,7 @@ async function openTransport(options = {}) {
     identity,
     getAccessToken: () => 'at_test',
     WebSocket: FakeWebSocket,
+    setTimeout: referencedSetTimeout,
     heartbeatMs: 60000,
     helloTimeoutMs: 200,
     requestTimeoutMs: 100,

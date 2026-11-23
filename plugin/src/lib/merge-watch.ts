@@ -53,6 +53,8 @@ export interface PullBinding {
   branch?: string
   base?: string
   sessionId?: string
+  /** Repository id when the binding belongs to a multi-repo chat. */
+  repoId?: string
   trackedAt?: number
   checkedAt?: number
   done?: boolean
@@ -76,6 +78,26 @@ export interface PullBinding {
   deferred?: string
 }
 
+/**
+ * One chat's change requests when it checks out several repositories.
+ *
+ * A multi-repo chat owns one PR per materialized repository. The per-repo slots
+ * settle independently, but the chat is archived only once every materialized
+ * repository has merged. Old single-PR records keep their flat shape.
+ */
+export interface SessionPullSet {
+  repos: Record<string, PullBinding>
+  archived?: boolean
+  archiveError?: string
+  attempts?: number
+  checkedAt?: number
+  cleanedAt?: number
+  deferred?: string
+}
+
+/** Either the historical single binding or a multi-repository set. */
+export type SessionPulls = PullBinding | SessionPullSet
+
 /** The plugin's recorded checkout of one Session, as the matching rules read it. */
 export interface CheckoutFacts {
   path?: string
@@ -85,7 +107,7 @@ export interface CheckoutFacts {
 
 /** The durable state the watcher reads and writes. */
 export interface MergeStoreState {
-  pulls?: Record<string, PullBinding>
+  pulls?: Record<string, SessionPulls>
   worktrees?: Record<string, unknown>
 }
 
@@ -162,6 +184,75 @@ export interface MergeWatcher {
 /** Read a caller-supplied binding record, narrowing at the boundary. */
 function asBinding(record: unknown): PullBinding {
   return record !== null && typeof record === 'object' ? (record as PullBinding) : {}
+}
+
+/** Whether one session's record holds several per-repository bindings. */
+export function isPullSet(value: SessionPulls | undefined): value is SessionPullSet {
+  if (value === null || typeof value !== 'object') return false
+  const repos = (value as SessionPullSet).repos
+  return repos !== null && typeof repos === 'object' && !Array.isArray(repos)
+}
+
+/** One binding slot, flattened so the poll can visit both record shapes. */
+interface PullSlot {
+  sessionId: string
+  repoId?: string
+  set?: SessionPullSet
+  binding: PullBinding
+}
+
+/** Every binding in the store, old and new shape alike. */
+function pullSlots(pulls: Record<string, SessionPulls> | undefined): PullSlot[] {
+  const slots: PullSlot[] = []
+  for (const [sessionId, value] of Object.entries(pulls ?? {})) {
+    if (isPullSet(value)) {
+      for (const [repoId, binding] of Object.entries(value.repos)) {
+        if (binding !== null && typeof binding === 'object') slots.push({ sessionId, repoId, set: value, binding })
+      }
+    } else if (value !== null && typeof value === 'object') {
+      slots.push({ sessionId, binding: value })
+    }
+  }
+  return slots
+}
+
+/** The one binding a slot addresses, if it has been tracked. */
+function readBinding(value: SessionPulls | undefined, repoId?: string): PullBinding | undefined {
+  if (value === undefined) return undefined
+  if (isPullSet(value)) return repoId === undefined ? undefined : value.repos[repoId]
+  return repoId === undefined ? value : undefined
+}
+
+/**
+ * Patch one slot, migrating a legacy flat binding into `repos.primary` before
+ * the first per-repository binding is written.
+ */
+function writeSlot(
+  state: MergeStoreState,
+  sessionId: string,
+  repoId: string | undefined,
+  patch: Partial<PullBinding>,
+): void {
+  state.pulls ??= {}
+  const current = state.pulls[sessionId]
+  if (repoId === undefined) {
+    if (isPullSet(current)) {
+      state.pulls[sessionId] = {
+        ...current,
+        repos: { ...current.repos, primary: { ...current.repos.primary, ...patch } },
+      }
+    } else {
+      state.pulls[sessionId] = { ...(current ?? {}), ...patch }
+    }
+    return
+  }
+  const set: SessionPullSet = isPullSet(current)
+    ? current
+    : { repos: current !== undefined ? { primary: current } : {} }
+  state.pulls[sessionId] = {
+    ...set,
+    repos: { ...set.repos, [repoId]: { ...(set.repos[repoId] ?? {}), ...patch } },
+  }
 }
 
 /**
@@ -258,7 +349,7 @@ export const ARCHIVE_REPAIR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
  * @returns ids to archive again.
  */
 export function lostArchives(
-  pulls: Record<string, PullBinding> | undefined,
+  pulls: Record<string, SessionPulls> | undefined,
   archivedIds: ReadonlySet<string> | readonly string[],
   now: number,
   windowMs: number = ARCHIVE_REPAIR_WINDOW_MS,
@@ -267,6 +358,15 @@ export function lostArchives(
   const lost: string[] = []
   for (const [sessionId, binding] of Object.entries(pulls ?? {})) {
     if (binding === null || typeof binding !== 'object') continue
+    if (isPullSet(binding)) {
+      // A set archives only after every repository merged; one shared
+      // settlement stamp is enough to bound the repair window.
+      if (binding.archived !== true) continue
+      const settledAt = Number(binding.cleanedAt ?? 0)
+      if (settledAt <= 0 || now - settledAt > windowMs) continue
+      if (!archived.has(sessionId)) lost.push(sessionId)
+      continue
+    }
     if (binding.state !== 'merged' || binding.archived !== true) continue
     if (archived.has(sessionId)) continue
     const cleanedAt = Number(binding.cleanedAt ?? 0)
@@ -371,6 +471,8 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
   let timer: ReturnType<typeof setInterval> | undefined
   let running = false
   let disposed = false
+  /** Per-chat set archivals in flight, so a poll cannot archive twice. */
+  const archivingSets = new Set<string>()
 
   /**
    * Remember one Session's change request so a later poll can settle it.
@@ -382,10 +484,15 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
     if (record === null || typeof record !== 'object') return
     const number = Number(record.number)
     if (!Number.isFinite(number) || number <= 0) return
+    const repoId = typeof record.repoId === 'string' ? record.repoId.trim() : ''
     await store.load()
     // Never bind a change request that names another checkout: settling it would
-    // remove this Session's branch for work it never pushed.
-    const checkout = store.state.worktrees?.[sessionId] as CheckoutFacts | undefined
+    // remove this Session's branch for work it never pushed. A multi-repo chat
+    // records one checkout per repo; the context directory itself is not one.
+    const stored = store.state.worktrees?.[sessionId] as (CheckoutFacts & {
+      repos?: Record<string, CheckoutFacts>
+    }) | undefined
+    const checkout = repoId.length > 0 ? stored?.repos?.[repoId] : stored
     if (checkout !== undefined && !checkoutOwnsBinding(record as { root?: string; branch?: string }, checkout)) {
       logger.warn(
         'git: ignoring change request %d for %s: branch %s is not its checkout branch %s',
@@ -396,18 +503,18 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
       )
       return
     }
-    const existing = store.state.pulls?.[sessionId]
+    const slot = repoId.length > 0 ? repoId : undefined
+    const existing = readBinding(store.state.pulls?.[sessionId], slot)
     // The same binding needs no rewrite: a settled one must stay settled, and an
     // open one is already polled, so only a different change request is new.
     if (existing !== undefined && existing.number === number) return
     await store.update((state) => {
-      state.pulls ??= {}
-      const previous = state.pulls[sessionId]
-      state.pulls[sessionId] = {
-        ...previous,
+      const previous = readBinding(state.pulls?.[sessionId], slot)
+      writeSlot(state, sessionId, slot, {
         ...record,
         number,
         sessionId,
+        repoId: slot,
         trackedAt: previous?.trackedAt ?? now(),
         done: false,
         checkedAt: now(),
@@ -425,7 +532,7 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
         attempts: undefined,
         deferred: undefined,
         skipped: undefined,
-      }
+      })
     })
   }
 
@@ -437,20 +544,29 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
     try {
       await store.load()
       const pulls = store.state.pulls ?? {}
-      for (const [sessionId, record] of Object.entries(pulls)) {
-        if (record === null || typeof record !== 'object') continue
+      for (const { sessionId, repoId, set, binding } of pullSlots(pulls)) {
         try {
           // A binding settled by an older build may still show its merged chat:
           // that build archived before stopping the Session's work, so the
           // registry refused while a turn ran and the error was final. Retrying
           // here repairs those records instead of leaving them visible.
-          if (record.done === true) {
-            await retrySettledArchive(sessionId, record)
+          if (binding.done === true) {
+            if (set === undefined) await retrySettledArchive(sessionId, binding)
             continue
           }
-          await settle(sessionId, record)
+          await settle(sessionId, binding, repoId, set)
         } catch (error) {
           logger.warn('git: merge check for %s failed: %s', sessionId, messageOf(error))
+        }
+      }
+      // A set can become complete after its last binding settled (a deferred
+      // archive, or a repo bound later), so every pass re-checks the predicate.
+      for (const [sessionId, value] of Object.entries(pulls)) {
+        if (!isPullSet(value)) continue
+        try {
+          await maybeArchiveSet(sessionId, value)
+        } catch (error) {
+          logger.warn('git: multi-repo merge check for %s failed: %s', sessionId, messageOf(error))
         }
       }
     } finally {
@@ -497,11 +613,131 @@ export function createMergeWatcher({ config, logger, store, forge, runtime, now 
   }
 
   /**
+   * Settle one repository of a multi-repo chat, without archiving the chat:
+   * the other repositories may still have open work.
+   */
+  async function settleRepoBinding(
+    sessionId: string,
+    record: PullBinding,
+    repoId: string,
+  ): Promise<void> {
+    const state = await forge.pullState({
+      root: record.root,
+      remote: record.remote,
+      number: Number(record.number),
+    })
+    if (state === null) return
+    const next = String(state.state ?? '')
+    if (next !== 'merged') {
+      await store.update((value) => {
+        writeSlot(value, sessionId, repoId, {
+          state: next,
+          checkedAt: now(),
+          done: next === 'closed',
+        })
+      })
+      return
+    }
+    const worktrees = store.state.worktrees ?? {}
+    const stored = worktrees[sessionId] as { repos?: Record<string, CheckoutFacts> } | undefined
+    const checkout = stored?.repos?.[repoId]
+    if (checkout !== undefined && !checkoutOwnsBinding(record, checkout)) {
+      logger.warn('git: %s merged but is not the checkout of %s in %s; leaving it alone', String(state.url ?? record.number), repoId, sessionId)
+      await store.update((value) => {
+        writeSlot(value, sessionId, repoId, {
+          state: 'merged', done: true, skipped: 'checkout-mismatch', checkedAt: now(),
+        })
+      })
+      return
+    }
+    await store.update((value) => {
+      writeSlot(value, sessionId, repoId, {
+        state: 'merged',
+        done: true,
+        cleanedAt: now(),
+        mergedUrl: state.url ?? record.url ?? '',
+        attempts: (Number(record.attempts) || 0) + 1,
+        deferred: undefined,
+        skipped: undefined,
+      })
+    })
+  }
+
+  /**
+   * Archive a multi-repo chat only when every repository still checked out by
+   * it has a merged change request. A materialized repository without a binding
+   * blocks the archive: its state is unknown, so acting would hide live work.
+   */
+  async function maybeArchiveSet(sessionId: string, initial: SessionPullSet): Promise<void> {
+    if (archivingSets.has(sessionId)) return
+    const value = (store.state.pulls?.[sessionId] as SessionPulls | undefined)
+    const set = isPullSet(value) ? value : initial
+    if (set.archived === true) return
+    if ((Number(set.attempts) || 0) >= SETTLE_RETRY_LIMIT) return
+    const stored = store.state.worktrees?.[sessionId] as {
+      kind?: string
+      repos?: Record<string, unknown>
+    } | undefined
+    if (stored?.kind !== 'context') return
+    const materialized = Object.keys(stored.repos ?? {})
+    if (materialized.length === 0) return
+    const bindings = materialized.map((repoId) => set.repos[repoId])
+    if (bindings.some((binding) => binding === undefined)) return
+    if (!bindings.every((binding) => String(binding?.state ?? '') === 'merged')) return
+    if (!mergedCleanup(merged, { hasWorktree: true }).archiveSession) return
+    archivingSets.add(sessionId)
+    try {
+      const result = await archiveNow(sessionId)
+      if (!result.archived) {
+        const busy = runtime.isSessionActive?.(sessionId, stored) === true
+        await store.update((current) => {
+          const entry = current.pulls?.[sessionId]
+          if (entry === undefined || !isPullSet(entry)) return
+          entry.archiveError = result.error ?? (busy ? 'session-active' : 'archive-refused')
+          entry.deferred = busy ? 'session-active' : undefined
+          entry.attempts = (Number(entry.attempts) || 0) + 1
+          entry.checkedAt = now()
+        })
+        if (busy) logger.info('git: %s has merged in every repo but is still active; cleanup waits', sessionId)
+        return
+      }
+      await store.update((current) => {
+        const entry = current.pulls?.[sessionId]
+        if (entry === undefined || !isPullSet(entry)) return
+        entry.archived = true
+        entry.archiveError = undefined
+        entry.deferred = undefined
+        entry.cleanedAt = now()
+        entry.attempts = (Number(entry.attempts) || 0) + 1
+      })
+      logger.info('git: archived %s after all %d repositories merged', sessionId, bindings.length)
+      if (mergedCleanup(merged, { hasWorktree: true }).removeWorktree) {
+        try {
+          await runtime.removeSessionWorktree(stored, sessionId)
+        } catch (error) {
+          logger.warn('git: could not remove the checkouts of %s: %s', sessionId, messageOf(error))
+        }
+      }
+    } finally {
+      archivingSets.delete(sessionId)
+    }
+  }
+
+  /**
    * Read one binding's state and apply the configured cleanup when it merged.
    * @param sessionId owning Session.
    * @param record binding.
    */
-  async function settle(sessionId: string, record: PullBinding): Promise<void> {
+  async function settle(
+    sessionId: string,
+    record: PullBinding,
+    repoId?: string,
+    set?: SessionPullSet,
+  ): Promise<void> {
+    if (set !== undefined && repoId !== undefined) {
+      await settleRepoBinding(sessionId, record, repoId)
+      return
+    }
     const state = await forge.pullState({
       root: record.root,
       remote: record.remote,
