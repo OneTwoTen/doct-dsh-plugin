@@ -211,6 +211,63 @@ export function createWorktreeCleanup(
       for (const [sessionId, value] of Object.entries(records)) {
         if (value === null || typeof value !== 'object') continue
         const record = value as CleanupRecord
+        if (record.kind === 'context') {
+          // A context owns one checkout per repository; clean each on its own
+          // facts, then persist the shrunken record. The context directory
+          // itself stays: an empty one costs nothing and can be reused.
+          let changed = false
+          const active = runtime.isSessionActive(sessionId, record)
+          for (const [repoId, raw] of Object.entries(record.repos ?? {})) {
+            const checkout = raw as {
+              path?: string
+              branch?: string
+              repositoryRoot?: string
+              materializedAt?: number
+              start?: string
+              base?: string
+            }
+            try {
+              const facts = await inspectWorktree(runner, {
+                path: checkout.path,
+                branch: checkout.branch,
+                repositoryRoot: checkout.repositoryRoot,
+                createdAt: checkout.materializedAt ?? record.createdAt,
+                start: checkout.start,
+                base: checkout.base,
+              }, now())
+              const decision = cleanupDecision(settings, { ...facts, active })
+              if (!decision.remove) {
+                kept.push({ sessionId, branch: checkout.branch, reason: decision.reason })
+                continue
+              }
+              await removeWorktree(runner, {
+                repoRoot: String(checkout.repositoryRoot ?? ''),
+                path: String(checkout.path ?? ''),
+                branch: checkout.branch,
+                deleteBranch: settings.deleteBranch === true,
+                timeoutMs,
+              })
+              delete (record.repos as Record<string, unknown>)[repoId]
+              changed = true
+              removed.push({ sessionId, branch: checkout.branch, reason: decision.reason })
+              logger.info('git: cleanup removed %s of %s (%s)', String(checkout.branch ?? ''), repoId, decision.reason)
+            } catch (error: unknown) {
+              const reason = error instanceof Error ? error.message : String(error)
+              kept.push({ sessionId, branch: checkout.branch, reason: 'failed', error: reason })
+              logger.warn('git: cleanup kept %s of %s: %s', String(checkout.branch ?? ''), repoId, reason)
+            }
+          }
+          if (changed) {
+            await store.update((state) => {
+              const worktrees: unknown = state.worktrees ?? {}
+              state.worktrees = worktrees
+              if (worktrees !== null && typeof worktrees === 'object') {
+                ;(worktrees as Record<string, unknown>)[sessionId] = record
+              }
+            })
+          }
+          continue
+        }
         try {
           const facts = await inspectWorktree(runner, record, now())
           const decision = cleanupDecision(settings, {

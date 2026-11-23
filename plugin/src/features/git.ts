@@ -20,8 +20,9 @@
  * transport failure with HTTP 405.
  */
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
-import { isAbsolute, join, resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { realpath, rm, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   CommandError,
@@ -118,9 +119,17 @@ import type {
   WorktreeRequest,
   WorktreeCreation,
   WorktreeState,
+  WorkspaceRepo,
+  WorkspaceReposResult,
+  CheckoutRepoRequest,
+  CheckoutRemoveRequest,
 } from '../shared/protocol.ts'
-import type { DshContext, Logger, ConfigEditorEntry, ConfigEditorService, LlmService, SessionLike, AgentLike } from '../host/dsh.ts'
+import type { DshContext, Logger, ConfigEditorEntry, ConfigEditorService, LlmService, SessionLike, AgentLike, FileSystemService, SystemPromptService, ToolDefinitionLike, ToolsService } from '../host/dsh.ts'
 import type { GitConfig, HubConfig } from '../lib/config.ts'
+import { contextName, ensureContext, materializeRepo, readContext as readContextManifest, removeRepoCheckout } from '../lib/context.ts'
+import type { ContextRecord, RepoCheckout } from '../lib/context.ts'
+import { defaultRepo, isPathInside, repoOf, repoPathKey, resolveRepoSet } from '../lib/repo-set.ts'
+import type { RepoSet, WorkspaceRepoEntry } from '../lib/repo-set.ts'
 
 /** The Connection shared-channel prefix the browser posts to. */
 export const GIT_PATH_PREFIX = '/api/personal-hub-git'
@@ -323,7 +332,12 @@ function mountRoutes(
 
   /** A comparison key for one filesystem path; Windows compares case-insensitively. */
   function pathKey(value: string): string {
-    const normalized = resolve(String(value ?? ''))
+    let normalized = resolve(String(value ?? ''))
+    try {
+      normalized = realpathSync(normalized)
+    } catch {
+      // A path that no longer exists compares by its resolved spelling.
+    }
     return process.platform === 'win32' ? normalized.toLowerCase() : normalized
   }
 
@@ -375,6 +389,9 @@ function mountRoutes(
     forge,
     runtime: {
       async removeSessionWorktree(record: WorktreeRecord, sessionId: string) {
+        // A context directory holds several repositories; its per-repo
+        // checkouts are removed by the panel or the cleanup pass, not here.
+        if (record?.kind === 'context') return { removed: false, branchDeleted: false }
         const target = typeof record?.path === 'string' ? record.path : ''
         if (target.length === 0) return { removed: false, branchDeleted: false }
         const repoRoot = typeof record.repositoryRoot === 'string' ? record.repositoryRoot : ''
@@ -675,13 +692,35 @@ function mountRoutes(
     if (isSubagentSession(session)) return null
     if (creating.has(sessionId)) return null
     if (checkouts.has(sessionId)) return null
-    if (stateReady && store.state.worktrees?.[sessionId] !== undefined) return null
+    const stored = stateReady ? store.state.worktrees?.[sessionId] : undefined
+    if (stored !== undefined) {
+      // A context record whose Session is not standing in it (an idle panel
+      // click, or a resume that fell back to the workspace root) needs the
+      // folder restored before the message runs.
+      if (stored.kind === 'context') {
+        const live = liveSessionDirectory(ctx, sessionId)
+        if (live === undefined || !isPathInside(stored.path, live)) return 'auto'
+      }
+      return null
+    }
     const request = requests.get(sessionId)
     // A recorded failure holds creation until the panel retries: a checkout
     // that cannot be made must not delay every message after it.
     if (request !== undefined && request.error !== null) return null
     if (request?.enabled === true) return 'explicit'
     if (request?.enabled === false) return null
+    // A multi-repo workspace always begins with a context directory, even
+    // when the single-repo auto-worktree default is off. The creation is a
+    // mkdir, not a checkout, so it is cheap enough to do before the first step.
+    if (config.checkout.mode !== 'off') {
+      const header = session?.header?.cwd
+      const cached = typeof header === 'string' && header.length > 0
+        ? repoSetCache.get(repoPathKey(header))
+        : undefined
+      if (cached === undefined || cached.set.kind === 'multi') {
+        return hasStartedTurn(session) ? null : 'auto'
+      }
+    }
     if (config.worktree.auto !== true) return null
     return hasStartedTurn(session) ? null : 'auto'
   }
@@ -822,6 +861,51 @@ function mountRoutes(
     }
     if (directory === undefined || directory.length === 0) {
       await rememberRequest(sessionId, null)
+      return
+    }
+
+    // A chat that already has a context keeps it; a multi-repo workspace gets
+    // an empty context now, and repositories appear only when they are edited.
+    try {
+      const existing = await contextFor(sessionId)
+      if (existing !== undefined) {
+        const live = liveSessionDirectory(ctx, sessionId)
+        if (live === undefined || !isPathInside(existing.context.path, live)) {
+          await setSessionDirectory(sessionId, existing.context.path, signal)
+        }
+        checkouts.add(sessionId)
+        requests.delete(sessionId)
+        return
+      }
+      const set = await repoSetFor(directory, signal)
+      if (set.kind === 'multi' && config.checkout.mode !== 'off') {
+        if (request?.enabled === false) {
+          await rememberRequest(sessionId, null)
+          return
+        }
+        const { context } = await ensureSessionContext(sessionId, set.workspaceRoot, signal)
+        checkouts.add(sessionId)
+        requests.delete(sessionId)
+        logger.info('git: %s now works in context %s', sessionId, context.path)
+        // `eager` is the opt-in shortcut for people who would rather pay for
+        // every core checkout up front than on the first edit. A failed repo
+        // is logged and skipped; the chat still starts.
+        if (config.checkout.mode === 'eager') {
+          for (const repo of set.repos.filter((entry) => entry.core)) {
+            await materializeForSession(sessionId, repo, undefined, signal)
+              .catch((error: unknown) => logger.warn('git: eager checkout of %s failed: %s', repo.id, messageOf(error)))
+          }
+        }
+        return
+      }
+      if (set.kind === 'none') {
+        await rememberRequest(sessionId, null)
+        return
+      }
+    } catch (error) {
+      if (signal.aborted) return
+      logger.warn('git: cannot prepare a context for %s: %s', sessionId, messageOf(error))
+      await failRequest(sessionId, error instanceof CommandError ? error.code : 'workspace/failed', messageOf(error))
       return
     }
 
@@ -1346,15 +1430,23 @@ function mountRoutes(
       body,
       signal,
     })
+    // One binding per Session is the merge-watcher's shape. A multi-repo chat
+    // has several independent PRs, and archiving on the first merge would hide
+    // work still open in another repository; track only single-repo sessions
+    // until the watcher itself becomes set-aware.
     if (sessionId.length > 0 && created.number !== null) {
-      await watcher.track(sessionId, {
-        root,
-        remote,
-        number: created.number,
-        url: created.url,
-        branch,
-        base,
-      })
+      const workspaceRoot = await workspaceRootFor(sessionId, undefined, signal).catch(() => '')
+      const set = workspaceRoot.length > 0 ? await repoSetFor(workspaceRoot, signal).catch(() => undefined) : undefined
+      if (set === undefined || set.kind === 'single' || set.repos.length <= 1) {
+        await watcher.track(sessionId, {
+          root,
+          remote,
+          number: created.number,
+          url: created.url,
+          branch,
+          base,
+        })
+      }
     }
     return {
       status: 'created',
@@ -1374,21 +1466,141 @@ function mountRoutes(
 
   const handlers: HandlerMap = {
     /**
+     * The workspace's repositories, their roles, and this chat's checkouts.
+     *
+     * This is the one route the panel calls before it picks a repository. It
+     * never touches Git history: a repository that is not checked out costs
+     * one directory probe, not a worktree.
+     */
+    async repos(payload, signal): Promise<WorkspaceReposResult> {
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal)
+      const set = await repoSetFor(workspaceRoot, signal)
+      if (sessionId.length > 0 && set.kind === 'multi') sessionRepoSets.set(sessionId, set)
+      const record = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] : undefined
+      const context = record?.kind === 'context' ? contextFromRecord(record) : undefined
+      const repos = await buildRepoStates(set, context)
+      return {
+        workspaceRoot,
+        kind: set.kind,
+        isolation: set.kind === 'multi' && config.worktree.enabled !== false && config.checkout.mode !== 'off',
+        context: context === undefined
+          ? null
+          : { path: context.path, name: context.name, createdAt: context.createdAt },
+        repos,
+        warnings: set.warnings,
+      }
+    },
+
+    /**
+     * Create one repository's checkout for this chat, on demand.
+     *
+     * The panel uses it when the user presses "create checkout"; the write
+     * guard uses the same materializer so a model's first edit and a button
+     * cannot produce two checkouts.
+     */
+    async checkoutRepo(payload, signal): Promise<{ repo: WorkspaceRepo }> {
+      const sessionId = requiredString(payload.sessionId, 'sessionId')
+      const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal)
+      const set = await repoSetFor(workspaceRoot, signal)
+      if (set.kind !== 'multi') {
+        throw new CommandError('repo/not-multi', 'This workspace has only one repository, so it needs no context checkout')
+      }
+      if (config.worktree.enabled === false || config.checkout.mode === 'off') {
+        throw new CommandError('checkout/disabled', 'Lazy checkouts are disabled for this workspace')
+      }
+      const repo = repoOf(set, requiredString(payload.repo, 'repo'))
+      if (repo === undefined) throw new CommandError('repo/unknown', `Unknown repository: ${payload.repo}`, { repo: payload.repo })
+      await materializeForSession(sessionId, repo, typeof payload.base === 'string' ? payload.base : undefined, signal)
+      const context = (await contextFor(sessionId))?.context
+      const states = await buildRepoStates(set, context)
+      const state = states.find((item) => item.id === repo.id)
+      if (state === undefined) throw new CommandError('repo/unknown', `Unknown repository: ${repo.id}`, { repo: repo.id })
+      return { repo: state }
+    },
+
+    /** Remove one repository's checkout, keeping the context directory. */
+    async checkoutRemove(payload, signal): Promise<{ removed: boolean; branchDeleted: boolean }> {
+      const sessionId = requiredString(payload.sessionId, 'sessionId')
+      const context = (await contextFor(sessionId))?.context
+      if (context === undefined) return { removed: false, branchDeleted: false }
+      const set = await repoSetFor(context.workspaceRoot, signal)
+      const repo = repoOf(set, requiredString(payload.repo, 'repo'))
+      if (repo === undefined) throw new CommandError('repo/unknown', `Unknown repository: ${payload.repo}`, { repo: payload.repo })
+      const result = await removeRepoCheckout({
+        runner,
+        context,
+        repoId: repo.id,
+        deleteBranch: payload.deleteBranch === true,
+        force: payload.force === true,
+        timeoutMs: config.worktreeTimeoutMs,
+        signal,
+      })
+      await store.update((current) => {
+        current.worktrees ??= {}
+        current.worktrees[sessionId] = recordFromContext(context)
+      })
+      return result
+    },
+
+    /**
+     * Remove every checkout this chat created and the context directory.
+     *
+     * A dirty repository refuses unless `force` is set, so a click cannot
+     * discard uncommitted work. The Session is moved back to the workspace root
+     * before its folder disappears.
+     */
+    async contextRemove(payload, signal): Promise<{ removed: number; branchDeleted: number }> {
+      const sessionId = requiredString(payload.sessionId, 'sessionId')
+      const current = await contextFor(sessionId)
+      if (current === undefined) return { removed: 0, branchDeleted: 0 }
+      const context = current.context
+      let removed = 0
+      let branchDeleted = 0
+      for (const repoId of Object.keys(context.repos)) {
+        const result = await removeRepoCheckout({
+          runner,
+          context,
+          repoId,
+          deleteBranch: payload.deleteBranch === true,
+          force: payload.force === true,
+          timeoutMs: config.worktreeTimeoutMs,
+          signal,
+        })
+        if (result.removed) removed += 1
+        if (result.branchDeleted) branchDeleted += 1
+      }
+      if (agentFor(sessionId) !== undefined) {
+        await setSessionDirectory(sessionId, context.workspaceRoot, signal).catch(() => undefined)
+      }
+      await rm(context.path, { recursive: true, force: true }).catch(() => undefined)
+      await store.update((value) => {
+        if (value.worktrees !== undefined) delete value.worktrees[sessionId]
+      })
+      checkouts.delete(sessionId)
+      sessionRepoSets.delete(sessionId)
+      return { removed, branchDeleted }
+    },
+
+    /**
      * Everything the header and the changes view need.
      */
     async overview(payload, signal) {
       const { root } = await repository(payload, signal)
       const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
       const stored = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null
+      // A context record describes a directory of repositories, not one
+      // checkout; the legacy repair and adoption rules below are for the latter.
+      const legacy = stored?.kind === 'context' ? null : stored
       // A checkout from an older build may still track the base branch it
       // started from; repairing it here keeps "behind/diverged" honest without
       // a migration step.
-      if (stored !== null && typeof stored.path === 'string' && pathKey(stored.path) === pathKey(root)) {
+      if (legacy !== null && typeof legacy.path === 'string' && pathKey(legacy.path) === pathKey(root)) {
         await repairInheritedBaseUpstream(runner, {
           path: root,
-          branch: String(stored.branch ?? ''),
-          base: String(stored.base ?? ''),
-          source: stored.source,
+          branch: String(legacy.branch ?? ''),
+          base: String(legacy.base ?? ''),
+          source: legacy.source,
           signal,
         }).catch(() => null)
       }
@@ -1396,23 +1608,23 @@ function mountRoutes(
       // A checkout whose branch was renamed in place keeps a stale record; the
       // panel must show and adopt by the branch Git really has.
       if (
-        stored !== null
-        && typeof stored.path === 'string'
-        && pathKey(stored.path) === pathKey(root)
+        legacy !== null
+        && typeof legacy.path === 'string'
+        && pathKey(legacy.path) === pathKey(root)
         && read.repo.branch !== null
-        && String(stored.branch ?? '') !== read.repo.branch
+        && String(legacy.branch ?? '') !== read.repo.branch
       ) {
         const branch = read.repo.branch
         await store.update((current) => {
           const entry = current.worktrees?.[sessionId]
           if (entry !== undefined) entry.branch = branch
         })
-        stored.branch = branch
+        legacy.branch = branch
       }
       const value: GitOverview = {
         ...read,
         forge: await describeForge(read.repo.remote, root, signal),
-        worktree: stored,
+        worktree: legacy,
         branchPull: null,
       }
       if (value.forge.available === true && read.repo.branch !== null) {
@@ -1434,7 +1646,7 @@ function mountRoutes(
               pull: found.pull,
               root,
               branch: read.repo.branch,
-              checkout: stored,
+              checkout: legacy,
             })
           ) {
             await watcher.track(sessionId, {
@@ -2043,6 +2255,38 @@ function mountRoutes(
         creating: sessionId.length > 0 ? creating.get(sessionId) ?? null : null,
         started: hasStartedTurn(session),
       }
+      // A multi-repo workspace answers with the context state instead of a
+      // single repository's base branches. Nothing is created here.
+      try {
+        const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal)
+        const set = await repoSetFor(workspaceRoot, signal)
+        if (set.kind === 'none') return { ...base, reason: 'not-a-repository' }
+        if (set.kind === 'multi') {
+          const record = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] : undefined
+          const context = record?.kind === 'context' ? contextFromRecord(record) : undefined
+          const repos = await buildRepoStates(set, context, payload.lite === true)
+          const enabled = config.worktree.enabled !== false && config.checkout.mode !== 'off'
+          if (sessionId.length > 0) sessionRepoSets.set(sessionId, set)
+          return {
+            ...base,
+            enabled,
+            supported: enabled,
+            reason: enabled ? null : 'disabled',
+            kind: 'context',
+            workspaceRoot,
+            context: context === undefined
+              ? null
+              : { path: context.path, name: context.name, createdAt: context.createdAt },
+            repos,
+            project: { directory: workspaceRoot, linked: false },
+            current: record ?? null,
+            auto: enabled,
+            bases: null,
+          }
+        }
+      } catch {
+        // Fall through to the single-repository path, whose error is precise.
+      }
       let directory: string
       try {
         directory = await sessionCheckout(ctx, sessionId, payload.cwd)
@@ -2123,7 +2367,7 @@ function mountRoutes(
         updatedAt: now,
       }
       await rememberRequest(sessionId, request)
-      return { request, auto: config.worktree.auto === true }
+      return { request, auto: config.worktree.auto === true || config.checkout.mode !== 'off' }
     },
 
     /**
@@ -2132,6 +2376,7 @@ function mountRoutes(
      * holds uncommitted work.
      */
     async worktrees(payload, signal) {
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
       const { directory, root } = await repository(payload, signal)
       const currentPath = directory
       const [entries, value] = await Promise.all([
@@ -2139,6 +2384,11 @@ function mountRoutes(
         state(),
       ])
       const mainRoot = resolve(entries[0]?.path ?? root)
+      // The Session header keeps the repository spelling the user opened; the
+      // live folder is a worktree whose own root is not the main checkout.
+      const headerRoot = sessionOf(sessionId)?.header?.cwd
+      const projectRoot = typeof headerRoot === 'string' && headerRoot.length > 0
+        && pathKey(headerRoot) === pathKey(mainRoot) ? headerRoot : mainRoot
       const records = new Map<string, WorktreeRecord>()
       for (const record of Object.values(value.worktrees ?? {})) {
         if (typeof record?.path === 'string') records.set(pathKey(record.path), record)
@@ -2146,7 +2396,10 @@ function mountRoutes(
       const pool = poolDirectory(mainRoot, config.worktree)
       const worktrees = await Promise.all(entries.map(async (entry) => {
         const record = records.get(pathKey(entry.path))
-        const entryPath = resolve(entry.path)
+          ?? [...records.values()].find((candidate) => candidate.branch === entry.branch)
+        // Keep the path the user opened for the main checkout; git reports its
+        // canonical twin on macOS, which would make the row unmatchable.
+        const entryPath = pathKey(entry.path) === pathKey(mainRoot) ? projectRoot : resolve(entry.path)
         const changedFiles = entry.bare || entry.prunable ? null : await countChangedFiles(entryPath, signal)
         return {
           path: entryPath,
@@ -2168,7 +2421,7 @@ function mountRoutes(
         if (left.isPool !== right.isPool) return left.isPool ? -1 : 1
         return left.path.localeCompare(right.path)
       })
-      return { root: mainRoot, poolDirectory: pool, currentPath, worktrees }
+      return { root: projectRoot, poolDirectory: pool, currentPath, worktrees }
     },
 
     /**
@@ -2177,6 +2430,7 @@ function mountRoutes(
      * so a checkout can be prepared before a chat exists.
      */
     async worktreeAdd(payload, signal) {
+      await rejectContextManagement(typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '', 'This action')
       const { root } = await repository(payload, signal)
       const mainRoot = await mainWorktreeRoot(root, signal)
       if (config.worktree.enabled !== true) {
@@ -2254,6 +2508,7 @@ function mountRoutes(
     /** Move one Session into an existing checkout, or back to the project. */
     async worktreeSwitch(payload, signal) {
       const sessionId = requiredString(payload.sessionId, 'sessionId')
+      await rejectContextManagement(sessionId, 'Moving a chat to one checkout')
       const target = requiredString(payload.path, 'path')
       const { root } = await repository(payload, signal)
       const mainRoot = await mainWorktreeRoot(root, signal)
@@ -2263,7 +2518,7 @@ function mountRoutes(
         throw new CommandError('worktree/unknown-path', 'That folder is not a worktree of this repository', { path: target })
       }
       if (match.bare) throw new CommandError('worktree/bare', 'A bare repository cannot hold a Session')
-      const matchPath = resolve(match.path)
+      const matchPath = pathKey(match.path) === pathKey(mainRoot) ? target : resolve(match.path)
       await setSessionDirectory(sessionId, matchPath, signal)
       await store.update((current) => {
         current.worktrees ??= {}
@@ -2281,6 +2536,7 @@ function mountRoutes(
 
     /** Remove one checkout by path, never the main one. */
     async worktreeRemovePath(payload, signal) {
+      await rejectContextManagement(typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '', 'Removing a checkout by path')
       const target = requiredString(payload.path, 'path')
       const { root } = await repository(payload, signal)
       const mainRoot = await mainWorktreeRoot(root, signal)
@@ -2296,7 +2552,9 @@ function mountRoutes(
       if (sessionId.length > 0) {
         const current = sessionDirectory(ctx, sessionId)
         if (current !== undefined && isInside(match.path, current)) {
-          await setSessionDirectory(sessionId, mainRoot, signal)
+          // Go back to the repository as the caller spelled it, not git's
+          // canonical /private/var twin on macOS.
+          await setSessionDirectory(sessionId, root, signal)
         }
       }
       const result = await removeWorktree(runner, {
@@ -2343,6 +2601,7 @@ function mountRoutes(
      */
     async worktreeCreate(payload, signal) {
       const sessionId = requiredString(payload.sessionId, 'sessionId')
+      await rejectContextManagement(sessionId, 'Creating a single checkout')
       const { directory, root } = await repository(payload, signal)
       const mainRoot = await mainWorktreeRoot(root, signal)
       if (config.worktree.enabled !== true) {
@@ -2430,6 +2689,9 @@ function mountRoutes(
       if (record === undefined) {
         throw new CommandError('worktree/unknown', 'This Session has no worktree created by the plugin')
       }
+      if (record.kind === 'context') {
+        throw new CommandError('worktree/context', 'This chat has several repository checkouts; remove one with checkoutRemove')
+      }
       const repoRoot = String(record.repositoryRoot ?? '')
       const result = await removeWorktree(runner, {
         repoRoot,
@@ -2444,7 +2706,9 @@ function mountRoutes(
         set(agent: { session?: SessionLike }, directory: string, signal?: AbortSignal): Promise<unknown>
       }>('workingDirectory')
       if (agent !== undefined && repoRoot.length > 0 && typeof workingDirectory?.set === 'function') {
-        await workingDirectory.set(agent, repoRoot, signal).catch(() => undefined)
+        const project = sessionOf(sessionId)?.header?.cwd
+        await workingDirectory.set(agent, project !== undefined && project.length > 0 ? project : repoRoot, signal)
+          .catch(() => undefined)
       }
       await store.update((current) => {
         current.worktrees ??= {}
@@ -2613,8 +2877,13 @@ function mountRoutes(
       const record = value.worktrees?.[id]
       const path = typeof record?.path === 'string' ? record.path : ''
       if (path.length > 0) {
-        const marker = await stat(join(path, '.git')).catch(() => undefined)
-        if (marker !== undefined) return path
+        if (record?.kind === 'context') {
+          const directory = await stat(path).catch(() => undefined)
+          if (directory?.isDirectory() === true) return path
+        } else {
+          const marker = await stat(join(path, '.git')).catch(() => undefined)
+          if (marker !== undefined) return path
+        }
       }
     }
     let payloadError: unknown
@@ -2630,18 +2899,320 @@ function mountRoutes(
     throw payloadError
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Workspaces with more than one repository                          */
+  /* ---------------------------------------------------------------- */
+
+  /** Repositories per workspace, cached briefly so a panel poll is cheap. */
+  const repoSetCache = new Map<string, { at: number; set: RepoSet }>()
+  /** The workspace each live Session belongs to, for the prompt and the tool. */
+  const sessionRepoSets = new Map<string, RepoSet>()
+  /** One materialization per Session and repo, so two writes cannot race. */
+  const materializing = new Map<string, Promise<RepoCheckout>>()
+  const REPO_SET_TTL_MS = 30_000
+
+  /** The Session behind an id, live or persisted. */
+  function sessionOf(sessionId: string): SessionLike | undefined {
+    const agent = agentFor(sessionId)
+    return agent?.session ?? ctx.get<{ get(sessionId: string): SessionLike | undefined }>('sessions')?.get(sessionId)
+  }
+
+  /** The workspace directory a Session belongs to. */
+  async function workspaceRootFor(
+    sessionId: string,
+    cwd: unknown,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (sessionId.length > 0) {
+      const session = sessionOf(sessionId)
+      const header = session?.header?.cwd
+      if (typeof header === 'string' && header.length > 0) {
+        const context = await readContextManifest(header).catch(() => undefined)
+        if (context !== undefined) return context.workspaceRoot
+        return header
+      }
+      const live = liveSessionDirectory(ctx, sessionId)
+      if (live !== undefined) {
+        const context = await readContextManifest(live).catch(() => undefined)
+        if (context !== undefined) return context.workspaceRoot
+        return live
+      }
+      const record = (await state()).worktrees?.[sessionId]
+      if (typeof record?.workspaceRoot === 'string' && record.workspaceRoot.length > 0) return record.workspaceRoot
+    }
+    if (typeof cwd === 'string' && cwd.trim().length > 0) {
+      return await directoryFromPayload(cwd)
+    }
+    throw new CommandError('git/no-directory', 'Cannot determine the workspace folder for this Session')
+  }
+
+  /** Discover one workspace's repositories, reusing a short-lived answer. */
+  async function repoSetFor(workspaceRoot: string, signal?: AbortSignal, refresh = false): Promise<RepoSet> {
+    const key = repoPathKey(workspaceRoot)
+    const cached = repoSetCache.get(key)
+    if (refresh !== true && cached !== undefined && Date.now() - cached.at < REPO_SET_TTL_MS) return cached.set
+    const set = await resolveRepoSet(runner, workspaceRoot, {
+      scanDepth: config.workspace.scanDepth,
+      signal,
+    })
+    repoSetCache.set(key, { at: Date.now(), set })
+    return set
+  }
+
+  /** Turn the durable record of a context into the module's working shape. */
+  function contextFromRecord(record: WorktreeRecord): ContextRecord {
+    const repos: Record<string, RepoCheckout> = {}
+    for (const [id, checkout] of Object.entries(record.repos ?? {})) {
+      repos[id] = {
+        id,
+        path: checkout.path,
+        repositoryRoot: checkout.repositoryRoot,
+        branch: checkout.branch,
+        base: checkout.base,
+        source: checkout.source,
+        remote: checkout.remote,
+        start: checkout.start,
+        materializedAt: checkout.materializedAt,
+        warning: checkout.warning ?? null,
+      }
+    }
+    return {
+      kind: 'context',
+      sessionId: record.sessionId,
+      workspaceRoot: record.workspaceRoot ?? record.repositoryRoot,
+      path: record.path,
+      name: record.name,
+      createdAt: record.createdAt,
+      repos,
+    }
+  }
+
+  /** Turn a working context into the durable record. */
+  function recordFromContext(context: ContextRecord): WorktreeRecord {
+    return {
+      kind: 'context',
+      path: context.path,
+      branch: '',
+      name: context.name,
+      repositoryRoot: context.workspaceRoot,
+      sessionId: context.sessionId,
+      createdAt: context.createdAt,
+      workspaceRoot: context.workspaceRoot,
+      repos: { ...context.repos },
+    }
+  }
+
+  /** This Session's context, from the store or from the directory manifest. */
+  async function contextFor(sessionId: string): Promise<{ record: WorktreeRecord; context: ContextRecord } | undefined> {
+    if (sessionId.length === 0) return undefined
+    const record = (await state()).worktrees?.[sessionId]
+    if (record?.kind === 'context' && typeof record.path === 'string') {
+      return { record, context: contextFromRecord(record) }
+    }
+    const live = liveSessionDirectory(ctx, sessionId)
+    if (live !== undefined) {
+      const context = await readContextManifest(live).catch(() => undefined)
+      if (context !== undefined) return { record: recordFromContext(context), context }
+    }
+    return undefined
+  }
+
+  /** Refuse the single-checkout manager routes for a chat that has a context. */
+  async function rejectContextManagement(sessionId: string, action: string): Promise<void> {
+    if (sessionId.length === 0) return
+    const context = await contextFor(sessionId)
+    if (context === undefined) return
+    throw new CommandError(
+      'worktree/context',
+      `${action} is not available for a chat with several repository checkouts; use the repository chip instead`,
+    )
+  }
+
+  /** Create this chat's empty context and make it the Session's folder. */
+  async function ensureSessionContext(
+    sessionId: string,
+    workspaceRoot: string,
+    signal?: AbortSignal,
+  ): Promise<{ record: WorktreeRecord; context: ContextRecord }> {
+    const existing = await contextFor(sessionId)
+    if (existing !== undefined) return existing
+    const name = contextName(sessionId, config.worktree.namePrefix)
+    const context = await ensureContext({
+      workspaceRoot,
+      sessionId,
+      name,
+      directory: config.worktree.directory,
+    })
+    const record = recordFromContext(context)
+    try {
+      // A panel click can create the context while the chat is idle; no live
+      // Agent means there is no folder to change yet, which is not a failure.
+      if (agentFor(sessionId) !== undefined) await setSessionDirectory(sessionId, context.path, signal)
+    } catch (error) {
+      await rm(context.path, { recursive: true, force: true }).catch(() => undefined)
+      throw error
+    }
+    await store.update((current) => {
+      current.worktrees ??= {}
+      current.worktrees[sessionId] = record
+    })
+    checkouts.add(sessionId)
+    sessionRepoSets.set(sessionId, await repoSetFor(workspaceRoot, signal))
+    return { record, context }
+  }
+
+  /** The panel's per-repository view of one workspace. */
+  async function buildRepoStates(
+    set: RepoSet,
+    context: ContextRecord | undefined,
+    light = false,
+  ): Promise<WorkspaceRepo[]> {
+    const isolated = set.kind === 'multi' && config.worktree.enabled !== false && config.checkout.mode !== 'off'
+    return await Promise.all(set.repos.map(async (repo) => {
+      const checkout = context?.repos[repo.id]
+      let state: WorkspaceRepo['state'] = 'not-checked-out'
+      let info: WorkspaceRepo['checkout'] = null
+      let changedFiles: number | null = null
+      if (checkout !== undefined) {
+        const exists = await stat(checkout.path).catch(() => undefined)
+        if (exists?.isDirectory() === true) {
+          state = 'ready'
+          changedFiles = light ? null : await countChangedFiles(checkout.path)
+          info = {
+            path: checkout.path,
+            branch: checkout.branch,
+            base: checkout.base,
+            source: checkout.source,
+            remote: checkout.remote,
+            start: checkout.start,
+            changedFiles,
+            warning: checkout.warning ?? null,
+          }
+        } else {
+          state = 'missing'
+        }
+      } else if (set.kind === 'single' || !isolated) {
+        // No isolation: the panel works on the repository's main checkout.
+        state = 'ready'
+        changedFiles = light ? null : await countChangedFiles(repo.root)
+      }
+      return {
+        id: repo.id,
+        name: repo.name,
+        relativePath: repo.relativePath,
+        role: repo.role,
+        description: repo.description,
+        root: repo.root,
+        core: repo.core,
+        available: repo.available,
+        state,
+        checkout: info,
+        changedFiles,
+        error: null,
+      }
+    }))
+  }
+
+  /** Materialize one repository for a Session, coalescing concurrent calls. */
+  async function materializeForSession(
+    sessionId: string,
+    repo: WorkspaceRepoEntry,
+    base: string | undefined,
+    signal?: AbortSignal,
+    ownerId: string = sessionId,
+  ): Promise<RepoCheckout> {
+    const key = `${ownerId}\u0000${repo.id}`
+    const running = materializing.get(key)
+    if (running !== undefined) return await running
+    const task = (async (): Promise<RepoCheckout> => {
+      const workspaceRoot = await workspaceRootFor(ownerId, undefined, signal)
+      const { context } = await ensureSessionContext(ownerId, workspaceRoot, signal)
+      const set = await repoSetFor(context.workspaceRoot, signal)
+      const result = await materializeRepo({
+        runner,
+        context,
+        repo,
+        set,
+        config: {
+          directory: config.worktree.directory,
+          base: config.worktree.base,
+          source: config.worktree.source,
+          remote: config.worktree.remote,
+          dirtyMain: config.checkout.dirtyMain,
+          fetchOnCheckout: config.checkout.fetchOnCheckout,
+        },
+        timeoutMs: config.worktreeTimeoutMs,
+        signal,
+        base,
+      })
+      await store.update((current) => {
+        current.worktrees ??= {}
+        current.worktrees[ownerId] = recordFromContext(context)
+      })
+      sessionRepoSets.set(ownerId, set)
+      return result.checkout
+    })()
+    materializing.set(key, task)
+    try {
+      return await task
+    } finally {
+      materializing.delete(key)
+    }
+  }
+
   /**
    * Resolve the repository a call addresses.
+   *
+   * A single-repo workspace keeps the original path: the folder resolved from
+   * the Session, as it always was. A multi-repo workspace resolves the `repo`
+   * id against the workspace's set, then answers with that repository's
+   * checkout when the chat has one, its main checkout in direct mode, or a
+   * `repo/not-checked-out` error the panel turns into a "create checkout" card.
+   *
    * @param payload call arguments.
    * @param signal call cancellation.
    */
-  async function repository(payload: GitTarget, signal?: AbortSignal): Promise<{ directory: string; root: string }> {
-    const directory = await sessionCheckout(ctx, payload.sessionId, payload.cwd)
-    const root = await locateRepository(runner, directory, signal)
-    if (root === null) {
-      throw new CommandError('git/not-a-repository', `The folder ${directory} is not inside a Git repository`, { cwd: directory })
+  async function repository(payload: GitTarget, signal?: AbortSignal): Promise<{ directory: string; root: string; repo?: WorkspaceRepoEntry }> {
+    const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+    const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal)
+    const set = await repoSetFor(workspaceRoot, signal)
+    if (set.kind === 'single') {
+      const directory = await sessionCheckout(ctx, sessionId, payload.cwd)
+      const root = await locateRepository(runner, directory, signal)
+      if (root === null) {
+        throw new CommandError('git/not-a-repository', `The folder ${directory} is not inside a Git repository`, { cwd: directory })
+      }
+      return { directory, root }
     }
-    return { directory, root }
+    if (set.kind === 'none') {
+      throw new CommandError('git/not-a-repository', `The folder ${workspaceRoot} contains no Git repository`, { cwd: workspaceRoot })
+    }
+    const wanted = typeof payload.repo === 'string' ? payload.repo.trim() : ''
+    const context = (await contextFor(sessionId))?.context
+    const repo = wanted.length > 0
+      ? repoOf(set, wanted)
+      : (context !== undefined && Object.keys(context.repos).length === 1
+          ? repoOf(set, Object.keys(context.repos)[0])
+          : defaultRepo(set))
+    if (repo === undefined) {
+      throw new CommandError('repo/unknown', `Unknown repository: ${wanted || '(none)'}`, { repo: wanted })
+    }
+    if (context !== undefined) {
+      const checkout = context.repos[repo.id]
+      if (checkout === undefined) {
+        throw new CommandError(
+          'repo/not-checked-out',
+          `${repo.name} is not checked out for this chat yet. Create its checkout first.`,
+          { repo: repo.id },
+        )
+      }
+      const exists = await stat(checkout.path).catch(() => undefined)
+      if (exists?.isDirectory() !== true) {
+        throw new CommandError('repo/missing', `The checkout of ${repo.name} is missing`, { repo: repo.id, path: checkout.path })
+      }
+      return { directory: checkout.path, root: checkout.path, repo }
+    }
+    return { directory: repo.root, root: repo.root, repo }
   }
 
   /**
@@ -2669,6 +3240,220 @@ function mountRoutes(
   }
 
   const disposers: Array<() => void> = []
+
+  /* ---------------------------------------------------------------- */
+  /* Model surface: prompt, checkout tool, and the write guard         */
+  /* ---------------------------------------------------------------- */
+
+  /** The Session behind an opaque `fs/*-intent` actor. */
+  function actorSession(actor: unknown): SessionLike | undefined {
+    return (actor as { agent?: { session?: SessionLike } } | undefined)?.agent?.session
+  }
+
+  /** A model-readable denial that looks like a filesystem refusal. */
+  function checkoutRedirect(message: string): Error {
+    const error = new Error(message)
+    ;(error as { code?: string }).code = 'FS_PERMISSION_DENIED'
+    ;(error as { name?: string }).name = 'FsError'
+    return error
+  }
+
+  /**
+   * Refuse a write to a repository's main checkout while the chat is isolated.
+   *
+   * The first write to a repository creates its checkout and tells the model to
+   * repeat the write inside it; later writes point at the existing checkout.
+   * This is the only way to satisfy "only a repository that changes gets a
+   * worktree": the change itself is the trigger.
+   */
+  async function guardMainCheckout(target: unknown, actor: unknown): Promise<void> {
+    if (config.checkout.mode === 'off' || config.checkout.enforceIsolation !== true) return
+    const fileSystem = ctx.get<FileSystemService>('fs')
+    if (typeof fileSystem?.processPath !== 'function') return
+    const session = actorSession(actor)
+    const sessionId = typeof session?.id === 'string' ? session.id : ''
+    if (sessionId.length === 0) return
+    const current = await contextFor(sessionId)
+    if (current === undefined) return
+    const set = await repoSetFor(current.context.workspaceRoot)
+    if (set.kind !== 'multi') return
+    let path: string
+    try {
+      path = fileSystem.processPath(target)
+    } catch {
+      return
+    }
+    path = await realpath(path).catch(() => path)
+    // Writing the context manifest or a checkout is exactly what is allowed.
+    if (isPathInside(current.context.path, path)) return
+    for (const repo of set.repos) {
+      if (!isPathInside(repo.root, path)) continue
+      const suffix = relative(repo.root, path)
+      const existing = current.context.repos[repo.id]
+      if (existing !== undefined) {
+        const targetPath = join(existing.path, suffix)
+        throw checkoutRedirect(
+          `${repo.name} is isolated at ${targetPath}. Write there instead of the repository's main checkout.`,
+        )
+      }
+      const made = await materializeForSession(sessionId, repo, undefined, undefined, current.context.sessionId || sessionId)
+      const warning = made.warning === null || made.warning === undefined ? '' : ` ${made.warning}`
+      throw checkoutRedirect(
+        `Created an isolated checkout for ${repo.name} at ${join(made.path, suffix)} (branch ${made.branch}). `
+        + `Re-run this write at that path and re-read the file there; the main checkout is untouched.${warning}`,
+      )
+    }
+  }
+
+  // `fs/write-intent`, `fs/edit-intent`, and `fs/delete-intent` are the file
+  // tools' pre-mutation waterfalls. A listener that rejects vetoes the call;
+  // returning `next()` lets the filesystem's own guards decide.
+  if (typeof ctx.on === 'function') {
+    const listen = ctx.on as unknown as (
+      event: string,
+      listener: (target: unknown, actor: unknown, next: () => unknown) => unknown,
+    ) => () => void
+    for (const event of ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']) {
+      try {
+        disposers.push(listen(event, (target, actor, next) => (
+          guardMainCheckout(target, actor).then(() => next())
+        )))
+      } catch (error) {
+        logger.warn('git: cannot install the %s guard: %s', event, messageOf(error))
+      }
+    }
+  }
+
+  /** The context record a Session or its inherited working directory names. */
+  function contextRecordFor(session: SessionLike | undefined): WorktreeRecord | undefined {
+    const sessionId = typeof session?.id === 'string' ? session.id : ''
+    if (sessionId.length > 0) {
+      const direct = store.state.worktrees?.[sessionId]
+      if (direct?.kind === 'context') return direct
+    }
+    const cwd = session?.header?.cwd
+    if (typeof cwd !== 'string' || cwd.length === 0) return undefined
+    return Object.values(store.state.worktrees ?? {}).find(
+      (record) => record?.kind === 'context' && pathKey(record.path) === pathKey(cwd),
+    )
+  }
+
+  /** The workspace paragraph the model sees for an isolated chat. */
+  function workspacePrompt(session: SessionLike | undefined): string {
+    const record = contextRecordFor(session)
+    if (record?.kind !== 'context') return ''
+    const sessionId = record.sessionId
+    const set = sessionRepoSets.get(sessionId)
+      ?? (record.workspaceRoot !== undefined ? repoSetCache.get(repoPathKey(record.workspaceRoot))?.set : undefined)
+    const context = contextFromRecord(record)
+    const lines = [
+      'This chat works in a multi-repository workspace.',
+      `Workspace root: ${context.workspaceRoot}`,
+      `Working directory: ${context.path} (an empty context directory; repositories appear here after checkout).`,
+      'Repositories:',
+    ]
+    const repos = set?.repos ?? []
+    if (repos.length === 0) {
+      for (const [id, checkout] of Object.entries(context.repos)) {
+        lines.push(`- ${id}: checked out at ${checkout.path} (branch ${checkout.branch})`)
+      }
+    } else {
+      for (const repo of repos) {
+        const checkout = context.repos[repo.id]
+        lines.push(checkout === undefined
+          ? `- ${repo.id} — ${repo.role} — ${repo.root} — not checked out`
+          : `- ${repo.id} — ${repo.role} — ${repo.root} — checked out at ${checkout.path} (branch ${checkout.branch})`)
+      }
+    }
+    lines.push(
+      'To modify a repository, call checkout_repo({ repo }) first, then edit inside the returned checkout and',
+      're-read files there; a checkout starts from the fetched base, not from uncommitted main-tree changes.',
+      'Never edit a repository main checkout: the harness will redirect the write. Reading any repository is allowed.',
+    )
+    return lines.join('\n')
+  }
+
+  const promptService = ctx.get<SystemPromptService>('systemPrompt')
+  if (typeof promptService?.context === 'function') {
+    try {
+      disposers.push(promptService.context({
+        name: 'personal-hub:workspace',
+        order: 1200,
+        text: (context) => workspacePrompt(context.agent?.session),
+      }))
+    } catch (error) {
+      logger.warn('git: cannot add the workspace prompt: %s', messageOf(error))
+    }
+  }
+
+  const toolsService = ctx.get<ToolsService>('tools')
+  if (typeof toolsService?.register === 'function') {
+    const definition: ToolDefinitionLike = {
+      name: 'checkout_repo',
+      description: 'Create an isolated Git checkout for one repository of this multi-repository workspace so you can modify it. Call this before editing that repository; it returns the path to use. Reading does not require a checkout.',
+      parameters: {
+        repo: { type: 'string', required: true, description: 'Repository id from the workspace context.' },
+        base: { type: 'string', description: 'Optional branch to start from; defaults to the repository default branch.' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            repo: { type: 'string', required: true },
+            path: { type: 'string', required: true },
+            branch: { type: 'string', required: true },
+            base: { type: 'string', required: true },
+            warning: { type: 'string' },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: `${String(value.repo ?? '')}: ${String(value.path ?? '')} (branch ${String(value.branch ?? '')} from ${String(value.base ?? '')})${value.warning === undefined ? '' : `
+${String(value.warning)}`}`,
+        }],
+      },
+      async execute(args, exec) {
+        const repoId = typeof args.repo === 'string' ? args.repo.trim() : ''
+        const session = exec.agent?.session
+        const sessionId = typeof session?.id === 'string' ? session.id : ''
+        if (sessionId.length === 0) throw new Error('checkout_repo requires an open Session')
+        const owner = (await contextFor(sessionId))?.context.sessionId || sessionId
+        const workspaceRoot = await workspaceRootFor(owner, undefined, exec.signal)
+        const set = await repoSetFor(workspaceRoot, exec.signal)
+        if (set.kind !== 'multi') throw new Error('This workspace has only one repository; it needs no context checkout')
+        if (config.checkout.mode === 'off') throw new Error('Lazy checkouts are disabled for this workspace')
+        const repo = repoOf(set, repoId)
+        if (repo === undefined) throw new Error(`Unknown repository: ${repoId}`)
+        const checkout = await materializeForSession(
+          owner,
+          repo,
+          typeof args.base === 'string' ? args.base : undefined,
+          exec.signal,
+        )
+        return {
+          repo: repo.id,
+          path: checkout.path,
+          branch: checkout.branch,
+          base: checkout.base,
+          ...(checkout.warning === null || checkout.warning === undefined ? {} : { warning: checkout.warning }),
+        }
+      },
+    }
+    try {
+      disposers.push(toolsService.register(definition, {
+        when: ({ agent }) => {
+          const sessionId = typeof agent?.session?.id === 'string' ? agent.session.id : ''
+          if (sessionId.length === 0) return false
+          if (store.state.worktrees?.[sessionId]?.kind === 'context') return true
+          return sessionRepoSets.get(sessionId)?.kind === 'multi'
+        },
+      }))
+    } catch (error) {
+      logger.warn('git: cannot register checkout_repo: %s', messageOf(error))
+    }
+  }
+
   for (const endpoint of Object.keys(handlers)) {
     const route = {
       path: `${GIT_PATH_PREFIX}/${endpoint}`,

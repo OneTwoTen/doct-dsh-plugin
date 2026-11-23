@@ -10,6 +10,9 @@ Plugin cá nhân cho **DeepSeek Harness**: một bundle, nhiều tính năng.
   đánh giá và **gộp PR (merge/squash/rebase)** ngay trong panel, và issue. Dải tab hiện số thật.
 - **Quản lý worktree** — tab Worktree trong bảng Git: liệt kê mọi checkout, tạo worktree mới, chuyển
   chat sang checkout, mở chat trong checkout, xoá và dọn đăng ký mồ côi.
+- **Workspace nhiều kho** — mở workspace ở thư mục cha chứa nhiều repo: panel phát hiện từng repo
+  (vai trò tuỳ chọn), chat có context dir rỗng và **chỉ tạo worktree cho repo bị sửa**; commit/push/PR
+  vẫn độc lập từng repo.
 - **Pull request bằng AI** — một bước trong chuỗi thao tác: model hiện tại của phiên (effort thấp nhất)
   viết tiêu đề/mô tả, bạn **xem và sửa trong hộp thoại** (hoặc bấm Viết lại) rồi mới đẩy nhánh và mở PR.
   Mô tả mơ hồ được hỏi lại một lần; ngôn ngữ bám theo UI (vi/en).

@@ -5,6 +5,7 @@
  * action reads that back the views.
  */
 import { execFile } from 'node:child_process'
+import { realpath } from 'node:fs/promises'
 import { open, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
@@ -1737,7 +1738,18 @@ export async function locateRepository(
   }
   const root = String(result.stdout ?? '').trim().split('\n')[0]
   if (root.length === 0) return null
-  return resolve(cwd, root)
+  const absolute = resolve(cwd, root)
+  // Keep the caller's spelling when it already names the repository root: a
+  // macOS workspace under /var is the same checkout as git's /private/var, and
+  // the UI should show the path the user opened.
+  const [realCwd, realRoot] = await Promise.all([
+    realpath(cwd).catch(() => resolve(cwd)),
+    realpath(absolute).catch(() => absolute),
+  ])
+  const same = process.platform === 'win32'
+    ? realCwd.toLowerCase() === realRoot.toLowerCase()
+    : realCwd === realRoot
+  return same ? resolve(cwd) : absolute
 }
 
 /** One parsed patch, exported for tests that build patches by hand. */

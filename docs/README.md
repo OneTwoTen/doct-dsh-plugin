@@ -1,6 +1,16 @@
 # Tài liệu
 
-Bộ tài liệu thiết kế cho Web Remote (điều khiển DSH từ xa qua WebChat).
+Bộ tài liệu thiết kế của plugin: workspace nhiều repo, Web Remote, và các quyết định kiến trúc.
+
+## Workspace nhiều repo
+
+| Tài liệu | Nội dung | Trạng thái |
+|---|---|---|
+| [Nghiên cứu — một workspace, nhiều git repo](nghien-cuu-workspace-nhieu-repo.md) | Hiện trạng một-repo của DSH/plugin, so sánh các phương án, thiết kế context dir + checkout theo nhu cầu, lộ trình P0–P3 | đã có P0–P2 |
+
+## Web Remote
+
+Điều khiển DSH từ xa qua WebChat.
 
 | Tài liệu | Nội dung | Trạng thái |
 |---|---|---|
@@ -19,7 +29,8 @@ trong [`plugin/README.md`](../plugin/README.md#8-web-remote-phase-1--bridge).
 
 ## Thứ tự đọc
 
-1. **Nghiên cứu** — để biết vì sao chọn kiến trúc này và những gì DSH đã có sẵn.
+0. **Nghiên cứu workspace nhiều repo** — nếu bạn dùng một thư mục chứa nhiều kho.
+1. **Nghiên cứu Web Remote** — để biết vì sao chọn kiến trúc này và những gì DSH đã có sẵn.
 2. **Đặc tả v1** — hợp đồng dữ liệu và luồng ghép cặp để ba thành phần triển khai song song.
 3. **ADR-001** — nơi đặt code và khi nào tách repo.
 

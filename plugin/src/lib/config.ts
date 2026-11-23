@@ -98,6 +98,24 @@ export interface WorktreeConfig {
   cleanup: WorktreeCleanupConfig
 }
 
+/** How a multi-repo chat gets its per-repository checkouts. */
+export interface CheckoutConfig {
+  /** `lazy` (default) creates a checkout when a repo is first modified; `eager` pre-creates `core`. */
+  mode: 'lazy' | 'eager' | 'off'
+  /** Refuse writes to a repository's main checkout while the chat is isolated. */
+  enforceIsolation: boolean
+  /** What to do when a repository's main checkout has uncommitted changes. */
+  dirtyMain: 'warn' | 'abort'
+  /** Fetch the base when a checkout is created. */
+  fetchOnCheckout: boolean
+}
+
+/** Discovery settings for a multi-repo workspace. */
+export interface WorkspaceConfig {
+  /** Directory levels below the workspace root that are scanned for repositories. */
+  scanDepth: number
+}
+
 /** What happens once a Session's change request is merged. */
 export interface MergedConfig {
   enabled: boolean
@@ -134,6 +152,8 @@ export interface GitConfig {
   pull: PullConfig
   commit: CommitConfig
   worktree: WorktreeConfig
+  checkout: CheckoutConfig
+  workspace: WorkspaceConfig
   merged: MergedConfig
 }
 
@@ -300,6 +320,17 @@ export const GIT_DEFAULTS = Object.freeze({  enabled: true,
       deleteBranch: false,
     }),
   }),
+  /** Lazy per-repository checkouts for a multi-repo workspace. */
+  checkout: Object.freeze({
+    mode: 'lazy',
+    enforceIsolation: true,
+    dirtyMain: 'warn',
+    fetchOnCheckout: true,
+  }),
+  /** Discovery of repositories in a plain workspace directory. */
+  workspace: Object.freeze({
+    scanDepth: 2,
+  }),
   /** What happens once a Session's change request is merged. */
   merged: Object.freeze({
     enabled: false,
@@ -433,6 +464,8 @@ export function normalizeConfig(raw: unknown): HubConfig {
   const worktree = asRecord(git.worktree)
   const cleanup = asRecord(worktree.cleanup)
   const merged = asRecord(git.merged)
+  const checkout = asRecord(git.checkout)
+  const workspace = asRecord(git.workspace)
   const webRemote = asRecord(root.webRemote)
   const autoArchive = asRecord(root.autoArchive)
   const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 60000 })
@@ -537,6 +570,15 @@ export function normalizeConfig(raw: unknown): HubConfig {
           keepChanges: asChoice(cleanup.keepChanges, ['tracked', 'any', 'none'] as const, GIT_DEFAULTS.worktree.cleanup.keepChanges),
           deleteBranch: asBoolean(cleanup.deleteBranch, GIT_DEFAULTS.worktree.cleanup.deleteBranch),
         },
+      },
+      checkout: {
+        mode: asChoice(checkout.mode, ['lazy', 'eager', 'off'] as const, GIT_DEFAULTS.checkout.mode),
+        enforceIsolation: asBoolean(checkout.enforceIsolation, GIT_DEFAULTS.checkout.enforceIsolation),
+        dirtyMain: asChoice(checkout.dirtyMain, ['warn', 'abort'] as const, GIT_DEFAULTS.checkout.dirtyMain),
+        fetchOnCheckout: asBoolean(checkout.fetchOnCheckout, GIT_DEFAULTS.checkout.fetchOnCheckout),
+      },
+      workspace: {
+        scanDepth: asPositiveInteger(workspace.scanDepth, GIT_DEFAULTS.workspace.scanDepth, { min: 1, max: 5 }),
       },
       merged: {
         enabled: asBoolean(merged.enabled, GIT_DEFAULTS.merged.enabled),
