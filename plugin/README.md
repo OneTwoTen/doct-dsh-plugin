@@ -806,6 +806,40 @@ Gói tiếng Việt có test riêng trong `test/vi-language-pack.test.ts`: ngôn
 fallback, mọi namespace đăng ký ở locale `vi`, placeholder giữ nguyên, không có ký tự zero-width,
 và một đăng ký lỗi không làm hỏng phần còn lại của gói.
 
+## 9. Đồng bộ model OpenCode Go cho subagent
+
+Khi dùng `dsh-opencode-go` làm adapter, danh sách model của phiên chính được adapter làm mới trực tiếp
+từ gateway `/models`. Riêng subagent dùng một **session policy** gồm các route `provider/model` cụ thể,
+nên bản thân DSH không có chế độ "lấy mọi model đang có".
+
+Tính năng `opencodeSubagent` (bật mặc định) giải quyết phần đó:
+
+- Khi một phiên mới được tạo, plugin gọi `llm.listModels('dsh-opencode-go')` và ghi toàn bộ model mà
+  gateway đang quảng cáo vào `subagent/model-selection-policy` của phiên đó.
+- Subagent con kế thừa đúng policy của phiên cha; model mới trên gateway vì thế có mặt ngay ở cả
+  `list_subagent_models` lẫn lựa chọn model của subagent, không cần sửa cấu hình.
+- Nếu catalog chưa kịp nạp hoặc lỗi mạng tạm thời, plugin dùng danh sách tốt nhất từng đọc được trong
+  cùng phiên Host; khi chưa có gì thì bỏ qua và để DSH giữ hành vi mặc định.
+
+Cấu hình trong `cordis.patch.yml`:
+
+```yaml
+- id: personal-hub
+  config:
+    opencodeSubagent:
+      enabled: true
+      provider: dsh-opencode-go
+```
+
+Để tránh hai bên cùng ghi policy, tắt bộ sampler có sẵn trong cùng patch:
+
+```yaml
+- id: subagent-model-selection-settings
+  config:
+    enabled: false
+    allowedModels: []
+```
+
 ## Giới hạn hiện tại
 
 - Chỉ nhận tin nhắn văn bản; ảnh/tệp chưa được chuyển vào DSH.

@@ -1,4 +1,8 @@
 // src/lib/config.ts
+var OPENCODE_SUBAGENT_DEFAULTS = Object.freeze({
+  enabled: true,
+  provider: "dsh-opencode-go"
+});
 var TELEGRAM_DEFAULTS = Object.freeze({
   enabled: true,
   token: "",
@@ -230,6 +234,7 @@ function normalizeConfig(raw) {
   const merged = asRecord(git.merged);
   const webRemote = asRecord(root.webRemote);
   const autoArchive = asRecord(root.autoArchive);
+  const opencodeSubagent = asRecord(root.opencodeSubagent);
   const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 6e4 });
   const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 3e5 });
   return {
@@ -349,6 +354,10 @@ function normalizeConfig(raw) {
       dryRun: asBoolean(autoArchive.dryRun, AUTO_ARCHIVE_DEFAULTS.dryRun),
       maxPerPass: asWholeNumber(autoArchive.maxPerPass, AUTO_ARCHIVE_DEFAULTS.maxPerPass, { min: 0, max: 500 }),
       startupDelayMs: asWholeNumber(autoArchive.startupDelayMs, AUTO_ARCHIVE_DEFAULTS.startupDelayMs, { min: 0, max: 36e5 })
+    },
+    opencodeSubagent: {
+      enabled: asBoolean(opencodeSubagent.enabled, OPENCODE_SUBAGENT_DEFAULTS.enabled),
+      provider: asString(opencodeSubagent.provider, OPENCODE_SUBAGENT_DEFAULTS.provider).trim() || OPENCODE_SUBAGENT_DEFAULTS.provider
     }
   };
 }
@@ -7684,6 +7693,98 @@ function textOfUserMessage(message3) {
   return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text).join(" ").trim();
 }
 
+// src/features/opencode-subagent.ts
+var POLICY_EVENT = "subagent/model-selection-policy";
+function allowedModelsFrom(models, provider) {
+  const seen = /* @__PURE__ */ new Set();
+  const routes = [];
+  for (const entry of models) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const id = entry.id;
+    if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    routes.push({ provider, model: id });
+  }
+  return routes;
+}
+function recordedPolicy(session) {
+  const events = session?.snapshotEvents?.() ?? [];
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index];
+    if (event?.type !== POLICY_EVENT) continue;
+    const allowed = event.data?.allowedModels;
+    if (!Array.isArray(allowed)) return void 0;
+    const routes = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const raw of allowed) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const provider = raw.provider;
+      const model = raw.model;
+      if (typeof provider !== "string" || provider.length === 0) continue;
+      if (typeof model !== "string" || model.length === 0) continue;
+      const key = `${provider}\0${model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      routes.push({ provider, model });
+    }
+    return routes.length > 0 ? routes : void 0;
+  }
+  return void 0;
+}
+function mountOpencodeSubagent(ctx, config, deps) {
+  const { logger } = deps;
+  const llm = ctx.get("llm");
+  const sessions = ctx.get("sessions");
+  if (llm?.listModels === void 0) {
+    logger.warn("personal-hub: llm.listModels unavailable; subagent models keep their existing policy");
+    return () => {
+    };
+  }
+  let disposed = false;
+  let lastKnown = [];
+  const listModels = llm.listModels;
+  const readLive = async () => {
+    const models = await listModels.call(llm, config.provider);
+    const routes = allowedModelsFrom(models, config.provider);
+    if (routes.length === 0) throw new Error(`no models advertised by ${config.provider}`);
+    lastKnown = routes;
+    return routes;
+  };
+  const onAgentCreated = async (payload) => {
+    if (disposed) return;
+    const session = payload?.agent?.session;
+    if (session?.append === void 0) return;
+    if (recordedPolicy(session) !== void 0) return;
+    if (session.header?.origin === "subagent") {
+      const parentId = session.header.parentSession;
+      const inherited = typeof parentId === "string" ? recordedPolicy(sessions?.get(parentId)) : void 0;
+      if (inherited !== void 0) {
+        session.append(POLICY_EVENT, { allowedModels: inherited });
+        return;
+      }
+    }
+    let allowedModels;
+    try {
+      allowedModels = await readLive();
+    } catch (error) {
+      if (lastKnown.length === 0) {
+        logger.warn("personal-hub: cannot read %s models for subagents: %s", config.provider, String(error));
+        return;
+      }
+      allowedModels = lastKnown;
+      logger.warn("personal-hub: using last known %s models for subagents: %s", config.provider, String(error));
+    }
+    if (disposed) return;
+    session.append(POLICY_EVENT, { allowedModels });
+    logger.info("personal-hub: subagent models synced from %s (%d)", config.provider, allowedModels.length);
+  };
+  const off = ctx.on?.("agent/created", onAgentCreated);
+  return () => {
+    disposed = true;
+    off?.();
+  };
+}
+
 // src/features/telegram-remote.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir3, readFile as readFile3 } from "node:fs/promises";
@@ -11532,7 +11633,8 @@ var FEATURES = [
   { key: "telegram", label: "Telegram remote control" },
   { key: "git", label: "Git panel" },
   { key: "webRemote", label: "Web Remote", mountWhenDisabled: true },
-  { key: "autoArchive", label: "Automatic archive", mountWhenDisabled: true }
+  { key: "autoArchive", label: "Automatic archive", mountWhenDisabled: true },
+  { key: "opencodeSubagent", label: "Live OpenCode Go subagent models" }
 ];
 function mountFeature(ctx, settings, key, deps) {
   switch (key) {
@@ -11544,6 +11646,8 @@ function mountFeature(ctx, settings, key, deps) {
       return mountWebRemote(ctx, settings.webRemote, deps);
     case "autoArchive":
       return mountAutoArchive(ctx, settings.autoArchive, deps);
+    case "opencodeSubagent":
+      return mountOpencodeSubagent(ctx, settings.opencodeSubagent, deps);
   }
 }
 function apply(ctx, config) {
