@@ -18,6 +18,7 @@ import { normalizeConfig } from './lib/config.ts'
 import type { HubConfig } from './lib/config.ts'
 import { mountAutoArchive } from './features/auto-archive.ts'
 import { mountGit } from './features/git.ts'
+import { mountOpencodeSubagent } from './features/opencode-subagent.ts'
 import { mountTelegramRemote } from './features/telegram-remote.ts'
 import { mountWebRemote } from './features/web-remote.ts'
 import type { DshContext, Disposer, Logger } from './host/dsh.ts'
@@ -48,6 +49,7 @@ const FEATURES: readonly HubFeature[] = [
   { key: 'git', label: 'Git panel' },
   { key: 'webRemote', label: 'Web Remote', mountWhenDisabled: true },
   { key: 'autoArchive', label: 'Automatic archive', mountWhenDisabled: true },
+  { key: 'opencodeSubagent', label: 'Live OpenCode Go subagent models' },
 ]
 
 /**
@@ -73,6 +75,8 @@ function mountFeature(
       return mountWebRemote(ctx, settings.webRemote, deps)
     case 'autoArchive':
       return mountAutoArchive(ctx, settings.autoArchive, deps)
+    case 'opencodeSubagent':
+      return mountOpencodeSubagent(ctx, settings.opencodeSubagent, deps)
   }
 }
 

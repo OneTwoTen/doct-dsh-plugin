@@ -102,12 +102,16 @@ export interface SessionLike {
     cwd?: string
     /** `subagent` on a child a delegating Agent created. */
     origin?: string
+    /** Parent Session of a `subagent` child. */
+    parentSession?: string
     /** Delegation depth; absent or zero on a top-level Session. */
     delegationDepth?: number
     [key: string]: unknown
   }
+  /** Append one durable event to the Session log. */
+  append?(type: string, data: unknown): void
   /** The Session log, when this build exposes the synchronous reader. */
-  snapshotEvents?(): readonly { type?: string }[]
+  snapshotEvents?(): readonly { type?: string; data?: unknown }[]
   [key: string]: unknown
 }
 
@@ -163,6 +167,8 @@ export interface LlmService {
     signal: AbortSignal,
     adjust?: (controls: Record<string, unknown>, model: unknown) => Record<string, unknown>,
   ): Promise<LlmCall>
+  /** Live catalog advertised by one registered provider. */
+  listModels?(provider: string): Promise<readonly { id?: unknown; provider?: unknown }[]>
 }
 
 /** The `workspaceRegistry` service. */

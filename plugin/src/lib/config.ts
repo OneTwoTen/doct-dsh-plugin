@@ -146,13 +146,27 @@ export interface AutoArchiveConfig extends AutoArchiveSettings {
   startupDelayMs: number
 }
 
+/** Keep subagent model selection in sync with a live LLM catalog. */
+export interface OpencodeSubagentConfig {
+  enabled: boolean
+  /** Registered LLM route whose `/models` catalog is authoritative. */
+  provider: string
+}
+
 /** The normalized configuration one plugin row carries. */
 export interface HubConfig {
   telegram: TelegramConfig
   webRemote: WebRemoteConfig
   git: GitConfig
   autoArchive: AutoArchiveConfig
+  opencodeSubagent: OpencodeSubagentConfig
 }
+
+/** Live subagent model sync defaults. */
+export const OPENCODE_SUBAGENT_DEFAULTS = Object.freeze({
+  enabled: true,
+  provider: 'dsh-opencode-go',
+})
 
 /** Telegram defaults. */
 export const TELEGRAM_DEFAULTS = Object.freeze({
@@ -435,6 +449,7 @@ export function normalizeConfig(raw: unknown): HubConfig {
   const merged = asRecord(git.merged)
   const webRemote = asRecord(root.webRemote)
   const autoArchive = asRecord(root.autoArchive)
+  const opencodeSubagent = asRecord(root.opencodeSubagent)
   const reconnectMinMs = asPositiveInteger(webRemote.reconnectMinMs, WEB_REMOTE_DEFAULTS.reconnectMinMs, { min: 250, max: 60000 })
   const reconnectMaxMs = asPositiveInteger(webRemote.reconnectMaxMs, WEB_REMOTE_DEFAULTS.reconnectMaxMs, { min: reconnectMinMs, max: 300000 })
   return {
@@ -556,6 +571,10 @@ export function normalizeConfig(raw: unknown): HubConfig {
       dryRun: asBoolean(autoArchive.dryRun, AUTO_ARCHIVE_DEFAULTS.dryRun),
       maxPerPass: asWholeNumber(autoArchive.maxPerPass, AUTO_ARCHIVE_DEFAULTS.maxPerPass, { min: 0, max: 500 }),
       startupDelayMs: asWholeNumber(autoArchive.startupDelayMs, AUTO_ARCHIVE_DEFAULTS.startupDelayMs, { min: 0, max: 3600000 }),
+    },
+    opencodeSubagent: {
+      enabled: asBoolean(opencodeSubagent.enabled, OPENCODE_SUBAGENT_DEFAULTS.enabled),
+      provider: asString(opencodeSubagent.provider, OPENCODE_SUBAGENT_DEFAULTS.provider).trim() || OPENCODE_SUBAGENT_DEFAULTS.provider,
     },
   }
 }
