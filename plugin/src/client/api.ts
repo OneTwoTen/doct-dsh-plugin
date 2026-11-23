@@ -162,6 +162,10 @@ export function createGitApi(call: RawCall): GitApi {
       call(name, payload) as Promise<GitResponse<K>>
 
   return {
+    repos: route('repos') as (payload: GitTarget) => Promise<GitResponse<'repos'>>,
+    checkoutRepo: route('checkoutRepo') as (payload: import('../shared/protocol.ts').CheckoutRepoRequest) => Promise<GitResponse<'checkoutRepo'>>,
+    checkoutRemove: route('checkoutRemove') as (payload: import('../shared/protocol.ts').CheckoutRemoveRequest) => Promise<GitResponse<'checkoutRemove'>>,
+    contextRemove: route('contextRemove') as (payload: import('../shared/protocol.ts').ContextRemoveRequest) => Promise<GitResponse<'contextRemove'>>,
     overview: route('overview') as (payload: GitTarget) => Promise<GitResponse<'overview'>>,
     counts: route('counts') as (payload: GitTarget & { refresh?: boolean }) => Promise<GitResponse<'counts'>>,
     diff: route('diff') as (payload: DiffRequest) => Promise<GitResponse<'diff'>>,

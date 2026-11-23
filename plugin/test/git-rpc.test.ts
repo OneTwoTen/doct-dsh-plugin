@@ -17,9 +17,9 @@ process.once('exit', () => rmSync(testHome, { recursive: true, force: true }))
 /** The routes the feature registers, so a removed or renamed one fails the suite. */
 const EXPECTED_ROUTES = [
   'actionState', 'branchPull', 'branches', 'cleanupRun', 'cleanupState', 'commit', 'commitChanges', 'commits',
-  'counts', 'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'draftPull', 'forge',
+  'checkoutRemove', 'checkoutRepo', 'contextRemove', 'counts', 'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'draftPull', 'forge',
   'issue', 'issues', 'mergePull', 'mergeSettings', 'mergeSettingsSet', 'overview', 'publish', 'pull',
-  'pullRequest', 'pulls', 'push', 'stage', 'startAction', 'switchBranch', 'unstage', 'worktreeAdd',
+  'pullRequest', 'pulls', 'push', 'repos', 'stage', 'startAction', 'switchBranch', 'unstage', 'worktreeAdd',
   'worktreeCreate', 'worktreePrune', 'worktreeRemove', 'worktreeRemovePath', 'worktreeRequest', 'worktreeState',
   'worktreeSwitch', 'worktrees',
 ].sort()

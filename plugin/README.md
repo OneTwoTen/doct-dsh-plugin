@@ -380,6 +380,30 @@ thay đổi chưa commit của tệp được theo dõi, `any` giữ cả khi ch
 cả hai. "Không hoạt động" đo bằng thời điểm tạo checkout và mtime thư mục. Kết quả mỗi lượt được ghi
 vào `cleanup` trong `git.json`, và thẻ cấu hình có nút **Dọn ngay** cùng dòng tóm tắt lần gần nhất.
 
+### Workspace nhiều kho (multi-repo)
+
+Mở workspace ở **thư mục cha** chứa các repo (workspace phải là thư mục thường, không nằm trong một
+repo). Panel phát hiện repo, hiện chip theo repo; Git vẫn độc lập từng repo.
+
+- Tin nhắn đầu tiên chỉ tạo **context dir rỗng** (`<workspace>/.agents/worktrees/<tên>`), **không**
+  tạo worktree. Chat đọc mọi repo qua đường dẫn tuyệt đối (hoặc `grep`/`glob` với `path`).
+- Khi agent sửa một repo, nó gọi tool `checkout_repo`; nếu quên, write guard chặn lần ghi đầu vào
+  cây chính, tạo checkout trong context dir và trả đường dẫn để thử lại. **Chỉ repo bị sửa mới có
+  worktree**; repo chỉ đọc không tốn checkout.
+- Panel có chip `Tất cả` + từng repo, trạng thái `chưa checkout / đang tạo / đã checkout`; repo chưa
+  checkout có nút **Tạo checkout**. Commit/push/PR/diff vẫn theo repo đang chọn.
+- Tab **Worktree** có mục checkout của chat: tạo/xoá từng repo, xoá cả context, và dọn dẹp từng
+  checkout theo tuổi/quy tắc. Auto-archive theo PR **chưa** chạy cho multi-repo (P3).
+- Mặc định `lazy`. Cấu hình: `git.checkout.mode` (`lazy`/`eager`/`off`), `dirtyMain` (`warn`/`abort`),
+  `enforceIsolation`; `git.workspace.scanDepth`.
+- Manifest tuỳ chọn `<workspace>/.dsh-workspace.json`: `core`, `exclude`, `roles`, `description`,
+  `base`, `remote`, `checkout`. Không có manifest plugin vẫn khám phá và chạy.
+
+Giới hạn: guard chỉ phủ file tool (`write`, `edit`, `apply_patch`…); bash có thể lách. Checkout tạo
+từ base đã fetch, **không mang thay đổi chưa commit** ở cây chính (`dirtyMain` cảnh báo/buộc dừng).
+`AGENTS.md`/skills của workspace và từng repo không tự nạp trong context dir — xem
+[`docs/nghien-cuu-workspace-nhieu-repo.md`](../docs/nghien-cuu-workspace-nhieu-repo.md).
+
 ### Dọn dẹp sau khi PR được gộp
 
 Bật trong cấu hình (hoặc trong thẻ cấu hình của plugin ở trang **Plugins**):

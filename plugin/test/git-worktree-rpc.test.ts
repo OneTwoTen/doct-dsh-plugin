@@ -42,6 +42,7 @@ async function makeRepositoryWithOrigin() {
   const peer = await mkdtemp(join(tmpdir(), 'personal-hub-peer-'))
   const peerGit = (...args) => execFileSync('git', args, { cwd: peer, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   peerGit('clone', '-q', origin, '.')
+  peerGit('checkout', '-q', '-b', 'main')
   peerGit('config', 'user.email', 'peer@example.com')
   peerGit('config', 'user.name', 'Peer Contributor')
   peerGit('config', 'commit.gpgsign', 'false')
@@ -791,5 +792,241 @@ test('an opted-out chat, a started chat, and a failing checkout stay in the proj
   } finally {
     await feature.dispose()
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+/** A repository inside a plain workspace, with one commit on `main`. */
+async function makeSiblingRepo(workspace: string, name: string): Promise<string> {
+  const root = join(workspace, name)
+  execFileSync('git', ['init', '-q', '-b', 'main', root], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  git('config', 'user.email', 'rpc@example.com')
+  git('config', 'user.name', 'RPC Tester')
+  git('config', 'commit.gpgsign', 'false')
+  await writeFile(join(root, 'a.txt'), `${name}\n`, 'utf8')
+  git('add', '-A')
+  git('commit', '-qm', 'first commit')
+  return root
+}
+
+test('a multi-repo workspace lists its repositories and checks out only the one asked for', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-multi-'))
+  const moves: string[] = []
+  let current = workspace
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            moves.push(path)
+            current = path
+            return path
+          },
+        },
+      },
+    })
+    try {
+      const listed = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(listed.ok, true, JSON.stringify(listed))
+      assert.equal(listed.value.kind, 'multi')
+      assert.equal(listed.value.isolation, true)
+      assert.equal(listed.value.context, null)
+      assert.deepEqual(listed.value.repos.map((repo) => repo.id).sort(), ['be', 'fe'])
+      assert.equal(listed.value.repos.every((repo) => repo.state === 'not-checked-out'), true)
+
+      const created = await feature.call('checkoutRepo', { sessionId: SESSION, repo: 'be' })
+      assert.equal(created.ok, true, JSON.stringify(created))
+      assert.equal(created.value.repo.state, 'ready')
+      assert.match(created.value.repo.checkout.branch, /^dsh-ad0ab5d0-/)
+      assert.equal(moves.length, 1)
+      assert.equal(moves[0].includes(join('.agents', 'worktrees')), true)
+
+      const after = await feature.call('repos', { sessionId: SESSION })
+      const be = after.value.repos.find((repo) => repo.id === 'be')
+      const fe = after.value.repos.find((repo) => repo.id === 'fe')
+      assert.equal(be.state, 'ready')
+      assert.equal(fe.state, 'not-checked-out')
+      assert.equal(after.value.context.path, moves[0])
+
+      const removed = await feature.call('checkoutRemove', { sessionId: SESSION, repo: 'be' })
+      assert.equal(removed.ok, true, JSON.stringify(removed))
+      assert.equal(removed.value.removed, true)
+
+      const empty = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(empty.value.repos.find((repo) => repo.id === 'be').state, 'not-checked-out')
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('the first message of a multi-repo workspace creates only an empty context', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-multi-first-'))
+  const moves: string[] = []
+  let current = workspace
+  const seen = { holds: 0 }
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            moves.push(path)
+            current = path
+            return path
+          },
+        },
+      },
+      on: () => {},
+    })
+    const agent = withMaintenance(feature.agent, seen)
+    try {
+      // The New Session probe populates the workspace set before the message.
+      const listed = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(listed.value.kind, 'multi')
+      const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+      assert.ok(listener)
+      listener.listener({ agent, message: { content: [{ type: 'text', text: 'change the backend' }] } })
+
+      const record = await waitFor(async () => {
+        const answer = await feature.call('worktreeState', { sessionId: SESSION })
+        return answer.value.current ?? null
+      })
+      assert.equal(record.kind, 'context')
+      assert.match(record.path, /\.agents\/worktrees\/dsh-ad0ab5d0-/)
+      assert.deepEqual(moves, [record.path])
+      // The context is empty: neither repository has a worktree yet.
+      const repos = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(repos.value.repos.every((repo) => repo.state === 'not-checked-out'), true)
+
+      // A second message does not re-enter the hold.
+      listener.listener({ agent, message: { content: [{ type: 'text', text: 'again' }] } })
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      assert.equal(seen.holds, 1)
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('the write guard creates a checkout on the first write to a main checkout', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-guard-'))
+  try {
+    const be = await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    let current = workspace
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            current = path
+            return path
+          },
+        },
+        fs: { processPath: (target: { path?: string }) => String(target?.path ?? '') },
+      },
+      on: () => {},
+    })
+    const agent = withMaintenance(feature.agent, { holds: 0 })
+    try {
+      // Give the chat an empty context first, exactly as its first message does.
+      await feature.call('repos', { sessionId: SESSION })
+      const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+      listener.listener({ agent, message: { content: [{ type: 'text', text: 'fix the backend' }] } })
+      await waitFor(async () => {
+        const answer = await feature.call('worktreeState', { sessionId: SESSION })
+        return answer.value.current ?? null
+      })
+
+      const guard = feature.listeners.find((entry) => entry.name === 'fs/write-intent')
+      assert.ok(guard, 'the feature installs the write guard')
+      await assert.rejects(
+        () => Promise.resolve(guard.listener({ path: join(be, 'a.txt') }, { agent }, () => undefined)),
+        (error: unknown) => {
+          assert.equal((error as { code?: string }).code, 'FS_PERMISSION_DENIED')
+          assert.match(String((error as Error).message), /Created an isolated checkout for be/)
+          return true
+        },
+      )
+      const after = await feature.call('repos', { sessionId: SESSION })
+      const state = after.value.repos.find((repo) => repo.id === 'be')
+      assert.equal(state.state, 'ready')
+      assert.equal(current.startsWith(workspace) || current.includes('.agents'), true)
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('the checkout_repo tool materializes one repository for the chat', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-tool-'))
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    let current = workspace
+    let captured: { definition: Record<string, unknown>; options?: { when?: (context: { agent?: unknown }) => boolean } } | undefined
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            current = path
+            return path
+          },
+        },
+        tools: {
+          register(definition: Record<string, unknown>, options?: { when?: (context: { agent?: unknown }) => boolean }) {
+            captured = { definition, options }
+            return () => {}
+          },
+        },
+      },
+      on: () => {},
+    })
+    const agent = withMaintenance(feature.agent, { holds: 0 })
+    try {
+      await feature.call('repos', { sessionId: SESSION })
+      const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+      listener.listener({ agent, message: { content: [{ type: 'text', text: 'change both' }] } })
+      await waitFor(async () => {
+        const answer = await feature.call('worktreeState', { sessionId: SESSION })
+        return answer.value.current ?? null
+      })
+      assert.ok(captured, 'the feature registers checkout_repo')
+      assert.equal(captured.definition.name, 'checkout_repo')
+      assert.equal(captured.options?.when?.({ agent }), true)
+      const execute = captured.definition.execute as (
+        args: Record<string, unknown>,
+        exec: { agent: unknown; signal: AbortSignal },
+      ) => Promise<Record<string, unknown>>
+      const result = await execute(
+        { repo: 'fe' },
+        { agent, signal: new AbortController().signal },
+      )
+      assert.equal(result.repo, 'fe')
+      assert.equal((await stat(String(result.path))).isDirectory(), true)
+      const after = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(after.value.repos.find((repo) => repo.id === 'fe').state, 'ready')
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
   }
 })

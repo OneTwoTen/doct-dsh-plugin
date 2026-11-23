@@ -374,8 +374,29 @@ export interface WorktreeBases {
   current: string | null
 }
 
-/** One worktree this plugin created for a Session. */
+/** One repository checkout inside a chat's context directory. */
+export interface RepoCheckoutRecord {
+  id: string
+  path: string
+  repositoryRoot: string
+  branch: string
+  base: string
+  source: 'local' | 'remote'
+  remote: string | null
+  start: string
+  materializedAt: number
+  warning?: string | null
+}
+
+/**
+ * One worktree this plugin created for a Session.
+ *
+ * A record from an older build has no `kind` and describes one checkout. A
+ * `context` record describes the per-chat directory: `path` is that directory
+ * and `repos` holds only the repositories this chat actually checked out.
+ */
 export interface WorktreeRecord {
+  kind?: 'single' | 'context'
   path: string
   branch: string
   name: string
@@ -389,6 +410,10 @@ export interface WorktreeRecord {
   source?: 'local' | 'remote'
   namedAt?: number
   namingError?: string
+  /** The workspace directory a context record belongs to. */
+  workspaceRoot?: string
+  /** Context records only: the repositories this chat checked out. */
+  repos?: Record<string, RepoCheckoutRecord>
 }
 
 /** A Session's wish to start its next message in a fresh checkout of its own. */
@@ -450,6 +475,48 @@ export interface WorktreeListResult {
   worktrees: WorktreeInfo[]
 }
 
+/** One repository's state in the workspace, as the panel shows it. */
+export interface WorkspaceRepo {
+  id: string
+  name: string
+  /** Path relative to the workspace root; `.` for a root repository. */
+  relativePath: string
+  role: string
+  description: string
+  /** The repository's main checkout. */
+  root: string
+  core: boolean
+  available: boolean
+  state: 'single' | 'not-checked-out' | 'materializing' | 'ready' | 'missing' | 'error'
+  /** The chat's checkout, when the repository was materialized. */
+  checkout: {
+    path: string
+    branch: string
+    base: string
+    source: 'local' | 'remote'
+    remote: string | null
+    start: string
+    changedFiles: number | null
+    warning: string | null
+  } | null
+  /** Changed files in the main checkout; null when it could not be read. */
+  changedFiles: number | null
+  error?: string | null
+}
+
+/** One workspace's repositories and the chat's context, for the panel. */
+export interface WorkspaceReposResult {
+  workspaceRoot: string
+  /** `single` (a repository workspace), `multi`, or `none`. */
+  kind: 'single' | 'multi' | 'none'
+  /** Whether this chat has a context directory. */
+  isolation: boolean
+  /** The chat's context directory, when it exists. */
+  context: { path: string; name: string; createdAt: number } | null
+  repos: WorkspaceRepo[]
+  warnings: string[]
+}
+
 /** The New Session worktree option's answer. */
 export interface WorktreeState {
   enabled: boolean
@@ -459,6 +526,13 @@ export interface WorktreeState {
   current: WorktreeRecord | null
   bases: WorktreeBases | null
   project: { directory: string; linked: boolean } | null
+  /** `context` for a multi-repo workspace that checks out repositories on demand. */
+  kind?: 'single' | 'context'
+  workspaceRoot?: string
+  /** Context state when `kind` is `context`. */
+  context?: { path: string; name: string; createdAt: number } | null
+  /** Per-repository state when `kind` is `context`. */
+  repos?: WorkspaceRepo[]
   repositoryRoot?: string
   remote?: string
   sourceDefault?: 'local' | 'remote'
@@ -623,10 +697,15 @@ export interface CleanupRunResult {
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
 
-/** Every route takes these two locators: a Session, or a directory. */
+/**
+ * Every route takes these locators: a Session, a directory, and optionally one
+ * repository id from the Session's workspace.
+ */
 export interface GitTarget {
   sessionId?: string
   cwd?: string
+  /** A repo id from `repos`; the Host resolves it to the chat's checkout. */
+  repo?: string
 }
 
 /** One file's diff request. */
@@ -835,8 +914,35 @@ export interface WorktreeRemovePathRequest extends GitTarget {
   sessionId?: string
 }
 
+/** Ask the Host to create one repository's checkout for this chat. */
+export interface CheckoutRepoRequest extends GitTarget {
+  repo: string
+  base?: string
+}
+
+/** Ask the Host to remove one repository's checkout from this chat. */
+export interface CheckoutRemoveRequest extends GitTarget {
+  repo: string
+  force?: boolean
+  deleteBranch?: boolean
+}
+
+/** Remove every checkout of this chat's context and the context directory. */
+export interface ContextRemoveRequest extends GitTarget {
+  force?: boolean
+  deleteBranch?: boolean
+}
+
 /** One route the browser may call. */
 export interface GitApi {
+  /** The workspace's repositories, their roles, and this chat's checkouts. */
+  repos(payload: GitTarget): Promise<WorkspaceReposResult>
+  /** Add one repository to this chat's context, creating its worktree. */
+  checkoutRepo(payload: CheckoutRepoRequest): Promise<{ repo: WorkspaceRepo }>
+  /** Remove one repository's checkout, keeping the context directory. */
+  checkoutRemove(payload: CheckoutRemoveRequest): Promise<{ removed: boolean; branchDeleted: boolean }>
+  /** Remove every checkout and the context directory. */
+  contextRemove(payload: ContextRemoveRequest): Promise<{ removed: number; branchDeleted: number }>
   overview(payload: GitTarget): Promise<GitOverview>
   /** The counts the tab strip shows. */
   counts(payload: GitTarget & { refresh?: boolean }): Promise<GitCounts>

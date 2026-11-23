@@ -78,6 +78,18 @@
     gitCleanHint: "The working tree matches the last commit.",
     gitNoRepo: "Not a git repository",
     gitNoRepoHint: "This session\u2019s folder is not inside a repository. Open a session in a project folder to use this panel.",
+    gitRepoAll: "All",
+    gitRepoOpen: "Open",
+    gitRepoReady: "checkout ready",
+    gitRepoMainCheckout: "main checkout",
+    gitRepoNotCheckedOut: "not checked out",
+    gitRepoMissing: "checkout missing",
+    gitRepoCreating: "creating checkout\u2026",
+    gitRepoCreateCheckout: "Create checkout",
+    gitRepoCheckoutHint: "This chat has no isolated checkout for this repository yet. Create one before modifying it.",
+    gitRepoCheckoutFailed: "Cannot create checkout",
+    gitRepoNone: "No Git repositories found",
+    gitRepoNoneHint: "This workspace folder contains no Git checkout. A repository can also be a nested folder.",
     gitNoDirectory: "This session has no working folder yet.",
     gitReadError: "Could not read the repository",
     gitBridgeHint: "The Host half of this plugin is not loaded yet. Restart Harness after installing or updating the plugin.",
@@ -206,6 +218,20 @@
     wtHint: "The checkout lives under the repository and starts from the branch you pick.",
     wtAuto: "Worktree",
     wtAutoHint: "When you send the first message, this chat gets its own checkout of the repository, so the project folder stays untouched.",
+    wtContext: "Checkout on demand",
+    wtContextHint: "This workspace has several repositories. The chat creates a checkout only for a repository you modify; reading leaves the project folders untouched.",
+    wtContextTitle: "This chat's checkouts",
+    wtContextNotStarted: "No checkout yet. The context starts empty; select a repository and create its checkout.",
+    wtContextCreated: "Checkout created",
+    wtContextFailed: "Checkout action failed",
+    wtContextRepoRemoved: "Repository checkout removed",
+    wtContextRemoved: "Context removed",
+    wtContextRemovedCount: "{count} checkout(s) removed",
+    wtContextRemove: "Remove context",
+    wtContextRemoving: "Removing\u2026",
+    wtContextRemoveRepo: "Remove",
+    wtContextRemoveConfirm: "Remove every repository checkout of this chat? Uncommitted work is kept by default and the action will stop at the first dirty checkout.",
+    wtContextRepos: "Checkout: {count} repo(s)",
     wtNextMessage: "The next message starts in a new worktree from {branch}",
     wtOff: "This chat stays in the project folder",
     wtDefaultBranch: "the default branch",
@@ -565,6 +591,18 @@
     gitCleanHint: "C\xE2y l\xE0m vi\u1EC7c tr\xF9ng v\u1EDBi commit g\u1EA7n nh\u1EA5t.",
     gitNoRepo: "Kh\xF4ng ph\u1EA3i kho git",
     gitNoRepoHint: "Th\u01B0 m\u1EE5c c\u1EE7a phi\xEAn n\xE0y kh\xF4ng n\u1EB1m trong kho git. M\u1EDF phi\xEAn trong th\u01B0 m\u1EE5c d\u1EF1 \xE1n \u0111\u1EC3 d\xF9ng b\u1EA3ng n\xE0y.",
+    gitRepoAll: "T\u1EA5t c\u1EA3",
+    gitRepoOpen: "M\u1EDF",
+    gitRepoReady: "\u0111\xE3 checkout",
+    gitRepoMainCheckout: "c\xE2y ch\xEDnh",
+    gitRepoNotCheckedOut: "ch\u01B0a checkout",
+    gitRepoMissing: "thi\u1EBFu checkout",
+    gitRepoCreating: "\u0111ang t\u1EA1o checkout\u2026",
+    gitRepoCreateCheckout: "T\u1EA1o checkout",
+    gitRepoCheckoutHint: "Chat n\xE0y ch\u01B0a c\xF3 checkout ri\xEAng cho kho n\xE0y. T\u1EA1o checkout tr\u01B0\u1EDBc khi s\u1EEDa.",
+    gitRepoCheckoutFailed: "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c checkout",
+    gitRepoNone: "Kh\xF4ng t\xECm th\u1EA5y kho Git",
+    gitRepoNoneHint: "Th\u01B0 m\u1EE5c workspace n\xE0y ch\u01B0a c\xF3 kho Git n\xE0o. Kho c\xF3 th\u1EC3 n\u1EB1m trong th\u01B0 m\u1EE5c con.",
     gitNoDirectory: "Phi\xEAn n\xE0y ch\u01B0a c\xF3 th\u01B0 m\u1EE5c l\xE0m vi\u1EC7c.",
     gitReadError: "Kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c kho m\xE3",
     gitBridgeHint: "Ph\u1EA7n Host c\u1EE7a plugin ch\u01B0a \u0111\u01B0\u1EE3c n\u1EA1p. H\xE3y kh\u1EDFi \u0111\u1ED9ng l\u1EA1i Harness sau khi c\xE0i ho\u1EB7c c\u1EADp nh\u1EADt plugin.",
@@ -693,6 +731,20 @@
     wtHint: "Checkout n\u1EB1m trong kho m\xE3 v\xE0 b\u1EAFt \u0111\u1EA7u t\u1EEB nh\xE1nh b\u1EA1n ch\u1ECDn.",
     wtAuto: "Worktree",
     wtAutoHint: "Khi b\u1EA1n g\u1EEDi tin nh\u1EAFn \u0111\u1EA7u ti\xEAn, chat n\xE0y c\xF3 checkout ri\xEAng c\u1EE7a kho m\xE3, n\xEAn th\u01B0 m\u1EE5c d\u1EF1 \xE1n kh\xF4ng b\u1ECB \u0111\u1EE5ng t\u1EDBi.",
+    wtContext: "Checkout theo nhu c\u1EA7u",
+    wtContextHint: "Workspace n\xE0y c\xF3 nhi\u1EC1u kho. Chat ch\u1EC9 t\u1EA1o checkout cho kho b\u1EA1n s\u1EEDa; vi\u1EC7c \u0111\u1ECDc kh\xF4ng \u0111\u1EE5ng t\u1EDBi th\u01B0 m\u1EE5c d\u1EF1 \xE1n.",
+    wtContextTitle: "Checkout c\u1EE7a chat n\xE0y",
+    wtContextNotStarted: "Ch\u01B0a c\xF3 checkout. Context b\u1EAFt \u0111\u1EA7u r\u1ED7ng; ch\u1ECDn m\u1ED9t kho v\xE0 t\u1EA1o checkout.",
+    wtContextCreated: "\u0110\xE3 t\u1EA1o checkout",
+    wtContextFailed: "Thao t\xE1c checkout th\u1EA5t b\u1EA1i",
+    wtContextRepoRemoved: "\u0110\xE3 xo\xE1 checkout c\u1EE7a kho",
+    wtContextRemoved: "\u0110\xE3 xo\xE1 context",
+    wtContextRemovedCount: "\u0110\xE3 xo\xE1 {count} checkout",
+    wtContextRemove: "Xo\xE1 context",
+    wtContextRemoving: "\u0110ang xo\xE1\u2026",
+    wtContextRemoveRepo: "Xo\xE1",
+    wtContextRemoveConfirm: "Xo\xE1 m\u1ECDi checkout c\u1EE7a chat n\xE0y? Thay \u0111\u1ED5i ch\u01B0a commit \u0111\u01B0\u1EE3c gi\u1EEF m\u1EB7c \u0111\u1ECBnh; thao t\xE1c d\u1EEBng \u1EDF checkout b\u1EA9n \u0111\u1EA7u ti\xEAn.",
+    wtContextRepos: "Checkout: {count} kho",
     wtNextMessage: "Tin nh\u1EAFn ti\u1EBFp theo b\u1EAFt \u0111\u1EA7u trong worktree m\u1EDBi t\u1EEB {branch}",
     wtOff: "Chat n\xE0y \u1EDF l\u1EA1i th\u01B0 m\u1EE5c d\u1EF1 \xE1n",
     wtDefaultBranch: "nh\xE1nh m\u1EB7c \u0111\u1ECBnh",
@@ -1084,6 +1136,10 @@
   function createGitApi(call) {
     const route = (name) => (payload) => call(name, payload);
     return {
+      repos: route("repos"),
+      checkoutRepo: route("checkoutRepo"),
+      checkoutRemove: route("checkoutRemove"),
+      contextRemove: route("contextRemove"),
       overview: route("overview"),
       counts: route("counts"),
       diff: route("diff"),
@@ -2941,6 +2997,36 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       return info.reason === "linked-project" ? h("span", { className: "ph-hint ph-tiny", "data-personal-hub-worktree": true }, t("wtLinkedProject")) : null;
     }
     const current = info.current ?? null;
+    if (info.kind === "context") {
+      const ready = info.repos?.filter((repo) => repo.state === "ready").length ?? 0;
+      return h(
+        "span",
+        { className: "ph-wrap", "data-personal-hub-worktree": true },
+        current === null ? h(
+          "label",
+          {
+            className: "ph-check-inline ph-wt-toggle",
+            title: t("wtContextHint")
+          },
+          h("input", {
+            type: "checkbox",
+            checked: props.wanted,
+            disabled: props.busy,
+            onChange: (event) => props.onToggle(event.target.checked)
+          }),
+          h(Icon, { name: "branch", size: 11 }),
+          h("span", null, t("wtContext"))
+        ) : h(
+          "span",
+          { className: "ph-chip ph-mono", title: String(current.path ?? "") },
+          h(Icon, { name: "branch", size: 11 }),
+          h("span", { className: "ph-ellipsis" }, t("wtContextRepos", { count: ready }))
+        ),
+        h("span", { className: "ph-hint ph-tiny" }, t("wtContextHint")),
+        props.error.length > 0 ? h("span", { className: "ph-error-text" }, props.error) : null,
+        props.notice.length > 0 ? h("span", { className: "ph-ok ph-tiny" }, props.notice) : null
+      );
+    }
     const bases = props.source === "remote" ? info.bases?.remote ?? [] : info.bases?.local ?? [];
     const options = bases.map((item) => ({
       value: props.source === "remote" ? item.branch : item.name,
@@ -5904,10 +5990,16 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
     const [force, setForce] = useState(false);
     const [pruning, setPruning] = useState(false);
     const [copied, setCopied] = useState("");
+    const [contextBusy, setContextBusy] = useState("");
     const state = useLoader(
       () => api.worktrees({ sessionId: sessionId || void 0, cwd: props.cwd || void 0 }),
       [sessionId, props.cwd, props.revision]
     );
+    const contextState = useLoader(
+      () => props.contextMode === true ? api.repos({ sessionId, cwd: props.cwd || void 0 }) : Promise.resolve(null),
+      [api, sessionId, props.cwd, props.revision, props.contextMode]
+    );
+    const contextValue = contextState.value;
     useEffect(() => {
       if (!creating) return void 0;
       let alive = true;
@@ -5925,6 +6017,46 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       };
     }, [creating, api, sessionId, props.cwd]);
     const reload = () => props.onChanged();
+    const createContextRepo = async (repoId) => {
+      if (contextBusy.length > 0) return;
+      setContextBusy(repoId);
+      try {
+        await api.checkoutRepo({ sessionId, cwd: props.cwd || void 0, repo: repoId });
+        props.onToast(t("wtContextCreated"), repoId, "success");
+        reload();
+      } catch (failure) {
+        props.onToast(t("wtContextFailed"), messageOf(failure), "error");
+      } finally {
+        setContextBusy("");
+      }
+    };
+    const removeContextRepo = async (repoId) => {
+      if (contextBusy.length > 0) return;
+      setContextBusy(repoId);
+      try {
+        await api.checkoutRemove({ sessionId, cwd: props.cwd || void 0, repo: repoId });
+        props.onToast(t("wtContextRepoRemoved"), repoId, "success");
+        reload();
+      } catch (failure) {
+        props.onToast(t("wtContextFailed"), messageOf(failure), "error");
+      } finally {
+        setContextBusy("");
+      }
+    };
+    const removeWholeContext = async () => {
+      if (contextBusy.length > 0) return;
+      if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(t("wtContextRemoveConfirm"))) return;
+      setContextBusy("context");
+      try {
+        const answer = await api.contextRemove({ sessionId, cwd: props.cwd || void 0 });
+        props.onToast(t("wtContextRemoved"), t("wtContextRemovedCount", { count: answer.removed }), "success");
+        reload();
+      } catch (failure) {
+        props.onToast(t("wtContextFailed"), messageOf(failure), "error");
+      } finally {
+        setContextBusy("");
+      }
+    };
     const create = async () => {
       setBusy(true);
       setError("");
@@ -6039,7 +6171,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         disabled: pruning,
         onClick: () => void prune()
       }, h(Icon, { name: "refresh", size: 13 })),
-      h("button", {
+      props.contextMode === true ? null : h("button", {
         type: "button",
         className: "ph-button",
         disabled: creating,
@@ -6049,7 +6181,53 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         }
       }, h(Icon, { name: "branchPlus", size: 12 }), t("wtNew"))
     );
-    const createCard = creating ? h(
+    const contextCard = props.contextMode === true && contextValue !== null && contextValue !== void 0 ? h(
+      "div",
+      { className: "ph-card", style: { margin: "8px 10px" } },
+      h("div", { className: "ph-card-title" }, h(Icon, { name: "tree", size: 12 }), t("wtContextTitle")),
+      h("p", { className: "ph-hint" }, contextValue.context === null ? t("wtContextNotStarted") : contextValue.context.path),
+      contextValue.context === null ? null : h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "3px", margin: "4px 0" } },
+        contextValue.repos.map((repo) => h(
+          "div",
+          {
+            key: repo.id,
+            style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }
+          },
+          h("span", { className: "ph-ellipsis", style: { flex: "1 1 auto", fontWeight: 600 } }, repo.name),
+          h("span", { className: "ph-chip" }, contextRepoLabel(t, repo)),
+          repo.checkout === null ? null : h("span", { className: "ph-mono ph-tiny ph-ellipsis" }, repo.checkout.branch),
+          repo.state === "ready" ? h("button", {
+            type: "button",
+            className: "ph-button",
+            onClick: () => props.onSelectRepo?.(repo.id)
+          }, t("gitRepoOpen")) : h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: contextBusy === repo.id,
+            onClick: () => void createContextRepo(repo.id)
+          }, contextBusy === repo.id ? t("gitRepoCreating") : t("gitRepoCreateCheckout")),
+          repo.state === "ready" ? h("button", {
+            type: "button",
+            className: "ph-button",
+            disabled: contextBusy === repo.id,
+            onClick: () => void removeContextRepo(repo.id)
+          }, t("wtContextRemoveRepo")) : null
+        ))
+      ),
+      contextValue.repos.length === 0 ? null : h(
+        "div",
+        { style: { display: "flex", justifyContent: "flex-end", marginTop: "6px" } },
+        h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: contextBusy === "context",
+          onClick: () => void removeWholeContext()
+        }, contextBusy === "context" ? t("wtContextRemoving") : t("wtContextRemove"))
+      )
+    ) : null;
+    const createCard = props.contextMode === true ? null : creating ? h(
       "div",
       { className: "ph-card", style: { margin: "8px 10px" } },
       h("div", { className: "ph-card-title" }, h(Icon, { name: "branchPlus", size: 12 }), t("wtCreateTitle")),
@@ -6181,6 +6359,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       "div",
       { style: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" } },
       toolbar,
+      contextCard,
       createCard,
       error.length > 0 && !creating ? h(
         "div",
@@ -6195,6 +6374,12 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         body2
       )
     );
+  }
+  function contextRepoLabel(t, repo) {
+    if (repo.state === "ready") return t("gitRepoReady");
+    if (repo.state === "missing") return t("gitRepoMissing");
+    if (repo.state === "materializing") return t("gitRepoCreating");
+    return t("gitRepoNotCheckedOut");
   }
   function WorktreeRow(props) {
     const { t, entry } = props;
@@ -6305,12 +6490,29 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
 
   // src/client/git/panel.tsx
   function GitPanel(props) {
-    const { t, api } = props;
+    const { t } = props;
+    const baseApi = props.api;
     const sessionId = typeof props.sessionId === "string" ? props.sessionId : "";
     const tabInfo = typeof props.useTabInfo === "function" ? props.useTabInfo() : void 0;
     const visible = tabInfo?.tab?.visible !== false;
     const documentVisible = useDocumentVisible();
     const cwd = typeof props.useSessions === "function" ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? "") : "";
+    const [repoId, setRepoId] = useState(null);
+    const repoPicked = useRef(false);
+    const [checkoutBusy, setCheckoutBusy] = useState("");
+    const scopedApi = useMemo(() => {
+      if (repoId === null || repoId.length === 0) return baseApi;
+      return new Proxy(baseApi, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver);
+          if (typeof value !== "function") return value;
+          return (payload) => value(
+            payload === void 0 || payload === null ? { repo: repoId } : { ...payload, repo: repoId }
+          );
+        }
+      });
+    }, [baseApi, repoId]);
+    const api = scopedApi;
     const [view, setView] = useState("changes");
     const [selection, setSelection] = useState(null);
     const [pullFilter, setPullFilter] = useState("open");
@@ -6333,17 +6535,31 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       if (successTimer.current !== void 0) clearTimeout(successTimer.current);
     }, []);
     const reload = () => setRevision((value) => value + 1);
-    const overviewState = useLoader(
-      () => api.overview({ sessionId, cwd: cwd || void 0 }),
-      [sessionId, cwd, revision]
+    const reposState = useLoader(
+      () => baseApi.repos({ sessionId, cwd: cwd || void 0 }),
+      [baseApi, sessionId, cwd, revision]
     );
-    const overview = overviewState.value;
+    const workspace = reposState.value;
+    const allMode = repoId === null;
+    const selectedRepo = workspace === void 0 ? null : workspace.repos.find((repo) => repo.id === repoId) ?? null;
+    const needsCheckout = workspace !== void 0 && workspace.isolation && selectedRepo !== null && selectedRepo.state !== "ready";
+    useEffect(() => {
+      if (repoPicked.current || workspace === void 0 || workspace.repos.length === 0) return;
+      repoPicked.current = true;
+      const pick = workspace.repos.find((repo) => repo.state === "ready" && (repo.changedFiles ?? 0) > 0) ?? workspace.repos.find((repo) => repo.state === "ready") ?? workspace.repos[0];
+      setRepoId(pick.id);
+    }, [workspace]);
+    const overviewState = useLoader(
+      () => repoId === null ? Promise.resolve(null) : api.overview({ sessionId, cwd: cwd || void 0 }),
+      [api, sessionId, cwd, revision, repoId]
+    );
+    const overview = overviewState.value ?? void 0;
     const status = actionStatusOf(overview);
     const countsState = useLoader(
-      () => api.counts({ sessionId, cwd: cwd || void 0 }),
-      [sessionId, cwd, revision]
+      () => repoId === null ? Promise.resolve(null) : api.counts({ sessionId, cwd: cwd || void 0 }),
+      [api, sessionId, cwd, revision, repoId]
     );
-    const counts = countsState.value;
+    const counts = countsState.value ?? void 0;
     useEffect(() => {
       if (!visible || !documentVisible) return void 0;
       const interval = Math.max(8e3, Number(overview?.refreshMs) || 3e4);
@@ -6390,6 +6606,21 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       successTimer.current = setTimeout(() => {
         if (mounted.current) setSuccess(null);
       }, 1e4);
+    };
+    const createCheckout = async (id) => {
+      if (checkoutBusy.length > 0) return;
+      setCheckoutBusy(id);
+      try {
+        await baseApi.checkoutRepo({ sessionId, cwd: cwd || void 0, repo: id });
+        repoPicked.current = true;
+        setRepoId(id);
+        reload();
+        toast(t("gitRepoReady"), t("gitRepoCreateCheckout"), "success");
+      } catch (failure) {
+        toast(t("gitRepoCheckoutFailed"), messageOf(failure), "error");
+      } finally {
+        setCheckoutBusy("");
+      }
     };
     const pollAction = async (actionId) => {
       for (; ; ) {
@@ -6561,6 +6792,19 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         featureBranch: request.featureBranch
       });
     };
+    const repoBar = workspace !== void 0 && workspace.kind === "multi" ? h(RepoBar, {
+      t,
+      workspace,
+      selected: repoId,
+      busy: checkoutBusy,
+      onSelect: (id) => {
+        repoPicked.current = true;
+        setRepoId(id);
+        setSelection(null);
+      },
+      onCreate: (id) => void createCheckout(id),
+      onRefresh: reload
+    }) : null;
     const header = overview === void 0 ? null : h(PanelHeader, {
       t,
       overview,
@@ -6600,7 +6844,37 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       }
     });
     let body2;
-    if (overviewState.status === "error" && overview === void 0) {
+    if (allMode) {
+      body2 = h(ReposOverview, {
+        t,
+        workspace: workspace ?? null,
+        error: reposState.error,
+        busy: checkoutBusy,
+        onSelect: (id) => {
+          repoPicked.current = true;
+          setRepoId(id);
+          setSelection(null);
+        },
+        onCreate: (id) => void createCheckout(id),
+        onRefresh: reload
+      });
+    } else if (workspace === void 0 && reposState.status === "error") {
+      body2 = h(Failure, {
+        error: reposState.error,
+        title: t("gitReadError"),
+        retryLabel: t("gitRetry"),
+        onRetry: reload
+      });
+    } else if (workspace === void 0) {
+      body2 = h(Loading, { label: t("gitLoadingLong") });
+    } else if (needsCheckout && selectedRepo !== null) {
+      body2 = h(RepoCheckoutCard, {
+        t,
+        repo: selectedRepo,
+        busy: checkoutBusy === selectedRepo.id,
+        onCreate: () => void createCheckout(selectedRepo.id)
+      });
+    } else if (overviewState.status === "error" && overview === void 0) {
       const error = overviewState.error;
       const code = errorCode(error);
       body2 = h(Failure, {
@@ -6664,6 +6938,11 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
         sessionId,
         cwd,
         revision,
+        contextMode: workspace?.isolation === true,
+        onSelectRepo: (id) => {
+          repoPicked.current = true;
+          setRepoId(id);
+        },
         newChat: props.newChat,
         onToast: toast,
         onChanged: reload
@@ -6704,11 +6983,13 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
       });
     }
     const isDetail = selection !== null;
+    const showTabs = !allMode && !needsCheckout && overview !== void 0;
     return h(
       "div",
       { className: "ph-git", "data-personal-hub-git": true, style: { position: "relative" } },
+      repoBar,
       header,
-      h(PanelTabs, {
+      showTabs ? h(PanelTabs, {
         t,
         value: view,
         counts: {
@@ -6722,7 +7003,7 @@ a.ph-button{text-decoration:none;color:var(--dsw-alias-label-secondary)}
           setView(next);
           setSelection(null);
         }
-      }),
+      }) : null,
       // The list views scroll as a whole, so their toolbars travel with the
       // content. The Changes and Worktrees views and every detail pane own their
       // scroller instead: a detail that is merely clipped cannot be read below
@@ -6925,6 +7206,150 @@ ${repo.root}` }, repo.name),
       onClick: () => props.open?.(),
       style: { width: "28px", height: "28px" }
     }, h(Icon, { name: "git", size: 15 }));
+  }
+  function RepoBar(props) {
+    const { t, workspace } = props;
+    return h(
+      "div",
+      {
+        className: "ph-repo-bar",
+        "data-personal-hub-repos": true,
+        style: {
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "5px",
+          padding: "7px 10px 6px",
+          borderBottom: "1px solid var(--dsw-alias-border-l1)"
+        }
+      },
+      h("button", {
+        type: "button",
+        className: "ph-chip",
+        "data-tone": props.selected === null ? "business" : void 0,
+        title: workspace.workspaceRoot,
+        onClick: () => props.onSelect(null)
+      }, t("gitRepoAll")),
+      workspace.repos.map((repo) => {
+        const selected = props.selected === repo.id;
+        const busy = props.busy === repo.id;
+        const changed = repo.state === "ready" && repo.changedFiles !== null && repo.changedFiles > 0 ? ` \u2022${repo.changedFiles}` : "";
+        const label = repo.role !== "" && repo.role !== repo.name ? `${repo.name} \xB7 ${repo.role}` : repo.name;
+        const tone = repo.state === "missing" ? "error" : repo.state === "not-checked-out" ? "warn" : selected ? "business" : void 0;
+        return h(
+          "button",
+          {
+            key: repo.id,
+            type: "button",
+            className: "ph-chip",
+            "data-tone": tone,
+            title: `${repo.root}${repo.description === "" ? "" : `
+${repo.description}`}`,
+            style: repo.available ? { opacity: 0.75 } : void 0,
+            onClick: () => {
+              if (repo.state === "not-checked-out" && workspace.isolation) {
+                props.onCreate(repo.id);
+                return;
+              }
+              props.onSelect(repo.id);
+            }
+          },
+          h("span", { className: "ph-ellipsis" }, `${label}${busy ? ` \xB7 ${t("gitRepoCreating")}` : changed}`),
+          repo.state === "missing" ? h(Icon, { name: "alert", size: 10 }) : null
+        );
+      }),
+      h("span", { style: { flex: "1 1 auto" } }),
+      h("button", {
+        type: "button",
+        className: "ph-icon-button",
+        title: t("gitRefresh"),
+        "aria-label": t("gitRefresh"),
+        onClick: props.onRefresh
+      }, h(Icon, { name: "refresh", size: 13 }))
+    );
+  }
+  function ReposOverview(props) {
+    const { t, workspace } = props;
+    if (workspace === null) {
+      return props.error === void 0 ? h(Loading, { label: t("gitLoadingLong") }) : h(Failure, { error: props.error, title: t("gitReadError"), retryLabel: t("gitRetry"), onRetry: props.onRefresh });
+    }
+    if (workspace.kind === "none") {
+      return h(Empty, { icon: "git", title: t("gitRepoNone"), hint: t("gitRepoNoneHint") });
+    }
+    return h(
+      "div",
+      { style: { padding: "10px 12px", overflow: "auto", minHeight: 0 } },
+      h("div", { className: "ph-hint", style: { marginBottom: "8px" } }, workspace.workspaceRoot),
+      workspace.warnings.length === 0 ? null : h(
+        "div",
+        { className: "ph-hint", style: { marginBottom: "8px", color: "var(--dsw-alias-state-warn-primary)" } },
+        workspace.warnings.join(" \xB7 ")
+      ),
+      workspace.repos.map((repo) => h(
+        "div",
+        {
+          key: repo.id,
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "7px 0",
+            borderTop: "1px solid var(--dsw-alias-border-l1)"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: "1 1 auto" } },
+          h(
+            "span",
+            { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+            h("span", { className: "ph-ellipsis", style: { fontWeight: 600 } }, repo.name),
+            repo.role !== "" && repo.role !== repo.name ? h("span", { className: "ph-chip" }, repo.role) : null,
+            h(
+              "span",
+              { className: "ph-chip", "data-tone": repo.state === "ready" ? "success" : repo.state === "missing" ? "error" : "warn" },
+              repoStateLabel(t, repo)
+            )
+          ),
+          h("span", { className: "ph-hint ph-ellipsis" }, repo.root),
+          repo.description === "" ? null : h("span", { className: "ph-hint" }, repo.description)
+        ),
+        repo.state === "not-checked-out" && workspace.isolation ? h("button", {
+          type: "button",
+          className: "ph-button",
+          disabled: props.busy === repo.id,
+          onClick: () => props.onCreate(repo.id)
+        }, props.busy === repo.id ? t("gitRepoCreating") : t("gitRepoCreateCheckout")) : h("button", {
+          type: "button",
+          className: "ph-button",
+          onClick: () => props.onSelect(repo.id)
+        }, t("gitRepoOpen"))
+      ))
+    );
+  }
+  function RepoCheckoutCard(props) {
+    const { t, repo } = props;
+    return h(
+      "div",
+      { className: "ph-empty" },
+      h("span", { className: "ph-empty-icon" }, h(Icon, { name: "git", size: 26 })),
+      h("span", { className: "ph-empty-title" }, `${repo.name} \xB7 ${repoStateLabel(t, repo)}`),
+      h("span", { className: "ph-empty-hint" }, repo.description === "" ? t("gitRepoCheckoutHint") : repo.description),
+      h("button", {
+        type: "button",
+        className: "ph-button",
+        disabled: props.busy,
+        onClick: props.onCreate
+      }, props.busy ? t("gitRepoCreating") : t("gitRepoCreateCheckout"))
+    );
+  }
+  function repoStateLabel(t, repo) {
+    if (repo.state === "ready") {
+      return repo.checkout === null ? t("gitRepoMainCheckout") : t("gitRepoReady");
+    }
+    if (repo.state === "missing") return t("gitRepoMissing");
+    if (repo.state === "materializing") return t("gitRepoCreating");
+    return t("gitRepoNotCheckedOut");
   }
 
   // src/client/vi-dictionaries.ts

@@ -128,7 +128,10 @@ function randomHex(length: number): string {
  */
 export function poolDirectory(repoRoot: string, config?: WorktreePoolConfig): string {
   const configured = String(config?.directory ?? '.agents/worktrees').trim() || '.agents/worktrees'
-  return isAbsolute(configured) ? configured : join(repoRoot, configured.split('/').join(sep))
+  // A Windows-style path is absolute even when this process is POSIX; the test
+  // matrix and a shared config may both carry one.
+  const windowsAbsolute = /^[A-Za-z]:[\\/]/.test(configured) || configured.startsWith('\\\\')
+  return isAbsolute(configured) || windowsAbsolute ? configured : join(repoRoot, configured.split('/').join(sep))
 }
 
 /**
@@ -542,18 +545,21 @@ export async function uniqueBranchName(
  */
 export async function createWorktree(
   runner: GitRunner,
-  { repoRoot, name, base, source = 'local', remote = '', config, timeoutMs, signal }: {
+  { repoRoot, name, base, source = 'local', remote = '', config, path: requestedPath, timeoutMs, signal }: {
     repoRoot: string
     name: string
     base: string
     source?: 'local' | 'remote'
     remote?: string
-    config: WorktreePoolConfig
+    /** The repository's pool configuration; unused when `path` is given. */
+    config?: WorktreePoolConfig
+    /** Where to create the checkout; omit to use the repository's pool. */
+    path?: string
     timeoutMs?: number
     signal?: AbortSignal
   },
 ): Promise<CreatedWorktree> {
-  const path = worktreePath(repoRoot, config, name)
+  const path = requestedPath === undefined ? worktreePath(repoRoot, config, name) : resolve(requestedPath)
   const branch = name
   if (!BRANCH_NAME.test(branch)) {
     throw new CommandError('worktree/invalid-name', `Tên nhánh worktree không hợp lệ: ${branch}`, { name })
@@ -578,7 +584,13 @@ export async function createWorktree(
     start = `refs/heads/${base}`
   }
 
-  await ensurePool(repoRoot, config)
+  // A context checkout lives outside the repository's own pool: create its
+  // parent and leave the pool's ignore file to the pool path only.
+  if (requestedPath === undefined) {
+    await ensurePool(repoRoot, config)
+  } else {
+    await mkdir(dirname(path), { recursive: true })
+  }
   const result = await runner.run('git', ['worktree', 'add', '--no-track', '-b', branch, path, start], {
     cwd: repoRoot,
     signal,

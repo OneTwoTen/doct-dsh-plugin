@@ -12,7 +12,7 @@ import type { Translate } from '../i18n.ts'
 import type { GitApi } from '../api.ts'
 import { messageOf } from '../api.ts'
 import { Empty, Failure, Loading } from './common.tsx'
-import type { WorktreeInfo, WorktreeState } from '../../shared/protocol.ts'
+import type { WorkspaceRepo, WorkspaceReposResult, WorktreeInfo, WorktreeState } from '../../shared/protocol.ts'
 
 /** Props of the worktree manager. */
 export interface WorktreesViewProps {
@@ -26,6 +26,10 @@ export interface WorktreesViewProps {
   onToast(title: string, description: string, tone: 'error' | 'success' | 'info'): void
   /** Refresh the panel's overview after the checkout the Session uses changed. */
   onChanged(): void
+  /** A multi-repo chat creates checkouts from its repository chips, not here. */
+  contextMode?: boolean
+  /** Select one repository in the panel, from the context list. */
+  onSelectRepo?(id: string): void
 }
 
 /** The worktree manager. */
@@ -45,11 +49,20 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
   const [force, setForce] = useState(false)
   const [pruning, setPruning] = useState(false)
   const [copied, setCopied] = useState('')
+  const [contextBusy, setContextBusy] = useState('')
 
   const state = useLoader(
     () => api.worktrees({ sessionId: sessionId || undefined, cwd: props.cwd || undefined }),
     [sessionId, props.cwd, props.revision],
   )
+
+  const contextState = useLoader<WorkspaceReposResult | null>(
+    () => props.contextMode === true
+      ? api.repos({ sessionId, cwd: props.cwd || undefined })
+      : Promise.resolve(null),
+    [api, sessionId, props.cwd, props.revision, props.contextMode],
+  )
+  const contextValue = contextState.value
 
   useEffect(() => {
     if (!creating) return undefined
@@ -71,6 +84,53 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
   }, [creating, api, sessionId, props.cwd])
 
   const reload = (): void => props.onChanged()
+
+  /** Add one repository to this chat's context from the manager. */
+  const createContextRepo = async (repoId: string): Promise<void> => {
+    if (contextBusy.length > 0) return
+    setContextBusy(repoId)
+    try {
+      await api.checkoutRepo({ sessionId, cwd: props.cwd || undefined, repo: repoId })
+      props.onToast(t('wtContextCreated'), repoId, 'success')
+      reload()
+    } catch (failure) {
+      props.onToast(t('wtContextFailed'), messageOf(failure), 'error')
+    } finally {
+      setContextBusy('')
+    }
+  }
+
+  /** Remove one repository's checkout, keeping the context. */
+  const removeContextRepo = async (repoId: string): Promise<void> => {
+    if (contextBusy.length > 0) return
+    setContextBusy(repoId)
+    try {
+      await api.checkoutRemove({ sessionId, cwd: props.cwd || undefined, repo: repoId })
+      props.onToast(t('wtContextRepoRemoved'), repoId, 'success')
+      reload()
+    } catch (failure) {
+      props.onToast(t('wtContextFailed'), messageOf(failure), 'error')
+    } finally {
+      setContextBusy('')
+    }
+  }
+
+  /** Remove every checkout and the context directory. */
+  const removeWholeContext = async (): Promise<void> => {
+    if (contextBusy.length > 0) return
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function'
+      && !window.confirm(t('wtContextRemoveConfirm'))) return
+    setContextBusy('context')
+    try {
+      const answer = await api.contextRemove({ sessionId, cwd: props.cwd || undefined })
+      props.onToast(t('wtContextRemoved'), t('wtContextRemovedCount', { count: answer.removed }), 'success')
+      reload()
+    } catch (failure) {
+      props.onToast(t('wtContextFailed'), messageOf(failure), 'error')
+    } finally {
+      setContextBusy('')
+    }
+  }
 
   const create = async (): Promise<void> => {
     setBusy(true)
@@ -191,17 +251,69 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
       disabled: pruning,
       onClick: () => void prune(),
     }, h(Icon, { name: 'refresh', size: 13 })),
-    h('button', {
-      type: 'button',
-      className: 'ph-button',
-      disabled: creating,
-      onClick: () => {
-        setCreating((value) => !value)
-        setError('')
-      },
-    }, h(Icon, { name: 'branchPlus', size: 12 }), t('wtNew')))
+    props.contextMode === true
+      ? null
+      : h('button', {
+          type: 'button',
+          className: 'ph-button',
+          disabled: creating,
+          onClick: () => {
+            setCreating((value) => !value)
+            setError('')
+          },
+        }, h(Icon, { name: 'branchPlus', size: 12 }), t('wtNew')))
 
-  const createCard = creating
+  const contextCard = props.contextMode === true && contextValue !== null && contextValue !== undefined
+    ? h('div', { className: 'ph-card', style: { margin: '8px 10px' } },
+        h('div', { className: 'ph-card-title' }, h(Icon, { name: 'tree', size: 12 }), t('wtContextTitle')),
+        h('p', { className: 'ph-hint' }, contextValue.context === null
+          ? t('wtContextNotStarted')
+          : contextValue.context.path),
+        contextValue.context === null
+          ? null
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px', margin: '4px 0' } },
+              contextValue.repos.map((repo) => h('div', {
+                key: repo.id,
+                style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 },
+              },
+                h('span', { className: 'ph-ellipsis', style: { flex: '1 1 auto', fontWeight: 600 } }, repo.name),
+                h('span', { className: 'ph-chip' }, contextRepoLabel(t, repo)),
+                repo.checkout === null ? null : h('span', { className: 'ph-mono ph-tiny ph-ellipsis' }, repo.checkout.branch),
+                repo.state === 'ready'
+                  ? h('button', {
+                      type: 'button',
+                      className: 'ph-button',
+                      onClick: () => props.onSelectRepo?.(repo.id),
+                    }, t('gitRepoOpen'))
+                  : h('button', {
+                      type: 'button',
+                      className: 'ph-button',
+                      disabled: contextBusy === repo.id,
+                      onClick: () => void createContextRepo(repo.id),
+                    }, contextBusy === repo.id ? t('gitRepoCreating') : t('gitRepoCreateCheckout')),
+                repo.state === 'ready'
+                  ? h('button', {
+                      type: 'button',
+                      className: 'ph-button',
+                      disabled: contextBusy === repo.id,
+                      onClick: () => void removeContextRepo(repo.id),
+                    }, t('wtContextRemoveRepo'))
+                  : null)),
+            ),
+        contextValue.repos.length === 0
+          ? null
+          : h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '6px' } },
+              h('button', {
+                type: 'button',
+                className: 'ph-button',
+                disabled: contextBusy === 'context',
+                onClick: () => void removeWholeContext(),
+              }, contextBusy === 'context' ? t('wtContextRemoving') : t('wtContextRemove'))))
+    : null
+
+  const createCard = props.contextMode === true
+    ? null
+    : creating
     ? h('div', { className: 'ph-card', style: { margin: '8px 10px' } },
         h('div', { className: 'ph-card-title' }, h(Icon, { name: 'branchPlus', size: 12 }), t('wtCreateTitle')),
         h('p', { className: 'ph-hint' }, t('wtCreateHint')),
@@ -315,6 +427,7 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto' } },
     toolbar,
+    contextCard,
     createCard,
     error.length > 0 && !creating
       ? h('div', { className: 'ph-error' },
@@ -324,6 +437,14 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
     h('div', { className: 'ph-body', style: { flex: '1 1 auto' } },
       h('p', { className: 'ph-hint', style: { padding: '8px 10px 0' } }, t('wtManagerHint')),
       body))
+}
+
+/** One repository's state inside the context card. */
+function contextRepoLabel(t: Translate, repo: WorkspaceRepo): string {
+  if (repo.state === 'ready') return t('gitRepoReady')
+  if (repo.state === 'missing') return t('gitRepoMissing')
+  if (repo.state === 'materializing') return t('gitRepoCreating')
+  return t('gitRepoNotCheckedOut')
 }
 
 /** Props of one worktree row. */

@@ -49,6 +49,31 @@ export function WorktreeOption(props: WorktreeOptionProps): ReturnType<typeof h>
       : null
   }
   const current: WorktreeRecord | null = info.current ?? null
+  // A multi-repo workspace has no base picker: each repository is checked out
+  // on demand, from its own default branch.
+  if (info.kind === 'context') {
+    const ready = info.repos?.filter((repo) => repo.state === 'ready').length ?? 0
+    return h('span', { className: 'ph-wrap', 'data-personal-hub-worktree': true },
+      current === null
+        ? h('label', {
+            className: 'ph-check-inline ph-wt-toggle',
+            title: t('wtContextHint'),
+          },
+            h('input', {
+              type: 'checkbox',
+              checked: props.wanted,
+              disabled: props.busy,
+              onChange: (event: { target: { checked: boolean } }) => props.onToggle(event.target.checked),
+            }),
+            h(Icon, { name: 'branch', size: 11 }),
+            h('span', null, t('wtContext')))
+        : h('span', { className: 'ph-chip ph-mono', title: String(current.path ?? '') },
+            h(Icon, { name: 'branch', size: 11 }),
+            h('span', { className: 'ph-ellipsis' }, t('wtContextRepos', { count: ready }))),
+      h('span', { className: 'ph-hint ph-tiny' }, t('wtContextHint')),
+      props.error.length > 0 ? h('span', { className: 'ph-error-text' }, props.error) : null,
+      props.notice.length > 0 ? h('span', { className: 'ph-ok ph-tiny' }, props.notice) : null)
+  }
   const bases = props.source === 'remote' ? info.bases?.remote ?? [] : info.bases?.local ?? []
   const options = bases.map((item) => ({
     value: props.source === 'remote' ? (item as { branch: string }).branch : item.name,

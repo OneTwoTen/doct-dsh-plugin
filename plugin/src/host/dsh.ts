@@ -257,3 +257,48 @@ export interface ClientContext extends DshContext {
 export function service<T>(ctx: DshContext, name: string): T | undefined {
   return ctx.get<T>(name)
 }
+
+/** One prompt contribution the system-prompt service accepts. */
+export interface SystemPromptContribution {
+  name: string
+  order?: number
+  /** Dynamic text; `context.agent` is the Session asking for its prompt. */
+  text: (context: { agent?: { session?: SessionLike } }) => string
+}
+
+/** The `systemPrompt` service slice this bundle uses. */
+export interface SystemPromptService {
+  context(entry: SystemPromptContribution): Disposer
+}
+
+/** One tool definition accepted by the tool registry. */
+export interface ToolDefinitionLike {
+  name: string
+  description: string
+  /** The registry's schema DSL: each parameter is its own object. */
+  parameters: Record<string, unknown>
+  output: {
+    schema: Record<string, unknown>
+    render: (args: Record<string, unknown>, value: Record<string, unknown>) => Array<{ type: 'text'; text: string }>
+  }
+  execute(args: Record<string, unknown>, exec: ToolExecutionLike): Promise<Record<string, unknown>>
+}
+
+/** What one tool execution receives from the registry. */
+export interface ToolExecutionLike {
+  agent?: AgentLike
+  signal: AbortSignal
+}
+
+/** The `tools` service slice this bundle uses. */
+export interface ToolsService {
+  register(
+    definition: ToolDefinitionLike,
+    options?: { when?: (context: { agent?: AgentLike }) => boolean | Promise<boolean> },
+  ): Disposer
+}
+
+/** The `fs` service slice the write guard needs. */
+export interface FileSystemService {
+  processPath(target: unknown): string
+}

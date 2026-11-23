@@ -5,7 +5,7 @@
  * and the toasts; each child view loads its own slice through the same Host
  * channel, so switching a tab never refetches what the header already has.
  */
-import { h, useEffect, useRef, useState } from '../runtime.ts'
+import { h, useEffect, useMemo, useRef, useState } from '../runtime.ts'
 import { Icon } from '../icons.tsx'
 import { useLoader, useDocumentVisible, splitPath } from '../hooks.ts'
 import { messageOf } from '../api.ts'
@@ -24,7 +24,7 @@ import { PullsView, PullPane } from './pulls.tsx'
 import { IssuesView, IssuePane } from './issues.tsx'
 import { WorktreesView } from './worktrees.tsx'
 import { Empty, Failure, Loading, DetailBar, stateLabel } from './common.tsx'
-import type { GitActionProgress, GitOverview, GitStackedAction } from '../../shared/protocol.ts'
+import type { GitActionProgress, GitOverview, GitStackedAction, WorkspaceRepo, WorkspaceReposResult } from '../../shared/protocol.ts'
 
 /** The tab kinds the panel shows. */
 type ViewId = 'changes' | 'worktrees' | 'pulls' | 'issues' | 'commits'
@@ -65,7 +65,8 @@ interface ActionOptions {
 
 /** The panel. */
 export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
-  const { t, api } = props
+  const { t } = props
+  const baseApi = props.api
   const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
   const tabInfo = typeof props.useTabInfo === 'function' ? props.useTabInfo() : undefined
   const visible = tabInfo?.tab?.visible !== false
@@ -73,6 +74,28 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   const cwd = typeof props.useSessions === 'function'
     ? props.useSessions((snapshot) => snapshot?.byId?.[sessionId]?.cwd ?? '')
     : ''
+
+  /** The repository chip the panel currently shows; null is the summary. */
+  const [repoId, setRepoId] = useState<string | null>(null)
+  const repoPicked = useRef(false)
+  const [checkoutBusy, setCheckoutBusy] = useState('')
+  // Every existing route gets the selected repo without threading a new prop
+  // through every child: the panel hands its children a scoped API.
+  const scopedApi = useMemo<GitApi>(() => {
+    if (repoId === null || repoId.length === 0) return baseApi
+    return new Proxy(baseApi, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown
+        if (typeof value !== 'function') return value
+        return (payload?: unknown) => (value as (input: unknown) => unknown)(
+          payload === undefined || payload === null
+            ? { repo: repoId }
+            : { ...(payload as Record<string, unknown>), repo: repoId },
+        )
+      },
+    }) as GitApi
+  }, [baseApi, repoId])
+  const api = scopedApi
 
   const [view, setView] = useState<ViewId>('changes')
   const [selection, setSelection] = useState<Selection>(null)
@@ -99,17 +122,42 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
 
   const reload = (): void => setRevision((value) => value + 1)
 
-  const overviewState = useLoader(
-    () => api.overview({ sessionId, cwd: cwd || undefined }),
-    [sessionId, cwd, revision],
+  // The workspace's repositories are the panel's first question. The answer
+  // decides which repository every other route addresses.
+  const reposState = useLoader(
+    () => baseApi.repos({ sessionId, cwd: cwd || undefined }),
+    [baseApi, sessionId, cwd, revision],
   )
-  const overview = overviewState.value
+  const workspace = reposState.value
+  const allMode = repoId === null
+  const selectedRepo = workspace === undefined
+    ? null
+    : workspace.repos.find((repo) => repo.id === repoId) ?? null
+  const needsCheckout = workspace !== undefined
+    && workspace.isolation
+    && selectedRepo !== null
+    && selectedRepo.state !== 'ready'
+
+  useEffect(() => {
+    if (repoPicked.current || workspace === undefined || workspace.repos.length === 0) return
+    repoPicked.current = true
+    const pick = workspace.repos.find((repo) => repo.state === 'ready' && (repo.changedFiles ?? 0) > 0)
+      ?? workspace.repos.find((repo) => repo.state === 'ready')
+      ?? workspace.repos[0]
+    setRepoId(pick.id)
+  }, [workspace])
+
+  const overviewState = useLoader(
+    () => repoId === null ? Promise.resolve(null) : api.overview({ sessionId, cwd: cwd || undefined }),
+    [api, sessionId, cwd, revision, repoId],
+  )
+  const overview = overviewState.value ?? undefined
   const status = actionStatusOf(overview)
   const countsState = useLoader(
-    () => api.counts({ sessionId, cwd: cwd || undefined }),
-    [sessionId, cwd, revision],
+    () => repoId === null ? Promise.resolve(null) : api.counts({ sessionId, cwd: cwd || undefined }),
+    [api, sessionId, cwd, revision, repoId],
   )
-  const counts = countsState.value
+  const counts = countsState.value ?? undefined
 
   // Poll while the tab is on screen; a hidden tab stops asking.
   useEffect(() => {
@@ -165,6 +213,23 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     successTimer.current = setTimeout(() => {
       if (mounted.current) setSuccess(null)
     }, 10000)
+  }
+
+  /** Create one repository's checkout for this chat. */
+  const createCheckout = async (id: string): Promise<void> => {
+    if (checkoutBusy.length > 0) return
+    setCheckoutBusy(id)
+    try {
+      await baseApi.checkoutRepo({ sessionId, cwd: cwd || undefined, repo: id })
+      repoPicked.current = true
+      setRepoId(id)
+      reload()
+      toast(t('gitRepoReady'), t('gitRepoCreateCheckout'), 'success')
+    } catch (failure) {
+      toast(t('gitRepoCheckoutFailed'), messageOf(failure), 'error')
+    } finally {
+      setCheckoutBusy('')
+    }
   }
 
   /**
@@ -364,6 +429,22 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
     })
   }
 
+  const repoBar = workspace !== undefined && workspace.kind === 'multi'
+    ? h(RepoBar, {
+        t,
+        workspace,
+        selected: repoId,
+        busy: checkoutBusy,
+        onSelect: (id: string | null) => {
+          repoPicked.current = true
+          setRepoId(id)
+          setSelection(null)
+        },
+        onCreate: (id: string) => void createCheckout(id),
+        onRefresh: reload,
+      })
+    : null
+
   const header = overview === undefined ? null : h(PanelHeader, {
     t,
     overview,
@@ -404,7 +485,37 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   })
 
   let body: ReturnType<typeof h> | ReturnType<typeof h>[]
-  if (overviewState.status === 'error' && overview === undefined) {
+  if (allMode) {
+    body = h(ReposOverview, {
+      t,
+      workspace: workspace ?? null,
+      error: reposState.error,
+      busy: checkoutBusy,
+      onSelect: (id: string) => {
+        repoPicked.current = true
+        setRepoId(id)
+        setSelection(null)
+      },
+      onCreate: (id: string) => void createCheckout(id),
+      onRefresh: reload,
+    })
+  } else if (workspace === undefined && reposState.status === 'error') {
+    body = h(Failure, {
+      error: reposState.error,
+      title: t('gitReadError'),
+      retryLabel: t('gitRetry'),
+      onRetry: reload,
+    })
+  } else if (workspace === undefined) {
+    body = h(Loading, { label: t('gitLoadingLong') })
+  } else if (needsCheckout && selectedRepo !== null) {
+    body = h(RepoCheckoutCard, {
+      t,
+      repo: selectedRepo,
+      busy: checkoutBusy === selectedRepo.id,
+      onCreate: () => void createCheckout(selectedRepo.id),
+    })
+  } else if (overviewState.status === 'error' && overview === undefined) {
     const error = overviewState.error
     const code = errorCode(error)
     body = h(Failure, {
@@ -452,6 +563,11 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   } else if (view === 'worktrees') {
     body = h(WorktreesView, {
       api, t, sessionId, cwd, revision,
+      contextMode: workspace?.isolation === true,
+      onSelectRepo: (id: string) => {
+        repoPicked.current = true
+        setRepoId(id)
+      },
       newChat: props.newChat,
       onToast: toast,
       onChanged: reload,
@@ -480,10 +596,12 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
   }
 
   const isDetail = selection !== null
+  const showTabs = !allMode && !needsCheckout && overview !== undefined
 
   return h('div', { className: 'ph-git', 'data-personal-hub-git': true, style: { position: 'relative' } },
+    repoBar,
     header,
-    h(PanelTabs, {
+    showTabs ? h(PanelTabs, {
       t,
       value: view,
       counts: {
@@ -501,7 +619,7 @@ export function GitPanel(props: GitPanelProps): ReturnType<typeof h> {
         setView(next)
         setSelection(null)
       },
-    }),
+    }) : null,
     // The list views scroll as a whole, so their toolbars travel with the
     // content. The Changes and Worktrees views and every detail pane own their
     // scroller instead: a detail that is merely clipped cannot be read below
@@ -761,4 +879,159 @@ export function NoRepository(props: { t: Translate }): ReturnType<typeof h> {
 /** The back bar a detail pane needs when it is rendered on its own. */
 export function PanelBackBar(props: { t: Translate; name: string; onBack(): void }): ReturnType<typeof h> {
   return h(DetailBar, { t: props.t, name: props.name, onBack: props.onBack })
+}
+
+/** One chip per repository, plus the summary the panel starts on. */
+function RepoBar(props: {
+  t: Translate
+  workspace: WorkspaceReposResult
+  selected: string | null
+  busy: string
+  onSelect(id: string | null): void
+  onCreate(id: string): void
+  onRefresh(): void
+}): ReturnType<typeof h> {
+  const { t, workspace } = props
+  return h('div', {
+    className: 'ph-repo-bar',
+    'data-personal-hub-repos': true,
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: '5px',
+      padding: '7px 10px 6px',
+      borderBottom: '1px solid var(--dsw-alias-border-l1)',
+    },
+  },
+    h('button', {
+      type: 'button',
+      className: 'ph-chip',
+      'data-tone': props.selected === null ? 'business' : undefined,
+      title: workspace.workspaceRoot,
+      onClick: () => props.onSelect(null),
+    }, t('gitRepoAll')),
+    workspace.repos.map((repo) => {
+      const selected = props.selected === repo.id
+      const busy = props.busy === repo.id
+      const changed = repo.state === 'ready' && repo.changedFiles !== null && repo.changedFiles > 0
+        ? ` •${repo.changedFiles}`
+        : ''
+      const label = repo.role !== '' && repo.role !== repo.name ? `${repo.name} · ${repo.role}` : repo.name
+      const tone = repo.state === 'missing' ? 'error' : repo.state === 'not-checked-out' ? 'warn' : selected ? 'business' : undefined
+      return h('button', {
+        key: repo.id,
+        type: 'button',
+        className: 'ph-chip',
+        'data-tone': tone,
+        title: `${repo.root}${repo.description === '' ? '' : `\n${repo.description}`}`,
+        style: repo.available ? { opacity: 0.75 } : undefined,
+        onClick: () => {
+          if (repo.state === 'not-checked-out' && workspace.isolation) {
+            props.onCreate(repo.id)
+            return
+          }
+          props.onSelect(repo.id)
+        },
+      },
+        h('span', { className: 'ph-ellipsis' }, `${label}${busy ? ` · ${t('gitRepoCreating')}` : changed}`),
+        repo.state === 'missing' ? h(Icon, { name: 'alert', size: 10 }) : null)
+    }),
+    h('span', { style: { flex: '1 1 auto' } }),
+    h('button', {
+      type: 'button',
+      className: 'ph-icon-button',
+      title: t('gitRefresh'),
+      'aria-label': t('gitRefresh'),
+      onClick: props.onRefresh,
+    }, h(Icon, { name: 'refresh', size: 13 })))
+}
+
+/** The "All repositories" summary: state, role, and one action per row. */
+function ReposOverview(props: {
+  t: Translate
+  workspace: WorkspaceReposResult | null
+  error: unknown
+  busy: string
+  onSelect(id: string): void
+  onCreate(id: string): void
+  onRefresh(): void
+}): ReturnType<typeof h> {
+  const { t, workspace } = props
+  if (workspace === null) {
+    return props.error === undefined
+      ? h(Loading, { label: t('gitLoadingLong') })
+      : h(Failure, { error: props.error, title: t('gitReadError'), retryLabel: t('gitRetry'), onRetry: props.onRefresh })
+  }
+  if (workspace.kind === 'none') {
+    return h(Empty, { icon: 'git', title: t('gitRepoNone'), hint: t('gitRepoNoneHint') })
+  }
+  return h('div', { style: { padding: '10px 12px', overflow: 'auto', minHeight: 0 } },
+    h('div', { className: 'ph-hint', style: { marginBottom: '8px' } }, workspace.workspaceRoot),
+    workspace.warnings.length === 0
+      ? null
+      : h('div', { className: 'ph-hint', style: { marginBottom: '8px', color: 'var(--dsw-alias-state-warn-primary)' } },
+          workspace.warnings.join(' · ')),
+    workspace.repos.map((repo) => h('div', {
+      key: repo.id,
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '7px 0',
+        borderTop: '1px solid var(--dsw-alias-border-l1)',
+      },
+    },
+      h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 auto' } },
+        h('span', { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 } },
+          h('span', { className: 'ph-ellipsis', style: { fontWeight: 600 } }, repo.name),
+          repo.role !== '' && repo.role !== repo.name
+            ? h('span', { className: 'ph-chip' }, repo.role)
+            : null,
+          h('span', { className: 'ph-chip', 'data-tone': repo.state === 'ready' ? 'success' : repo.state === 'missing' ? 'error' : 'warn' },
+            repoStateLabel(t, repo))),
+        h('span', { className: 'ph-hint ph-ellipsis' }, repo.root),
+        repo.description === '' ? null : h('span', { className: 'ph-hint' }, repo.description)),
+      repo.state === 'not-checked-out' && workspace.isolation
+        ? h('button', {
+            type: 'button',
+            className: 'ph-button',
+            disabled: props.busy === repo.id,
+            onClick: () => props.onCreate(repo.id),
+          }, props.busy === repo.id ? t('gitRepoCreating') : t('gitRepoCreateCheckout'))
+        : h('button', {
+            type: 'button',
+            className: 'ph-button',
+            onClick: () => props.onSelect(repo.id),
+          }, t('gitRepoOpen')))))
+}
+
+/** The card a repository shows before this chat has checked it out. */
+function RepoCheckoutCard(props: {
+  t: Translate
+  repo: WorkspaceRepo
+  busy: boolean
+  onCreate(): void
+}): ReturnType<typeof h> {
+  const { t, repo } = props
+  return h('div', { className: 'ph-empty' },
+    h('span', { className: 'ph-empty-icon' }, h(Icon, { name: 'git', size: 26 })),
+    h('span', { className: 'ph-empty-title' }, `${repo.name} · ${repoStateLabel(t, repo)}`),
+    h('span', { className: 'ph-empty-hint' }, repo.description === '' ? t('gitRepoCheckoutHint') : repo.description),
+    h('button', {
+      type: 'button',
+      className: 'ph-button',
+      disabled: props.busy,
+      onClick: props.onCreate,
+    }, props.busy ? t('gitRepoCreating') : t('gitRepoCreateCheckout')))
+}
+
+/** One repository's state in the user's language. */
+function repoStateLabel(t: Translate, repo: WorkspaceRepo): string {
+  if (repo.state === 'ready') {
+    return repo.checkout === null ? t('gitRepoMainCheckout') : t('gitRepoReady')
+  }
+  if (repo.state === 'missing') return t('gitRepoMissing')
+  if (repo.state === 'materializing') return t('gitRepoCreating')
+  return t('gitRepoNotCheckedOut')
 }
