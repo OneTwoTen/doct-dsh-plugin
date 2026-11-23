@@ -187,6 +187,12 @@ button.ph-chip:hover{background:var(--dsw-alias-bg-layer-2)}
 .ph-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0}
 .ph-split .ph-side{display:flex;align-items:flex-start;min-width:0;border-right:1px solid var(--dsw-alias-border-l3);white-space:pre}
 .ph-diff[data-wrap=true] .ph-split .ph-side{white-space:pre-wrap;word-break:break-word}
+/* Each column is only half the panel wide. With wrapping off, white-space:pre
+   keeps a long line at its full width and it prints straight over the next
+   column, so the two halves of a row overlap and neither is readable. A split
+   row has to stay inside its own column, so wrap its code there regardless of
+   the wrap switch; overflow-wrap also breaks a single overlong token. */
+.ph-diff[data-wrap=false] .ph-split .ph-side{white-space:pre-wrap;overflow-wrap:anywhere}
 .ph-split .ph-side:last-child{border-right:0}
 .ph-split .ph-side[data-kind=add]{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent)}
 .ph-split .ph-side[data-kind=del]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}
