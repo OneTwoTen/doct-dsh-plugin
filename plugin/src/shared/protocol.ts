@@ -426,6 +426,8 @@ export interface WorktreeRequest {
   source: 'local' | 'remote'
   /** Whether the user chose this, or it is simply the configured default. */
   explicit: boolean
+  /** How checkouts are materialized for this Session's next message. */
+  mode?: 'lazy' | 'eager'
   /** Why the last attempt failed; a set error holds creation until a retry. */
   error: string | null
   createdAt: number
@@ -513,8 +515,26 @@ export interface WorkspaceReposResult {
   isolation: boolean
   /** The chat's context directory, when it exists. */
   context: { path: string; name: string; createdAt: number } | null
+  /** The recorded context folder is gone; the next message can recreate it. */
+  contextMissing?: boolean
   repos: WorkspaceRepo[]
   warnings: string[]
+}
+
+/** One repository's checkout state, for the light panel poll. */
+export interface RepoCheckoutState {
+  /** Repo id from `repos`. */
+  repo: string
+  state: 'not-checked-out' | 'materializing' | 'ready' | 'missing' | 'error'
+  /** The last materialization error, when `state` is `error`. */
+  error?: string | null
+}
+
+/** A cheap answer while a checkout is being created or repaired. */
+export interface CheckoutStateResult {
+  workspaceRoot: string
+  contextMissing: boolean
+  repos: RepoCheckoutState[]
 }
 
 /** The New Session worktree option's answer. */
@@ -538,6 +558,8 @@ export interface WorktreeState {
   sourceDefault?: 'local' | 'remote'
   /** Whether a first message creates a checkout without the user asking. */
   auto?: boolean
+  /** Effective checkout materialization mode, from config or the Session's request. */
+  checkoutMode?: 'lazy' | 'eager' | 'off'
   /** What the next message will do for this Session. */
   request?: WorktreeRequest | null
   /** The creation in flight, when a message of this Session is waiting for it. */
@@ -706,6 +728,39 @@ export interface GitTarget {
   cwd?: string
   /** A repo id from `repos`; the Host resolves it to the chat's checkout. */
   repo?: string
+  /** Force repository discovery instead of using the short-lived cache. */
+  refresh?: boolean
+}
+
+/** A read-only change summary across every repository of the workspace. */
+export interface WorkspaceChangesRequest extends GitTarget {
+  /** `working` is uncommitted work; `branch` is the branch against its base. */
+  scope?: 'working' | 'branch'
+  /** Ask the Host to include whole-file diffs for untracked files. */
+  includeDiff?: boolean
+}
+
+/** One repository's changes in the workspace-wide summary. */
+export interface WorkspaceChangeRepo {
+  id: string
+  name: string
+  role: string
+  root: string
+  branch: string | null
+  state: WorkspaceRepo['state']
+  /** Empty when the repository is not ready; a failure does not fail the batch. */
+  files: GitFileChange[]
+  stats: Pick<GitStats, 'files' | 'additions' | 'deletions'>
+  /** A per-repository read failure, when one repository could not be inspected. */
+  error?: FailureInfo
+}
+
+/** The workspace-wide change summary, with one entry per repository. */
+export interface WorkspaceChangesResult {
+  workspaceRoot: string
+  scope: 'working' | 'branch'
+  repos: WorkspaceChangeRepo[]
+  warnings: string[]
 }
 
 /** One file's diff request. */
@@ -896,6 +951,8 @@ export interface WorktreeRequestPayload extends GitTarget {
   source?: 'local' | 'remote'
   /** Clear a recorded failure, so the next message tries again. */
   retry?: boolean
+  /** How checkouts are materialized for the next message. */
+  mode?: 'lazy' | 'eager'
 }
 
 /** A request to move a Session into an existing checkout, or back to the project. */
@@ -937,6 +994,12 @@ export interface ContextRemoveRequest extends GitTarget {
 export interface GitApi {
   /** The workspace's repositories, their roles, and this chat's checkouts. */
   repos(payload: GitTarget): Promise<WorkspaceReposResult>
+  /** Read-only changed files and totals for every repository of the workspace. */
+  workspaceChanges(payload: WorkspaceChangesRequest): Promise<WorkspaceChangesResult>
+  /** Light per-repo checkout state, including the ones being created. */
+  checkoutState(payload: GitTarget): Promise<CheckoutStateResult>
+  /** Recreate this chat's context directory when it disappeared. */
+  contextRepair(payload: GitTarget): Promise<WorkspaceReposResult>
   /** Add one repository to this chat's context, creating its worktree. */
   checkoutRepo(payload: CheckoutRepoRequest): Promise<{ repo: WorkspaceRepo }>
   /** Remove one repository's checkout, keeping the context directory. */

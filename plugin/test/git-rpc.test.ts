@@ -17,11 +17,11 @@ process.once('exit', () => rmSync(testHome, { recursive: true, force: true }))
 /** The routes the feature registers, so a removed or renamed one fails the suite. */
 const EXPECTED_ROUTES = [
   'actionState', 'branchPull', 'branches', 'cleanupRun', 'cleanupState', 'commit', 'commitChanges', 'commits',
-  'checkoutRemove', 'checkoutRepo', 'contextRemove', 'counts', 'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'draftPull', 'forge',
+  'checkoutRemove', 'checkoutRepo', 'checkoutState', 'contextRemove', 'contextRepair', 'counts', 'createBranch', 'createPull', 'diff', 'diffAll', 'discard', 'draftMessage', 'draftPull', 'forge',
   'issue', 'issues', 'mergePull', 'mergeSettings', 'mergeSettingsSet', 'overview', 'publish', 'pull',
   'pullRequest', 'pulls', 'push', 'repos', 'stage', 'startAction', 'switchBranch', 'unstage', 'worktreeAdd',
   'worktreeCreate', 'worktreePrune', 'worktreeRemove', 'worktreeRemovePath', 'worktreeRequest', 'worktreeState',
-  'worktreeSwitch', 'worktrees',
+  'worktreeSwitch', 'worktrees', 'workspaceChanges',
 ].sort()
 
 /** Initialize a repository with a committed file, a modified file, a staged file, and an untracked file. */

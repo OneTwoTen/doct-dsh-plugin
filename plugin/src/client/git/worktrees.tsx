@@ -278,6 +278,13 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
               },
                 h('span', { className: 'ph-ellipsis', style: { flex: '1 1 auto', fontWeight: 600 } }, repo.name),
                 h('span', { className: 'ph-chip' }, contextRepoLabel(t, repo)),
+                repo.state === 'error' || repo.state === 'missing'
+                  ? h('span', {
+                      className: 'ph-chip',
+                      'data-tone': 'error',
+                      title: repo.error ?? '',
+                    }, h(Icon, { name: 'alert', size: 10 }), t('gitRepoError'))
+                  : null,
                 repo.checkout === null ? null : h('span', { className: 'ph-mono ph-tiny ph-ellipsis' }, repo.checkout.branch),
                 repo.state === 'ready'
                   ? h('button', {
@@ -443,6 +450,7 @@ export function WorktreesView(props: WorktreesViewProps): ReturnType<typeof h> {
 function contextRepoLabel(t: Translate, repo: WorkspaceRepo): string {
   if (repo.state === 'ready') return t('gitRepoReady')
   if (repo.state === 'missing') return t('gitRepoMissing')
+  if (repo.state === 'error') return t('gitRepoError')
   if (repo.state === 'materializing') return t('gitRepoCreating')
   return t('gitRepoNotCheckedOut')
 }

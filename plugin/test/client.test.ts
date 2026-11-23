@@ -211,6 +211,61 @@ test('the caller posts to the Host route and unwraps the envelope', async () => 
   assert.equal(calls[0].init.credentials, 'same-origin')
 })
 
+test('the Git caller can force a rescan and reach the checkout-state routes', async () => {
+  const { createGitApi, createGitCaller } = await import('../src/client/api.ts')
+  const api = createGitApi(createGitCaller())
+  const calls: Array<{ url: string; init: { method: string; body: string; credentials: string } }> = []
+  const restore = stubFetch(calls, {
+    ok: true,
+    value: {
+      workspaceRoot: '/work',
+      kind: 'multi',
+      isolation: true,
+      context: null,
+      contextMissing: false,
+      repos: [],
+      warnings: [],
+    },
+  })
+  try {
+    await api.repos({ sessionId: 's1', refresh: true })
+    const state = await api.checkoutState({ sessionId: 's1' })
+    assert.equal(state.contextMissing, false)
+    await api.contextRepair({ sessionId: 's1' })
+  } finally {
+    restore()
+  }
+  assert.deepEqual(calls.map((call) => call.url), [
+    'api/personal-hub-git/repos',
+    'api/personal-hub-git/checkoutState',
+    'api/personal-hub-git/contextRepair',
+  ])
+  assert.deepEqual(JSON.parse(calls[0].init.body), { sessionId: 's1', refresh: true })
+  assert.deepEqual(JSON.parse(calls[1].init.body), { sessionId: 's1' })
+  assert.deepEqual(JSON.parse(calls[2].init.body), { sessionId: 's1' })
+  for (const call of calls) assert.equal(call.init.credentials, 'same-origin')
+})
+
+test('the workspace changes route posts its scope to its own endpoint', async () => {
+  const { createGitApi, createGitCaller } = await import('../src/client/api.ts')
+  const api = createGitApi(createGitCaller())
+  const calls: Array<{ url: string; init: { method: string; body: string; credentials: string } }> = []
+  const restore = stubFetch(calls, {
+    ok: true,
+    value: { workspaceRoot: '/work', scope: 'branch', repos: [], warnings: [] },
+  })
+  try {
+    const result = await api.workspaceChanges({ sessionId: 's1', scope: 'branch', includeDiff: true })
+    assert.equal(result.scope, 'branch')
+  } finally {
+    restore()
+  }
+  assert.equal(calls[0].url, 'api/personal-hub-git/workspaceChanges')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { sessionId: 's1', scope: 'branch', includeDiff: true })
+  assert.equal(calls[0].init.credentials, 'same-origin')
+})
+
 test('a failed envelope becomes an error with its code, and a transport failure its own', async () => {
   const { createGitCaller, GitRequestError } = await import('../src/client/api.ts')
   const call = createGitCaller()
@@ -563,6 +618,69 @@ test('the worktree option shows the checkout a chat already has', async () => {
   assert.match(textOf(option), /feat\/x/)
 })
 
+test('the context worktree option offers the checkout mode, the single-repo one does not', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const WorktreeOption = view.WorktreeOption as (props: Record<string, unknown>) => unknown
+  const contextInfo = {
+    enabled: true,
+    supported: true,
+    reason: null,
+    sessionId: 's1',
+    current: null,
+    bases: null,
+    project: { directory: '/work', linked: false },
+    kind: 'context',
+    workspaceRoot: '/work',
+    repos: [],
+    checkoutMode: 'lazy',
+    auto: true,
+    request: null,
+    creating: null,
+    started: false,
+  }
+  const modes: string[] = []
+  const shared = {
+    t: (key: string) => key,
+    source: 'local',
+    base: '',
+    wanted: true,
+    busy: false,
+    error: '',
+    notice: '',
+    onToggle: () => {},
+    onBase: () => {},
+    onSource: () => {},
+  }
+  const context = WorktreeOption({
+    ...shared,
+    info: contextInfo,
+    mode: 'lazy',
+    onMode: (next: string) => modes.push(next),
+  })
+  const selects = findAll(context, (element) => element.type === 'select')
+  assert.equal(selects.length, 1, 'the context branch has one mode picker')
+  assert.equal(selects[0].props?.['aria-label'], 'wtMode')
+  assert.equal(selects[0].props?.value, 'lazy')
+  ;(selects[0].props?.onChange as (event: { target: { value: string } }) => void)({ target: { value: 'eager' } })
+  assert.deepEqual(modes, ['eager'])
+
+  const off = WorktreeOption({ ...shared, info: contextInfo, mode: 'off', onMode: () => {} })
+  assert.equal(findAll(off, (element) => element.type === 'select').length, 0, 'off hides the picker')
+
+  // The single-repository branch keeps only its base branch picker.
+  const single = WorktreeOption({
+    ...shared,
+    info: { ...contextInfo, kind: undefined, checkoutMode: undefined },
+    base: 'main',
+    mode: 'lazy',
+    onMode: () => {},
+  })
+  const singleSelects = findAll(single, (element) => element.type === 'select')
+  assert.equal(singleSelects.length, 1)
+  assert.equal(singleSelects[0].props?.['aria-label'], 'wtBase')
+})
+
 test('the worktree option stays out of a project that cannot host one', async () => {
   const module = await loadClient()
   const view = module.__internal as Record<string, unknown>
@@ -611,7 +729,7 @@ test('the worktree option stays out of a project that cannot host one', async ()
     onBase: () => {},
     onSource: () => {},
   })
-  assert.equal(outside, null)
+  assert.match(textOf(outside), /wtNoRepository/)
 })
 
 test('the settings form draws every switch it can save', async () => {
@@ -1000,6 +1118,96 @@ test('the automatic-archive caller posts to its own route prefix', async () => {
   assert.equal(calls[0].init.credentials, 'same-origin')
 })
 
+test('the change set groups files per repository and shows no commit composer', async () => {
+  const module = await loadClient()
+  const view = module.__internal as Record<string, unknown>
+  const ChangeSetView = view.ChangeSetView as (props: Record<string, unknown>) => unknown
+  const t = (key: string, values?: Record<string, string | number>) =>
+    values === undefined ? key : `${key}:${Object.values(values).join(',')}`
+  const file = (path: string, kind: string, additions: number, deletions: number) => ({
+    path,
+    kind,
+    index: 'M',
+    worktree: 'M',
+    staged: false,
+    unstaged: true,
+    untracked: false,
+    conflicted: false,
+    additions,
+    deletions,
+    binary: false,
+  })
+  const result = {
+    workspaceRoot: '/work',
+    scope: 'working',
+    warnings: ['one workspace warning'],
+    repos: [
+      {
+        id: 'api',
+        name: 'api',
+        role: 'service',
+        root: '/work/api',
+        branch: 'main',
+        state: 'ready',
+        files: [file('src/index.ts', 'modified', 12, 3), file('src/new.ts', 'added', 5, 0)],
+        stats: { files: 2, additions: 17, deletions: 3 },
+      },
+      {
+        id: 'web',
+        name: 'web',
+        role: 'client',
+        root: '/work/web',
+        branch: 'feat/ui',
+        state: 'ready',
+        files: [file('docs/readme.md', 'modified', 1, 2)],
+        stats: { files: 1, additions: 1, deletions: 2 },
+      },
+      {
+        id: 'infra',
+        name: 'infra',
+        role: '',
+        root: '/work/infra',
+        branch: null,
+        state: 'not-checked-out',
+        files: [],
+        stats: { files: 0, additions: 0, deletions: 0 },
+        error: { code: 'git/no-repo', message: 'not a repository' },
+      },
+    ],
+  }
+  // The summary is read through the unscoped API; the view renders what it answers.
+  const calls: Array<Record<string, unknown>> = []
+  const api = {
+    workspaceChanges: async (payload: Record<string, unknown>) => {
+      calls.push(payload)
+      return result
+    },
+  }
+  const loaded = await api.workspaceChanges({ sessionId: 's1' })
+  const opened: string[] = []
+  const tree = ChangeSetView({ t, result: loaded, onOpenRepo: (id: string) => opened.push(id) })
+  const text = textOf(tree)
+  assert.deepEqual(calls, [{ sessionId: 's1' }])
+  assert.match(text, /api/)
+  assert.match(text, /service/)
+  assert.match(text, /src\/index\.ts/)
+  assert.match(text, /src\/new\.ts/)
+  assert.match(text, /web/)
+  assert.match(text, /feat\/ui/)
+  assert.match(text, /docs\/readme\.md/)
+  assert.match(text, /one workspace warning/)
+  assert.match(text, /git\/no-repo: not a repository/)
+  assert.match(text, /gitChangeSetClean/)
+  // One repo badge per file, not just the per-group heading.
+  assert.equal(findAll(tree, (element) => element.props?.className === 'ph-chip ph-tiny').length, 3)
+  // This is a read-only overview: staging and committing live in the repo view.
+  assert.doesNotMatch(text, /gitCommit|gitStage|gitDiscard|gitCommitMessage/)
+  const buttons = findAll(tree, (element) => element.type === 'button')
+  assert.equal(buttons.length, 3)
+  ;(buttons[0].props?.onClick as () => void)()
+  assert.deepEqual(opened, ['api'])
+})
+
 test('both languages carry the same personal-hub keys and placeholders', async () => {
   const { en, vi } = await import('../src/client/i18n.ts')
   assert.deepEqual(Object.keys(vi).sort(), Object.keys(en).sort())
@@ -1008,4 +1216,51 @@ test('both languages carry the same personal-hub keys and placeholders', async (
   for (const key of Object.keys(en)) {
     assert.deepEqual(placeholders(vi[key]), placeholders(en[key]), `placeholders of ${key}`)
   }
+})
+
+test('the repository filter, rescan, and context repair are translated in both languages', async () => {
+  const { en, vi } = await import('../src/client/i18n.ts')
+  for (const key of [
+    'gitRepoFilter',
+    'gitRepoNoMatch',
+    'gitRepoRescan',
+    'gitRepoError',
+    'gitContextMissing',
+    'gitContextMissingHint',
+    'gitContextRepair',
+    'gitContextRepairing',
+    'gitContextRepaired',
+    'gitContextRepairFailed',
+    'wtNoRepository',
+  ]) {
+    assert.ok(en[key] && en[key].length > 0, `English ${key}`)
+    assert.ok(vi[key] && vi[key].length > 0, `Vietnamese ${key}`)
+    assert.notEqual(en[key], vi[key], `${key} is translated`)
+  }
+  assert.equal(vi.gitRepoRescan, 'Quét lại')
+  assert.equal(vi.gitContextMissing, 'Context đã mất')
+  assert.equal(vi.gitContextRepair, 'Tạo lại')
+  assert.equal(vi.wtNoRepository, 'Thư mục chưa có kho Git')
+  assert.match(en.gitRepoFilter, /filter/i)
+})
+
+test('the change-set and checkout-mode labels are translated in both languages', async () => {
+  const { en, vi } = await import('../src/client/i18n.ts')
+  for (const key of [
+    'gitChangeSetTitle',
+    'gitChangeSetHint',
+    'gitChangeSetClean',
+    'gitChangeSetEmpty',
+    'gitChangeSetError',
+    'wtMode',
+    'wtModeHint',
+    'wtModeLazy',
+    'wtModeEager',
+  ]) {
+    assert.ok(en[key] && en[key].length > 0, `English ${key}`)
+    assert.ok(vi[key] && vi[key].length > 0, `Vietnamese ${key}`)
+    assert.notEqual(en[key], vi[key], `${key} is translated`)
+  }
+  assert.equal(en.wtModeLazy, 'Lazy')
+  assert.equal(en.wtModeEager, 'Eager')
 })

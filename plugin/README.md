@@ -390,18 +390,34 @@ repo). Panel phát hiện repo, hiện chip theo repo; Git vẫn độc lập t�
 - Khi agent sửa một repo, nó gọi tool `checkout_repo`; nếu quên, write guard chặn lần ghi đầu vào
   cây chính, tạo checkout trong context dir và trả đường dẫn để thử lại. **Chỉ repo bị sửa mới có
   worktree**; repo chỉ đọc không tốn checkout.
-- Panel có chip `Tất cả` + từng repo, trạng thái `chưa checkout / đang tạo / đã checkout`; repo chưa
-  checkout có nút **Tạo checkout**. Commit/push/PR/diff vẫn theo repo đang chọn.
+- Panel có chip `Tất cả` + từng repo, trạng thái `chưa checkout / đang tạo / đã checkout / lỗi`;
+  repo chưa checkout có nút **Tạo checkout**. Với workspace nhiều repo, thanh chip có ô lọc/tìm
+  theo tên, id, vai trò hoặc mô tả. Nút **Quét lại** bỏ qua cache 30 giây để thấy repo mới clone;
+  cache cũng tự đổi khi sửa `.dsh-workspace.json`. Panel thăm dò `checkoutState` nên thấy cả
+  checkout do agent gọi `checkout_repo` tạo. Commit/push/PR/diff vẫn theo repo đang chọn.
+- Nếu thư mục context bị xoá mất (vẫn còn bản ghi trong `git.json`), panel báo **Context đã mất**
+  và nút **Tạo lại** dựng lại context rỗng từ workspace gốc; tin nhắn kế tiếp cũng tự phục hồi.
+- Chip `Tất cả` mở **change set** xuyên repo: nhóm tệp đã đổi của từng repo đã checkout (chỉ đọc,
+  không commit/push gộp); repo chưa checkout hiện trạng thái riêng.
 - Tab **Worktree** có mục checkout của chat: tạo/xoá từng repo, xoá cả context, và dọn dẹp từng
-  checkout theo tuổi/quy tắc. Auto-archive theo PR **chưa** chạy cho multi-repo (P3).
+  checkout theo tuổi/quy tắc.
+- Agent có thêm tool `workspace_repos` (chỉ đọc) để liệt kê repo, vai trò và trạng thái checkout.
+- Context dir có `AGENTS.md` sinh tự động liệt kê repo và đường dẫn tài liệu hướng dẫn của từng repo;
+  file này không bị ghi đè nếu bạn sửa tay.
+- Auto-archive theo PR chạy theo **từng repo**: khi một PR gộp, plugin chỉ ghi nhận repo đó; chat chỉ
+  được lưu trữ và dọn checkout khi **mọi repo đã checkout đều có PR đã gộp**. Repo đã checkout mà
+  chưa có PR luôn chặn archive (không bao giờ ẩn việc còn dang dở).
 - Mặc định `lazy`. Cấu hình: `git.checkout.mode` (`lazy`/`eager`/`off`), `dirtyMain` (`warn`/`abort`),
-  `enforceIsolation`; `git.workspace.scanDepth`.
+  `enforceIsolation`; `git.workspace.scanDepth`. Ô **Cách ly theo nhu cầu** ở New Session cho chọn
+  `lazy` (tạo khi sửa) hoặc `eager` (tạo sẵn checkout cho mọi repo `core` ở tin nhắn đầu).
 - Manifest tuỳ chọn `<workspace>/.dsh-workspace.json`: `core`, `exclude`, `roles`, `description`,
-  `base`, `remote`, `checkout`. Không có manifest plugin vẫn khám phá và chạy.
+  `base`, `remote`, `checkout`. `checkout.mode` trong manifest được ưu tiên over cấu hình plugin.
+  Không có manifest plugin vẫn khám phá và chạy.
 
 Giới hạn: guard chỉ phủ file tool (`write`, `edit`, `apply_patch`…); bash có thể lách. Checkout tạo
 từ base đã fetch, **không mang thay đổi chưa commit** ở cây chính (`dirtyMain` cảnh báo/buộc dừng).
-`AGENTS.md`/skills của workspace và từng repo không tự nạp trong context dir — xem
+Nội dung `AGENTS.md` của từng repo không được nạp sẵn — chỉ đường dẫn được liệt kê; skills vẫn cần
+`customSkillDirs`. Xem thêm
 [`docs/nghien-cuu-workspace-nhieu-repo.md`](../docs/nghien-cuu-workspace-nhieu-repo.md).
 
 ### Dọn dẹp sau khi PR được gộp

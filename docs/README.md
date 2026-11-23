@@ -6,7 +6,7 @@ Bộ tài liệu thiết kế của plugin: workspace nhiều repo, Web Remote, 
 
 | Tài liệu | Nội dung | Trạng thái |
 |---|---|---|
-| [Nghiên cứu — một workspace, nhiều git repo](nghien-cuu-workspace-nhieu-repo.md) | Hiện trạng một-repo của DSH/plugin, so sánh các phương án, thiết kế context dir + checkout theo nhu cầu, lộ trình P0–P3 | đã có P0–P2 |
+| [Nghiên cứu — một workspace, nhiều git repo](nghien-cuu-workspace-nhieu-repo.md) | Hiện trạng một-repo của DSH/plugin, so sánh các phương án, thiết kế context dir + checkout theo nhu cầu, lộ trình P0–P3 | đã có P0–P3 (change set xuyên repo, `workspace_repos`, eager, marker AGENTS.md, archive theo PR từng repo) |
 
 ## Web Remote
 

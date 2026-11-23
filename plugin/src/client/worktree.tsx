@@ -36,17 +36,22 @@ export interface WorktreeOptionProps {
   onToggle(next: boolean): void
   onBase(value: string): void
   onSource(kind: 'local' | 'remote'): void
+  /** Effective materialization mode; `off` hides the lazy/eager picker. */
+  mode: 'lazy' | 'eager' | 'off'
+  onMode(mode: 'lazy' | 'eager'): void
 }
 
 /** The option row, pure presentation. */
 export function WorktreeOption(props: WorktreeOptionProps): ReturnType<typeof h> | null {
   const { t, info } = props
   if (info.enabled !== true || info.supported !== true) {
-    // A project that is itself a linked worktree cannot host a second checkout,
-    // so the row explains itself instead of offering a dead control.
-    return info.reason === 'linked-project'
-      ? h('span', { className: 'ph-hint ph-tiny', 'data-personal-hub-worktree': true }, t('wtLinkedProject'))
-      : null
+    // The row explains why it cannot offer a control instead of staying silent.
+    const reason = info.reason === 'linked-project' ? t('wtLinkedProject')
+      : info.reason === 'not-a-repository' ? t('wtNoRepository')
+      : ''
+    return reason === ''
+      ? null
+      : h('span', { className: 'ph-hint ph-tiny', 'data-personal-hub-worktree': true }, reason)
   }
   const current: WorktreeRecord | null = info.current ?? null
   // A multi-repo workspace has no base picker: each repository is checked out
@@ -70,6 +75,20 @@ export function WorktreeOption(props: WorktreeOptionProps): ReturnType<typeof h>
         : h('span', { className: 'ph-chip ph-mono', title: String(current.path ?? '') },
             h(Icon, { name: 'branch', size: 11 }),
             h('span', { className: 'ph-ellipsis' }, t('wtContextRepos', { count: ready }))),
+      props.wanted && props.mode !== 'off'
+        ? h('select', {
+            className: 'ph-select',
+            style: { width: 'auto', maxWidth: '132px' },
+            value: props.mode === 'eager' ? 'eager' : 'lazy',
+            disabled: props.busy,
+            'aria-label': t('wtMode'),
+            title: t('wtModeHint'),
+            onChange: (event: { target: { value: string } }) =>
+              props.onMode(event.target.value === 'eager' ? 'eager' : 'lazy'),
+          },
+            h('option', { value: 'lazy' }, t('wtModeLazy')),
+            h('option', { value: 'eager' }, t('wtModeEager')))
+        : null,
       h('span', { className: 'ph-hint ph-tiny' }, t('wtContextHint')),
       props.error.length > 0 ? h('span', { className: 'ph-error-text' }, props.error) : null,
       props.notice.length > 0 ? h('span', { className: 'ph-ok ph-tiny' }, props.notice) : null)
@@ -157,6 +176,7 @@ export function WorktreeHero(props: WorktreeHeroProps): ReturnType<typeof h> | n
   const [wanted, setWanted] = useState(false)
   const [source, setSource] = useState<'local' | 'remote'>('local')
   const [base, setBase] = useState('')
+  const [mode, setMode] = useState<'lazy' | 'eager' | 'off'>('lazy')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -170,6 +190,7 @@ export function WorktreeHero(props: WorktreeHeroProps): ReturnType<typeof h> | n
         setInfo(value)
         setSource(value.request?.source ?? value.sourceDefault ?? 'local')
         setBase(value.request?.base ?? value.bases?.defaultBase ?? '')
+        setMode(value.checkoutMode ?? 'lazy')
         setWanted(value.request === null || value.request === undefined ? value.auto !== false : value.request.enabled)
       })
       .catch(() => {
@@ -182,7 +203,7 @@ export function WorktreeHero(props: WorktreeHeroProps): ReturnType<typeof h> | n
 
   /** Keep one choice, then reflect it locally; the Host creates nothing yet. */
   const apply = useCallback(async (
-    next: { wanted: boolean; base: string; source: 'local' | 'remote' },
+    next: { wanted: boolean; base: string; source: 'local' | 'remote'; mode: 'lazy' | 'eager' | 'off' },
   ) => {
     if (sessionId.length === 0) return
     setBusy(true)
@@ -195,10 +216,12 @@ export function WorktreeHero(props: WorktreeHeroProps): ReturnType<typeof h> | n
         enabled: next.wanted,
         base: next.base,
         source: next.source,
+        ...(next.mode === 'off' ? {} : { mode: next.mode }),
       })
       setWanted(next.wanted)
       setBase(next.base)
       setSource(next.source)
+      setMode(next.mode)
       setNotice(next.wanted
         ? t('wtNextMessage', { branch: next.base.length > 0 ? next.base : t('wtDefaultBranch') })
         : t('wtOff'))
@@ -220,14 +243,16 @@ export function WorktreeHero(props: WorktreeHeroProps): ReturnType<typeof h> | n
     busy,
     error,
     notice,
-    onToggle: (next: boolean) => void apply({ wanted: next, base, source }),
-    onBase: (value: string) => void apply({ wanted, base: value, source }),
+    mode,
+    onMode: (next: 'lazy' | 'eager') => void apply({ wanted, base, source, mode: next }),
+    onToggle: (next: boolean) => void apply({ wanted: next, base, source, mode }),
+    onBase: (value: string) => void apply({ wanted, base: value, source, mode }),
     onSource: (kind: 'local' | 'remote') => {
       const list = kind === 'remote' ? info.bases?.remote ?? [] : info.bases?.local ?? []
       const preferred = info.bases?.defaultBase ?? ''
       const names = list.map((item) => (kind === 'remote' ? (item as { branch: string }).branch : item.name))
       const next = names.includes(preferred) ? preferred : names[0] ?? ''
-      void apply({ wanted, base: next, source: kind })
+      void apply({ wanted, base: next, source: kind, mode })
     },
   })
 }

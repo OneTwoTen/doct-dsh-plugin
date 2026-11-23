@@ -979,7 +979,7 @@ test('the checkout_repo tool materializes one repository for the chat', async ()
     await makeSiblingRepo(workspace, 'be')
     await makeSiblingRepo(workspace, 'fe')
     let current = workspace
-    let captured: { definition: Record<string, unknown>; options?: { when?: (context: { agent?: unknown }) => boolean } } | undefined
+    const captured = new Map<string, { definition: Record<string, unknown>; options?: { when?: (context: { agent?: unknown }) => boolean } }>()
     const feature = await mountFeature({
       root: workspace,
       services: {
@@ -992,7 +992,7 @@ test('the checkout_repo tool materializes one repository for the chat', async ()
         },
         tools: {
           register(definition: Record<string, unknown>, options?: { when?: (context: { agent?: unknown }) => boolean }) {
-            captured = { definition, options }
+            captured.set(String(definition.name), { definition, options })
             return () => {}
           },
         },
@@ -1008,10 +1008,13 @@ test('the checkout_repo tool materializes one repository for the chat', async ()
         const answer = await feature.call('worktreeState', { sessionId: SESSION })
         return answer.value.current ?? null
       })
-      assert.ok(captured, 'the feature registers checkout_repo')
-      assert.equal(captured.definition.name, 'checkout_repo')
-      assert.equal(captured.options?.when?.({ agent }), true)
-      const execute = captured.definition.execute as (
+      const checkoutTool = captured.get('checkout_repo')
+      const listTool = captured.get('workspace_repos')
+      assert.ok(checkoutTool, 'the feature registers checkout_repo')
+      assert.ok(listTool, 'the feature registers workspace_repos')
+      assert.equal(checkoutTool.options?.when?.({ agent }), true)
+      assert.equal(listTool.options?.when?.({ agent }), true)
+      const execute = checkoutTool.definition.execute as (
         args: Record<string, unknown>,
         exec: { agent: unknown; signal: AbortSignal },
       ) => Promise<Record<string, unknown>>
@@ -1021,8 +1024,219 @@ test('the checkout_repo tool materializes one repository for the chat', async ()
       )
       assert.equal(result.repo, 'fe')
       assert.equal((await stat(String(result.path))).isDirectory(), true)
+      const listExecute = listTool.definition.execute as (
+        args: Record<string, unknown>,
+        exec: { agent: unknown; signal: AbortSignal },
+      ) => Promise<Record<string, unknown>>
+      const listed = await listExecute({}, { agent, signal: new AbortController().signal })
+      assert.deepEqual((listed.repos as Array<{ id: string }>).map((repo) => repo.id).sort(), ['be', 'fe'])
+      const rendered = listTool.definition.output as { render: (args: unknown, value: Record<string, unknown>) => Array<{ text: string }> }
+      assert.match(rendered.render({}, listed)[0].text, /fe —/)
       const after = await feature.call('repos', { sessionId: SESSION })
       assert.equal(after.value.repos.find((repo) => repo.id === 'fe').state, 'ready')
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('repos can be rescanned on demand, and the light checkout state tracks failures', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-rescan-'))
+  let current = workspace
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            current = path
+            return path
+          },
+        },
+      },
+    })
+    try {
+      const first = await feature.call('repos', { sessionId: SESSION })
+      assert.deepEqual(first.value.repos.map((repo) => repo.id), ['be'])
+
+      await makeSiblingRepo(workspace, 'fe')
+      const cached = await feature.call('repos', { sessionId: SESSION })
+      assert.deepEqual(cached.value.repos.map((repo) => repo.id), ['be'])
+      const refreshed = await feature.call('repos', { sessionId: SESSION, refresh: true })
+      assert.deepEqual(refreshed.value.repos.map((repo) => repo.id), ['be', 'fe'])
+
+      // A repository with no commit has no base, so materializing it fails;
+      // the failure must be visible to the panel without a full repos reload.
+      const empty = join(workspace, 'empty')
+      execFileSync('git', ['init', '-q', '-b', 'main', empty], { stdio: ['ignore', 'pipe', 'pipe'] })
+      await feature.call('repos', { sessionId: SESSION, refresh: true })
+      const failed = await feature.call('checkoutRepo', { sessionId: SESSION, repo: 'empty' })
+      assert.equal(failed.ok, false, JSON.stringify(failed))
+      const state = await feature.call('checkoutState', { sessionId: SESSION })
+      assert.equal(state.ok, true, JSON.stringify(state))
+      assert.equal(state.value.contextMissing, false)
+      const emptyState = state.value.repos.find((repo) => repo.repo === 'empty')
+      assert.equal(emptyState?.state, 'error')
+      assert.ok(typeof emptyState?.error === 'string' && emptyState.error.length > 0)
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('a lost context directory is reported and can be recreated', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-repair-'))
+  let current = workspace
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            current = path
+            return path
+          },
+        },
+      },
+    })
+    try {
+      const created = await feature.call('checkoutRepo', { sessionId: SESSION, repo: 'be' })
+      assert.equal(created.ok, true, JSON.stringify(created))
+      const before = await feature.call('repos', { sessionId: SESSION })
+      const oldPath = before.value.context.path
+      await rm(oldPath, { recursive: true, force: true })
+
+      const lost = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(lost.value.contextMissing, true)
+      const repaired = await feature.call('contextRepair', { sessionId: SESSION })
+      assert.equal(repaired.ok, true, JSON.stringify(repaired))
+      assert.equal(repaired.value.contextMissing, false)
+      assert.notEqual(repaired.value.context.path, oldPath)
+      assert.equal((await stat(repaired.value.context.path)).isDirectory(), true)
+      assert.deepEqual(repaired.value.repos.map((repo) => repo.state), ['not-checked-out'])
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('the All view reports changes grouped by repository without hiding clean ones', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-changeset-'))
+  let current = workspace
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    const feature = await mountFeature({
+      root: workspace,
+      services: {
+        workingDirectory: {
+          get: () => current,
+          set: async (_agent: unknown, path: string) => {
+            current = path
+            return path
+          },
+        },
+      },
+    })
+    try {
+      const created = await feature.call('checkoutRepo', { sessionId: SESSION, repo: 'be' })
+      assert.equal(created.ok, true, JSON.stringify(created))
+      await writeFile(join(created.value.repo.checkout.path, 'a.txt'), 'changed\n', 'utf8')
+      const changes = await feature.call('workspaceChanges', { sessionId: SESSION })
+      assert.equal(changes.ok, true, JSON.stringify(changes))
+      assert.equal(changes.value.scope, 'working')
+      assert.deepEqual(changes.value.repos.map((repo) => repo.id), ['be', 'fe'])
+      const be = changes.value.repos.find((repo) => repo.id === 'be')
+      const fe = changes.value.repos.find((repo) => repo.id === 'fe')
+      assert.equal(be.state, 'ready')
+      assert.equal(be.files.some((file) => file.path === 'a.txt'), true)
+      assert.equal(be.stats.files >= 1, true)
+      assert.equal(fe.state, 'not-checked-out')
+      assert.deepEqual(fe.files, [])
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+/** The first message of a chat in a two-repo workspace. */
+async function firstMessageIn(workspace: string, config: Record<string, unknown> = {}) {
+  let current = workspace
+  const feature = await mountFeature({
+    root: workspace,
+    config,
+    services: {
+      workingDirectory: {
+        get: () => current,
+        set: async (_agent: unknown, path: string) => {
+          current = path
+          return path
+        },
+      },
+    },
+    on: () => {},
+  })
+  const agent = withMaintenance(feature.agent, { holds: 0 })
+  await feature.call('repos', { sessionId: SESSION })
+  const listener = feature.listeners.find((entry) => entry.name === 'agent/inbox/inserted')
+  assert.ok(listener)
+  listener.listener({ agent, message: { content: [{ type: 'text', text: 'change both' }] } })
+  await waitFor(async () => (await feature.call('worktreeState', { sessionId: SESSION })).value.current ?? null)
+  // Eager materialization follows the (very fast) context creation, so wait
+  // for the checkouts before asserting their state.
+  await waitFor(async () => {
+    const answer = await feature.call('repos', { sessionId: SESSION })
+    return answer.value.repos.length > 0 && answer.value.repos.every((repo) => repo.state === 'ready')
+      ? true
+      : null
+  })
+  return { feature, agent }
+}
+
+test('eager mode creates a checkout for every core repo on the first message', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-eager-'))
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    const { feature } = await firstMessageIn(workspace, { checkout: { mode: 'eager' } })
+    try {
+      const state = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(state.value.repos.every((repo) => repo.state === 'ready'), true)
+      const instructions = await readFile(join(state.value.context.path, 'AGENTS.md'), 'utf8')
+      assert.match(instructions, /be/)
+      assert.match(instructions, /fe/)
+    } finally {
+      await feature.dispose()
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('a workspace manifest can turn on eager checkouts without a plugin setting', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'personal-hub-manifest-eager-'))
+  try {
+    await makeSiblingRepo(workspace, 'be')
+    await makeSiblingRepo(workspace, 'fe')
+    await writeFile(join(workspace, '.dsh-workspace.json'), `${JSON.stringify({ checkout: { mode: 'eager' } })}\n`, 'utf8')
+    const { feature } = await firstMessageIn(workspace)
+    try {
+      const state = await feature.call('worktreeState', { sessionId: SESSION })
+      assert.equal(state.value.checkoutMode, 'eager')
+      const repos = await feature.call('repos', { sessionId: SESSION })
+      assert.equal(repos.value.repos.every((repo) => repo.state === 'ready'), true)
     } finally {
       await feature.dispose()
     }

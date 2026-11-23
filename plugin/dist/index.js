@@ -2436,7 +2436,8 @@ function normalizeRelativePath(root, path) {
   const target = resolve2(root, normalized);
   const inside = relative(root, target);
   if (inside.startsWith("..") || isAbsolute(inside)) {
-    throw new CommandError("input/invalid", "File path is outside the repository", { path: text2 });
+    const message3 = root ? `File path is outside this repository (${root})` : "File path is outside this repository";
+    throw new CommandError("input/invalid", message3, { path: text2 });
   }
   return normalized;
 }
@@ -4948,6 +4949,49 @@ function messageOf6(error) {
 import { resolve as resolve4 } from "node:path";
 var MIN_CHECK_MS = 15e3;
 var SETTLE_RETRY_LIMIT = 5;
+function isPullSet(value) {
+  if (value === null || typeof value !== "object") return false;
+  const repos = value.repos;
+  return repos !== null && typeof repos === "object" && !Array.isArray(repos);
+}
+function pullSlots(pulls) {
+  const slots = [];
+  for (const [sessionId, value] of Object.entries(pulls ?? {})) {
+    if (isPullSet(value)) {
+      for (const [repoId, binding] of Object.entries(value.repos)) {
+        if (binding !== null && typeof binding === "object") slots.push({ sessionId, repoId, set: value, binding });
+      }
+    } else if (value !== null && typeof value === "object") {
+      slots.push({ sessionId, binding: value });
+    }
+  }
+  return slots;
+}
+function readBinding(value, repoId) {
+  if (value === void 0) return void 0;
+  if (isPullSet(value)) return repoId === void 0 ? void 0 : value.repos[repoId];
+  return repoId === void 0 ? value : void 0;
+}
+function writeSlot(state, sessionId, repoId, patch) {
+  state.pulls ??= {};
+  const current = state.pulls[sessionId];
+  if (repoId === void 0) {
+    if (isPullSet(current)) {
+      state.pulls[sessionId] = {
+        ...current,
+        repos: { ...current.repos, primary: { ...current.repos.primary, ...patch } }
+      };
+    } else {
+      state.pulls[sessionId] = { ...current ?? {}, ...patch };
+    }
+    return;
+  }
+  const set = isPullSet(current) ? current : { repos: current !== void 0 ? { primary: current } : {} };
+  state.pulls[sessionId] = {
+    ...set,
+    repos: { ...set.repos, [repoId]: { ...set.repos[repoId] ?? {}, ...patch } }
+  };
+}
 function mergedCleanup(config, facts = {}) {
   const settings = config ?? {};
   const active = settings.enabled === true;
@@ -4987,6 +5031,13 @@ function lostArchives(pulls, archivedIds, now, windowMs = ARCHIVE_REPAIR_WINDOW_
   const lost = [];
   for (const [sessionId, binding] of Object.entries(pulls ?? {})) {
     if (binding === null || typeof binding !== "object") continue;
+    if (isPullSet(binding)) {
+      if (binding.archived !== true) continue;
+      const settledAt = Number(binding.cleanedAt ?? 0);
+      if (settledAt <= 0 || now - settledAt > windowMs) continue;
+      if (!archived.has(sessionId)) lost.push(sessionId);
+      continue;
+    }
     if (binding.state !== "merged" || binding.archived !== true) continue;
     if (archived.has(sessionId)) continue;
     const cleanedAt = Number(binding.cleanedAt ?? 0);
@@ -5044,13 +5095,16 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
   let timer;
   let running = false;
   let disposed = false;
+  const archivingSets = /* @__PURE__ */ new Set();
   async function track(sessionId, record3) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return;
     if (record3 === null || typeof record3 !== "object") return;
     const number = Number(record3.number);
     if (!Number.isFinite(number) || number <= 0) return;
+    const repoId = typeof record3.repoId === "string" ? record3.repoId.trim() : "";
     await store.load();
-    const checkout = store.state.worktrees?.[sessionId];
+    const stored = store.state.worktrees?.[sessionId];
+    const checkout = repoId.length > 0 ? stored?.repos?.[repoId] : stored;
     if (checkout !== void 0 && !checkoutOwnsBinding(record3, checkout)) {
       logger.warn(
         "git: ignoring change request %d for %s: branch %s is not its checkout branch %s",
@@ -5061,16 +5115,16 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
       );
       return;
     }
-    const existing = store.state.pulls?.[sessionId];
+    const slot = repoId.length > 0 ? repoId : void 0;
+    const existing = readBinding(store.state.pulls?.[sessionId], slot);
     if (existing !== void 0 && existing.number === number) return;
     await store.update((state) => {
-      state.pulls ??= {};
-      const previous = state.pulls[sessionId];
-      state.pulls[sessionId] = {
-        ...previous,
+      const previous = readBinding(state.pulls?.[sessionId], slot);
+      writeSlot(state, sessionId, slot, {
         ...record3,
         number,
         sessionId,
+        repoId: slot,
         trackedAt: previous?.trackedAt ?? now(),
         done: false,
         checkedAt: now(),
@@ -5088,7 +5142,7 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
         attempts: void 0,
         deferred: void 0,
         skipped: void 0
-      };
+      });
     });
   }
   async function runOnce() {
@@ -5098,16 +5152,23 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     try {
       await store.load();
       const pulls = store.state.pulls ?? {};
-      for (const [sessionId, record3] of Object.entries(pulls)) {
-        if (record3 === null || typeof record3 !== "object") continue;
+      for (const { sessionId, repoId, set, binding } of pullSlots(pulls)) {
         try {
-          if (record3.done === true) {
-            await retrySettledArchive(sessionId, record3);
+          if (binding.done === true) {
+            if (set === void 0) await retrySettledArchive(sessionId, binding);
             continue;
           }
-          await settle(sessionId, record3);
+          await settle(sessionId, binding, repoId, set);
         } catch (error) {
           logger.warn("git: merge check for %s failed: %s", sessionId, messageOf7(error));
+        }
+      }
+      for (const [sessionId, value] of Object.entries(pulls)) {
+        if (!isPullSet(value)) continue;
+        try {
+          await maybeArchiveSet(sessionId, value);
+        } catch (error) {
+          logger.warn("git: multi-repo merge check for %s failed: %s", sessionId, messageOf7(error));
         }
       }
     } finally {
@@ -5141,7 +5202,107 @@ function createMergeWatcher({ config, logger, store, forge, runtime, now = Date.
     });
     if (result.archived) logger.info("git: archived %s after its change request merged", sessionId);
   }
-  async function settle(sessionId, record3) {
+  async function settleRepoBinding(sessionId, record3, repoId) {
+    const state = await forge.pullState({
+      root: record3.root,
+      remote: record3.remote,
+      number: Number(record3.number)
+    });
+    if (state === null) return;
+    const next = String(state.state ?? "");
+    if (next !== "merged") {
+      await store.update((value) => {
+        writeSlot(value, sessionId, repoId, {
+          state: next,
+          checkedAt: now(),
+          done: next === "closed"
+        });
+      });
+      return;
+    }
+    const worktrees = store.state.worktrees ?? {};
+    const stored = worktrees[sessionId];
+    const checkout = stored?.repos?.[repoId];
+    if (checkout !== void 0 && !checkoutOwnsBinding(record3, checkout)) {
+      logger.warn("git: %s merged but is not the checkout of %s in %s; leaving it alone", String(state.url ?? record3.number), repoId, sessionId);
+      await store.update((value) => {
+        writeSlot(value, sessionId, repoId, {
+          state: "merged",
+          done: true,
+          skipped: "checkout-mismatch",
+          checkedAt: now()
+        });
+      });
+      return;
+    }
+    await store.update((value) => {
+      writeSlot(value, sessionId, repoId, {
+        state: "merged",
+        done: true,
+        cleanedAt: now(),
+        mergedUrl: state.url ?? record3.url ?? "",
+        attempts: (Number(record3.attempts) || 0) + 1,
+        deferred: void 0,
+        skipped: void 0
+      });
+    });
+  }
+  async function maybeArchiveSet(sessionId, initial) {
+    if (archivingSets.has(sessionId)) return;
+    const value = store.state.pulls?.[sessionId];
+    const set = isPullSet(value) ? value : initial;
+    if (set.archived === true) return;
+    if ((Number(set.attempts) || 0) >= SETTLE_RETRY_LIMIT) return;
+    const stored = store.state.worktrees?.[sessionId];
+    if (stored?.kind !== "context") return;
+    const materialized = Object.keys(stored.repos ?? {});
+    if (materialized.length === 0) return;
+    const bindings = materialized.map((repoId) => set.repos[repoId]);
+    if (bindings.some((binding) => binding === void 0)) return;
+    if (!bindings.every((binding) => String(binding?.state ?? "") === "merged")) return;
+    if (!mergedCleanup(merged, { hasWorktree: true }).archiveSession) return;
+    archivingSets.add(sessionId);
+    try {
+      const result = await archiveNow(sessionId);
+      if (!result.archived) {
+        const busy = runtime.isSessionActive?.(sessionId, stored) === true;
+        await store.update((current) => {
+          const entry = current.pulls?.[sessionId];
+          if (entry === void 0 || !isPullSet(entry)) return;
+          entry.archiveError = result.error ?? (busy ? "session-active" : "archive-refused");
+          entry.deferred = busy ? "session-active" : void 0;
+          entry.attempts = (Number(entry.attempts) || 0) + 1;
+          entry.checkedAt = now();
+        });
+        if (busy) logger.info("git: %s has merged in every repo but is still active; cleanup waits", sessionId);
+        return;
+      }
+      await store.update((current) => {
+        const entry = current.pulls?.[sessionId];
+        if (entry === void 0 || !isPullSet(entry)) return;
+        entry.archived = true;
+        entry.archiveError = void 0;
+        entry.deferred = void 0;
+        entry.cleanedAt = now();
+        entry.attempts = (Number(entry.attempts) || 0) + 1;
+      });
+      logger.info("git: archived %s after all %d repositories merged", sessionId, bindings.length);
+      if (mergedCleanup(merged, { hasWorktree: true }).removeWorktree) {
+        try {
+          await runtime.removeSessionWorktree(stored, sessionId);
+        } catch (error) {
+          logger.warn("git: could not remove the checkouts of %s: %s", sessionId, messageOf7(error));
+        }
+      }
+    } finally {
+      archivingSets.delete(sessionId);
+    }
+  }
+  async function settle(sessionId, record3, repoId, set) {
+    if (set !== void 0 && repoId !== void 0) {
+      await settleRepoBinding(sessionId, record3, repoId);
+      return;
+    }
     const state = await forge.pullState({
       root: record3.root,
       remote: record3.remote,
@@ -5262,7 +5423,296 @@ function messageOf7(error) {
 }
 
 // src/lib/worktree-cleanup.ts
-import { stat as stat3 } from "node:fs/promises";
+import { stat as stat4 } from "node:fs/promises";
+
+// src/lib/context.ts
+import { mkdir as mkdir3, readFile as readFile3, realpath as realpath2, rm, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
+import { dirname as dirname3, join as join5, resolve as resolve5 } from "node:path";
+var DEFAULT_CONTEXT_DIRECTORY = ".agents/worktrees";
+function contextPath(workspaceRoot, name2, config) {
+  const directory = String(config?.directory ?? DEFAULT_CONTEXT_DIRECTORY).trim() || DEFAULT_CONTEXT_DIRECTORY;
+  return join5(resolve5(workspaceRoot), directory.split("/").join(sepName()), name2);
+}
+function contextManifestPath(contextDirectory) {
+  return join5(contextDirectory, ".dsh", "checkout.json");
+}
+function contextName(sessionId, prefix = "dsh") {
+  return generatedWorktreeName(sessionId, prefix);
+}
+async function ensureContext(options) {
+  const workspaceRoot = await realpath2(resolve5(options.workspaceRoot)).catch(() => resolve5(options.workspaceRoot));
+  const directory = contextPath(workspaceRoot, options.name, { directory: options.directory });
+  if (!isInside(workspaceRoot, directory) || resolve5(directory) === resolve5(workspaceRoot)) {
+    throw new CommandError("context/invalid-path", "The context directory must sit inside the workspace");
+  }
+  const existing = await readContext2(directory).catch(() => void 0);
+  if (existing !== void 0) return existing;
+  await mkdir3(join5(directory, ".dsh"), { recursive: true });
+  const record3 = {
+    kind: "context",
+    sessionId: options.sessionId,
+    workspaceRoot,
+    path: resolve5(directory),
+    name: options.name,
+    createdAt: options.now ?? Date.now(),
+    repos: {}
+  };
+  await writeContext(record3);
+  return record3;
+}
+async function readContext2(contextDirectory) {
+  let text2;
+  try {
+    text2 = await readFile3(contextManifestPath(contextDirectory), "utf8");
+  } catch {
+    return void 0;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text2);
+  } catch {
+    return void 0;
+  }
+  if (parsed === null || typeof parsed !== "object") return void 0;
+  const raw = parsed;
+  if (typeof raw.path !== "string" || typeof raw.workspaceRoot !== "string") return void 0;
+  const repos = {};
+  for (const [id, value] of Object.entries(raw.repos ?? {})) {
+    if (value === null || typeof value !== "object") continue;
+    const entry = value;
+    if (typeof entry.path !== "string" || typeof entry.repositoryRoot !== "string") continue;
+    repos[id] = {
+      id,
+      path: entry.path,
+      repositoryRoot: entry.repositoryRoot,
+      branch: String(entry.branch ?? ""),
+      base: String(entry.base ?? ""),
+      source: entry.source === "remote" ? "remote" : "local",
+      remote: typeof entry.remote === "string" ? entry.remote : null,
+      start: String(entry.start ?? ""),
+      materializedAt: Number(entry.materializedAt) || 0,
+      warning: entry.warning ?? null
+    };
+  }
+  return {
+    kind: "context",
+    sessionId: String(raw.sessionId ?? ""),
+    workspaceRoot: raw.workspaceRoot,
+    path: raw.path,
+    name: String(raw.name ?? ""),
+    createdAt: Number(raw.createdAt) || 0,
+    repos
+  };
+}
+async function writeContext(record3) {
+  const path = contextManifestPath(record3.path);
+  await mkdir3(dirname3(path), { recursive: true });
+  await writeFile3(path, `${JSON.stringify(record3, null, 2)}
+`, "utf8");
+}
+var INSTRUCTION_FILE_NAMES = ["AGENTS.md", "CLAUDE.md"];
+function renderContextInstructions(workspaceRoot, repos, instructionFiles = /* @__PURE__ */ new Set()) {
+  const lines = [
+    "<!-- Generated by DeepSeek Harness for this chat. Safe to edit: this file is never overwritten. -->",
+    "",
+    "# Chat workspace",
+    "",
+    "This directory is this chat's working folder, not a Git repository.",
+    "Repositories appear here only when this chat changes them; the main checkouts below live elsewhere in the workspace.",
+    "",
+    `- Workspace root: \`${workspaceRoot}\``,
+    ""
+  ];
+  if (repos.length === 0) {
+    lines.push("No repositories were discovered in this workspace.", "");
+    return lines.join("\n");
+  }
+  lines.push("## Repositories", "");
+  for (const repo of repos) {
+    lines.push(`### \`${repo.id}\``, "");
+    lines.push(`- Main checkout: \`${repo.root}\``);
+    if (repo.role.trim() !== "" && repo.role !== repo.name) lines.push(`- Role: ${repo.role}`);
+    const files = INSTRUCTION_FILE_NAMES.map((name2) => join5(repo.root, name2)).filter((path) => instructionFiles.has(path));
+    if (files.length > 0) {
+      lines.push("- Instruction files (read these before working in this repository):");
+      for (const file of files) lines.push(`  - \`${file}\``);
+    }
+    lines.push("");
+  }
+  return `${lines.join("\n").trimEnd()}
+`;
+}
+async function writeContextInstructions(context, repos) {
+  const target = join5(context.path, "AGENTS.md");
+  if (await stat3(target).catch(() => void 0) !== void 0) return;
+  const instructionFiles = /* @__PURE__ */ new Set();
+  await Promise.all(
+    repos.flatMap((repo) => INSTRUCTION_FILE_NAMES.map(async (name2) => {
+      const path = join5(repo.root, name2);
+      const info = await stat3(path).catch(() => void 0);
+      if (info?.isFile() === true) instructionFiles.add(path);
+    }))
+  );
+  await mkdir3(context.path, { recursive: true });
+  try {
+    await writeFile3(target, renderContextInstructions(context.workspaceRoot, repos, instructionFiles), {
+      encoding: "utf8",
+      flag: "wx"
+    });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+  }
+}
+async function materializeRepo(options) {
+  const { runner, context, repo, set, config, timeoutMs, signal } = options;
+  const existing = context.repos[repo.id];
+  if (existing !== void 0) {
+    const info = await stat3(existing.path).catch(() => void 0);
+    if (info?.isDirectory() === true) return { checkout: existing, created: false, warning: existing.warning ?? null };
+    delete context.repos[repo.id];
+    await runner.run("git", ["worktree", "prune"], { cwd: repo.root, signal }).catch(() => void 0);
+    await writeContext(context).catch(() => void 0);
+  }
+  const remote = await preferredRemote(runner, repo, set, config, signal);
+  const requestedBase = String(options.base ?? "").trim();
+  const manifestBase = String(set.manifest.base?.[repo.id] ?? set.manifest.base?.[repo.name] ?? "").trim();
+  const configuredBase = requestedBase || manifestBase || String(config.base ?? "").trim();
+  let base = configuredBase;
+  if (base.length === 0) {
+    base = await resolveDefaultBase(runner, { root: repo.root, remote, signal }) ?? "";
+  } else {
+    const found = await runner.run("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], {
+      cwd: repo.root,
+      signal
+    });
+    if (found.code !== 0) {
+      base = await resolveDefaultBase(runner, { root: repo.root, remote, signal }) ?? "";
+    }
+  }
+  if (base.length === 0) {
+    throw new CommandError("checkout/no-base", `Cannot determine a base branch for ${repo.name}`, { repo: repo.id });
+  }
+  const dirty = await mainCheckoutDirty(runner, repo.root, signal);
+  const dirtyPolicy = set.manifest.checkout?.dirtyMain ?? config.dirtyMain ?? "warn";
+  if (dirty && dirtyPolicy === "abort") {
+    throw new CommandError(
+      "checkout/dirty-main",
+      `${repo.name} has uncommitted changes in its main checkout. Commit or stash them before this chat starts a checkout.`,
+      { repo: repo.id, root: repo.root }
+    );
+  }
+  const source = config.fetchOnCheckout === false || config.source === "local" || remote.length === 0 ? "local" : "remote";
+  const branch = await uniqueBranchName(runner, { root: repo.root, branch: context.name, signal });
+  const checkoutPath = join5(context.path, repo.relativePath);
+  if (checkoutPath !== context.path && !isInside(context.path, checkoutPath)) {
+    throw new CommandError("checkout/invalid-path", `Checkout path for ${repo.name} escapes the context directory`);
+  }
+  let created;
+  let fetchFailed = false;
+  try {
+    created = await createWorktree(runner, {
+      repoRoot: repo.root,
+      name: branch,
+      base,
+      source,
+      remote: source === "remote" ? remote : "",
+      path: checkoutPath,
+      timeoutMs,
+      signal
+    });
+  } catch (error) {
+    if (source !== "remote") throw error;
+    fetchFailed = true;
+    created = await createWorktree(runner, {
+      repoRoot: repo.root,
+      name: branch,
+      base,
+      source: "local",
+      path: checkoutPath,
+      timeoutMs,
+      signal
+    });
+  }
+  const warnings = [];
+  if (dirty) warnings.push(`The main checkout of ${repo.name} has uncommitted changes that this checkout does not include.`);
+  if (fetchFailed && source === "remote") warnings.push(`Could not fetch ${remote}/${base}; started from the local branch instead.`);
+  const warning = warnings.length === 0 ? null : warnings.join(" ");
+  const checkout = {
+    id: repo.id,
+    path: created.path,
+    repositoryRoot: repo.root,
+    branch: created.branch,
+    base,
+    source,
+    remote: source === "remote" ? remote : null,
+    start: created.start,
+    materializedAt: options.now ?? Date.now(),
+    warning
+  };
+  context.repos[repo.id] = checkout;
+  try {
+    await writeContext(context);
+  } catch (error) {
+    await removeWorktree(runner, {
+      repoRoot: repo.root,
+      path: checkout.path,
+      branch: created.branch,
+      deleteBranch: true,
+      timeoutMs,
+      signal
+    }).catch(() => void 0);
+    await removeCheckoutDir(checkout.path);
+    delete context.repos[repo.id];
+    throw error;
+  }
+  return { checkout, created: true, warning };
+}
+async function removeRepoCheckout(options) {
+  const checkout = options.context.repos[options.repoId];
+  if (checkout === void 0) return { removed: false, branchDeleted: false };
+  const result = await removeWorktree(options.runner, {
+    repoRoot: checkout.repositoryRoot,
+    path: checkout.path,
+    branch: checkout.branch,
+    deleteBranch: options.deleteBranch === true,
+    force: options.force === true,
+    timeoutMs: options.timeoutMs,
+    signal: options.signal
+  });
+  delete options.context.repos[options.repoId];
+  await writeContext(options.context);
+  return { removed: result.removed, branchDeleted: result.branchDeleted };
+}
+async function removeCheckoutDir(path) {
+  await rm(path, { recursive: true, force: true }).catch(() => void 0);
+}
+async function preferredRemote(runner, repo, set, config, signal) {
+  const names = await remoteNames(runner, { root: repo.root, signal });
+  const candidates = [
+    set.manifest.remote?.[repo.id] ?? set.manifest.remote?.[repo.name],
+    config.remote,
+    "origin"
+  ];
+  for (const candidate of candidates) {
+    const name2 = String(candidate ?? "").trim();
+    if (name2.length > 0 && names.includes(name2)) return name2;
+  }
+  return names[0] ?? "";
+}
+async function mainCheckoutDirty(runner, root, signal) {
+  const result = await runner.run("git", ["status", "--porcelain", "--untracked-files=normal"], {
+    cwd: root,
+    signal,
+    maxBytes: 2 * 1024 * 1024
+  }).catch(() => void 0);
+  if (result === void 0 || result.code !== 0) return false;
+  return String(result.stdout ?? "").trim().length > 0;
+}
+function sepName() {
+  return process.platform === "win32" ? "\\" : "/";
+}
+
+// src/lib/worktree-cleanup.ts
 var MIN_CHECK_MS2 = 3e5;
 var DAY_MS2 = 864e5;
 var HOUR_MS = 36e5;
@@ -5286,7 +5736,7 @@ function cleanupDecision(settings, facts) {
 async function inspectWorktree(runner, record3, at = Date.now()) {
   const path = String(record3?.path ?? "");
   const created = Number(record3?.createdAt) || at;
-  const info = await stat3(path).catch(() => void 0);
+  const info = await stat4(path).catch(() => void 0);
   if (info === void 0) {
     return { missing: true, ageMs: at - created, localFiles: 0, trackedChanges: 0, commitsAhead: 0 };
   }
@@ -5368,6 +5818,7 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
                 worktrees[sessionId] = record3;
               }
             });
+            await syncContextManifest(record3);
           }
           continue;
         }
@@ -5432,6 +5883,21 @@ function createWorktreeCleanup({ runner, config, logger, store, runtime, now = D
       timer = void 0;
     }
   };
+}
+async function syncContextManifest(record3) {
+  if (record3.kind !== "context" || typeof record3.path !== "string" || record3.path.length === 0) return;
+  const info = await stat4(record3.path).catch(() => void 0);
+  if (info?.isDirectory() !== true) return;
+  const context = {
+    kind: "context",
+    sessionId: String(record3.sessionId ?? ""),
+    workspaceRoot: String(record3.workspaceRoot ?? record3.repositoryRoot ?? ""),
+    path: record3.path,
+    name: String(record3.name ?? ""),
+    createdAt: Number(record3.createdAt) || 0,
+    repos: record3.repos ?? {}
+  };
+  await writeContext(context).catch(() => void 0);
 }
 function worktreeRecords(state) {
   const value = state.worktrees ?? {};
@@ -5565,227 +6031,6 @@ function firstReasoningEffort(model) {
   if (!Array.isArray(efforts)) return void 0;
   const first = efforts[0];
   return first !== null && typeof first === "object" ? first.id : void 0;
-}
-
-// src/lib/context.ts
-import { mkdir as mkdir3, readFile as readFile3, realpath as realpath2, rm, stat as stat4, writeFile as writeFile3 } from "node:fs/promises";
-import { dirname as dirname3, join as join5, resolve as resolve5 } from "node:path";
-var DEFAULT_CONTEXT_DIRECTORY = ".agents/worktrees";
-function contextPath(workspaceRoot, name2, config) {
-  const directory = String(config?.directory ?? DEFAULT_CONTEXT_DIRECTORY).trim() || DEFAULT_CONTEXT_DIRECTORY;
-  return join5(resolve5(workspaceRoot), directory.split("/").join(sepName()), name2);
-}
-function contextManifestPath(contextDirectory) {
-  return join5(contextDirectory, ".dsh", "checkout.json");
-}
-function contextName(sessionId, prefix = "dsh") {
-  return generatedWorktreeName(sessionId, prefix);
-}
-async function ensureContext(options) {
-  const workspaceRoot = await realpath2(resolve5(options.workspaceRoot)).catch(() => resolve5(options.workspaceRoot));
-  const directory = contextPath(workspaceRoot, options.name, { directory: options.directory });
-  if (!isInside(workspaceRoot, directory) || resolve5(directory) === resolve5(workspaceRoot)) {
-    throw new CommandError("context/invalid-path", "The context directory must sit inside the workspace");
-  }
-  const existing = await readContext2(directory).catch(() => void 0);
-  if (existing !== void 0) return existing;
-  await mkdir3(join5(directory, ".dsh"), { recursive: true });
-  const record3 = {
-    kind: "context",
-    sessionId: options.sessionId,
-    workspaceRoot,
-    path: resolve5(directory),
-    name: options.name,
-    createdAt: options.now ?? Date.now(),
-    repos: {}
-  };
-  await writeContext(record3);
-  return record3;
-}
-async function readContext2(contextDirectory) {
-  let text2;
-  try {
-    text2 = await readFile3(contextManifestPath(contextDirectory), "utf8");
-  } catch {
-    return void 0;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text2);
-  } catch {
-    return void 0;
-  }
-  if (parsed === null || typeof parsed !== "object") return void 0;
-  const raw = parsed;
-  if (typeof raw.path !== "string" || typeof raw.workspaceRoot !== "string") return void 0;
-  const repos = {};
-  for (const [id, value] of Object.entries(raw.repos ?? {})) {
-    if (value === null || typeof value !== "object") continue;
-    const entry = value;
-    if (typeof entry.path !== "string" || typeof entry.repositoryRoot !== "string") continue;
-    repos[id] = {
-      id,
-      path: entry.path,
-      repositoryRoot: entry.repositoryRoot,
-      branch: String(entry.branch ?? ""),
-      base: String(entry.base ?? ""),
-      source: entry.source === "remote" ? "remote" : "local",
-      remote: typeof entry.remote === "string" ? entry.remote : null,
-      start: String(entry.start ?? ""),
-      materializedAt: Number(entry.materializedAt) || 0,
-      warning: entry.warning ?? null
-    };
-  }
-  return {
-    kind: "context",
-    sessionId: String(raw.sessionId ?? ""),
-    workspaceRoot: raw.workspaceRoot,
-    path: raw.path,
-    name: String(raw.name ?? ""),
-    createdAt: Number(raw.createdAt) || 0,
-    repos
-  };
-}
-async function writeContext(record3) {
-  const path = contextManifestPath(record3.path);
-  await mkdir3(dirname3(path), { recursive: true });
-  await writeFile3(path, `${JSON.stringify(record3, null, 2)}
-`, "utf8");
-}
-async function materializeRepo(options) {
-  const { runner, context, repo, set, config, timeoutMs, signal } = options;
-  const existing = context.repos[repo.id];
-  if (existing !== void 0) {
-    const info = await stat4(existing.path).catch(() => void 0);
-    if (info?.isDirectory() === true) return { checkout: existing, created: false, warning: existing.warning ?? null };
-    delete context.repos[repo.id];
-    await runner.run("git", ["worktree", "prune"], { cwd: repo.root, signal }).catch(() => void 0);
-    await writeContext(context).catch(() => void 0);
-  }
-  const remote = await preferredRemote(runner, repo.root, config, signal);
-  const requestedBase = String(options.base ?? "").trim();
-  const manifestBase = String(set.manifest.base?.[repo.id] ?? set.manifest.base?.[repo.name] ?? "").trim();
-  const configuredBase = requestedBase || manifestBase || String(config.base ?? "").trim();
-  let base = configuredBase;
-  if (base.length === 0) {
-    base = await resolveDefaultBase(runner, { root: repo.root, remote, signal }) ?? "";
-  } else {
-    const found = await runner.run("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], {
-      cwd: repo.root,
-      signal
-    });
-    if (found.code !== 0) {
-      base = await resolveDefaultBase(runner, { root: repo.root, remote, signal }) ?? "";
-    }
-  }
-  if (base.length === 0) {
-    throw new CommandError("checkout/no-base", `Cannot determine a base branch for ${repo.name}`, { repo: repo.id });
-  }
-  const dirty = await mainCheckoutDirty(runner, repo.root, signal);
-  const dirtyPolicy = set.manifest.checkout?.dirtyMain ?? config.dirtyMain ?? "warn";
-  if (dirty && dirtyPolicy === "abort") {
-    throw new CommandError(
-      "checkout/dirty-main",
-      `${repo.name} has uncommitted changes in its main checkout. Commit or stash them before this chat starts a checkout.`,
-      { repo: repo.id, root: repo.root }
-    );
-  }
-  const source = config.source === "local" || remote.length === 0 ? "local" : "remote";
-  const branch = await uniqueBranchName(runner, { root: repo.root, branch: context.name, signal });
-  const checkoutPath = join5(context.path, repo.relativePath);
-  if (checkoutPath !== context.path && !isInside(context.path, checkoutPath)) {
-    throw new CommandError("checkout/invalid-path", `Checkout path for ${repo.name} escapes the context directory`);
-  }
-  let created;
-  let fetchFailed = false;
-  try {
-    created = await createWorktree(runner, {
-      repoRoot: repo.root,
-      name: branch,
-      base,
-      source,
-      remote: source === "remote" ? remote : "",
-      path: checkoutPath,
-      timeoutMs,
-      signal
-    });
-  } catch (error) {
-    if (source !== "remote") throw error;
-    fetchFailed = true;
-    created = await createWorktree(runner, {
-      repoRoot: repo.root,
-      name: branch,
-      base,
-      source: "local",
-      path: checkoutPath,
-      timeoutMs,
-      signal
-    });
-  }
-  const warnings = [];
-  if (dirty) warnings.push(`The main checkout of ${repo.name} has uncommitted changes that this checkout does not include.`);
-  if (fetchFailed && source === "remote") warnings.push(`Could not fetch ${remote}/${base}; started from the local branch instead.`);
-  const warning = warnings.length === 0 ? null : warnings.join(" ");
-  const checkout = {
-    id: repo.id,
-    path: created.path,
-    repositoryRoot: repo.root,
-    branch: created.branch,
-    base,
-    source,
-    remote: source === "remote" ? remote : null,
-    start: created.start,
-    materializedAt: options.now ?? Date.now(),
-    warning
-  };
-  context.repos[repo.id] = checkout;
-  try {
-    await writeContext(context);
-  } catch (error) {
-    await removeCheckoutDir(checkout.path);
-    delete context.repos[repo.id];
-    throw error;
-  }
-  return { checkout, created: true, warning };
-}
-async function removeRepoCheckout(options) {
-  const checkout = options.context.repos[options.repoId];
-  if (checkout === void 0) return { removed: false, branchDeleted: false };
-  const result = await removeWorktree(options.runner, {
-    repoRoot: checkout.repositoryRoot,
-    path: checkout.path,
-    branch: checkout.branch,
-    deleteBranch: options.deleteBranch === true,
-    force: options.force === true,
-    timeoutMs: options.timeoutMs,
-    signal: options.signal
-  });
-  delete options.context.repos[options.repoId];
-  await writeContext(options.context);
-  return { removed: result.removed, branchDeleted: result.branchDeleted };
-}
-async function removeCheckoutDir(path) {
-  await rm(path, { recursive: true, force: true }).catch(() => void 0);
-}
-async function preferredRemote(runner, root, config, signal) {
-  const names = await remoteNames(runner, { root, signal });
-  for (const candidate of [config.remote, "origin"]) {
-    const name2 = String(candidate ?? "").trim();
-    if (name2.length > 0 && names.includes(name2)) return name2;
-  }
-  return names[0] ?? "";
-}
-async function mainCheckoutDirty(runner, root, signal) {
-  const result = await runner.run("git", ["status", "--porcelain", "--untracked-files=normal"], {
-    cwd: root,
-    signal,
-    maxBytes: 2 * 1024 * 1024
-  }).catch(() => void 0);
-  if (result === void 0 || result.code !== 0) return false;
-  return String(result.stdout ?? "").trim().length > 0;
-}
-function sepName() {
-  return process.platform === "win32" ? "\\" : "/";
 }
 
 // src/lib/repo-set.ts
@@ -6178,7 +6423,31 @@ function mountRoutes(ctx, connection, config, deps) {
     forge,
     runtime: {
       async removeSessionWorktree(record3, sessionId) {
-        if (record3?.kind === "context") return { removed: false, branchDeleted: false };
+        if (record3?.kind === "context") {
+          const context = contextFromRecord(record3);
+          let removed = 0;
+          let branchDeleted = 0;
+          for (const repoId of Object.keys(context.repos)) {
+            try {
+              const result2 = await removeRepoCheckout({
+                runner,
+                context,
+                repoId,
+                deleteBranch: config.merged.deleteBranch === true,
+                timeoutMs: config.worktreeTimeoutMs
+              });
+              if (result2.removed) removed += 1;
+              if (result2.branchDeleted) branchDeleted += 1;
+            } catch (error) {
+              logger.warn("git: cannot remove %s of %s: %s", repoId, sessionId, messageOf8(error));
+            }
+          }
+          await store.update((current) => {
+            current.worktrees ??= {};
+            current.worktrees[sessionId] = recordFromContext(context);
+          });
+          return { removed: removed > 0, branchDeleted: branchDeleted > 0 };
+        }
         const target = typeof record3?.path === "string" ? record3.path : "";
         if (target.length === 0) return { removed: false, branchDeleted: false };
         const repoRoot = typeof record3.repositoryRoot === "string" ? record3.repositoryRoot : "";
@@ -6382,9 +6651,10 @@ function mountRoutes(ctx, connection, config, deps) {
     if (request !== void 0 && request.error !== null) return null;
     if (request?.enabled === true) return "explicit";
     if (request?.enabled === false) return null;
-    if (config.checkout.mode !== "off") {
-      const header = session?.header?.cwd;
-      const cached = typeof header === "string" && header.length > 0 ? repoSetCache.get(repoPathKey(header)) : void 0;
+    const header = session?.header?.cwd;
+    const cached = typeof header === "string" && header.length > 0 ? repoSetCache.get(repoPathKey(header)) : void 0;
+    const mode = cached?.set.manifest.checkout?.mode ?? config.checkout.mode;
+    if (mode !== "off") {
       if (cached === void 0 || cached.set.kind === "multi") {
         return hasStartedTurn(session) ? null : "auto";
       }
@@ -6463,16 +6733,26 @@ function mountRoutes(ctx, connection, config, deps) {
     try {
       const existing = await contextFor(sessionId);
       if (existing !== void 0) {
-        const live = liveSessionDirectory(ctx, sessionId);
-        if (live === void 0 || !isPathInside(existing.context.path, live)) {
-          await setSessionDirectory(sessionId, existing.context.path, signal);
+        const folder = await stat6(existing.context.path).catch(() => void 0);
+        if (folder?.isDirectory() === true) {
+          const live = liveSessionDirectory(ctx, sessionId);
+          if (live === void 0 || !isPathInside(existing.context.path, live)) {
+            await setSessionDirectory(sessionId, existing.context.path, signal);
+          }
+          checkouts.add(sessionId);
+          requests.delete(sessionId);
+          return;
         }
+        const set2 = await repoSetFor(existing.context.workspaceRoot || directory, signal);
+        const { context } = await ensureSessionContext(sessionId, set2.workspaceRoot, signal);
         checkouts.add(sessionId);
         requests.delete(sessionId);
+        logger.info("git: rebuilt the missing context %s for %s", context.path, sessionId);
         return;
       }
       const set = await repoSetFor(directory, signal);
-      if (set.kind === "multi" && config.checkout.mode !== "off") {
+      const mode = request?.mode ?? checkoutModeFor(set);
+      if (set.kind === "multi" && mode !== "off") {
         if (request?.enabled === false) {
           await rememberRequest(sessionId, null);
           return;
@@ -6481,7 +6761,7 @@ function mountRoutes(ctx, connection, config, deps) {
         checkouts.add(sessionId);
         requests.delete(sessionId);
         logger.info("git: %s now works in context %s", sessionId, context.path);
-        if (config.checkout.mode === "eager") {
+        if (mode === "eager") {
           for (const repo of set.repos.filter((entry) => entry.core)) {
             await materializeForSession(sessionId, repo, void 0, signal).catch((error) => logger.warn("git: eager checkout of %s failed: %s", repo.id, messageOf8(error)));
           }
@@ -6916,14 +7196,18 @@ function mountRoutes(ctx, connection, config, deps) {
     if (sessionId.length > 0 && created.number !== null) {
       const workspaceRoot = await workspaceRootFor(sessionId, void 0, signal).catch(() => "");
       const set = workspaceRoot.length > 0 ? await repoSetFor(workspaceRoot, signal).catch(() => void 0) : void 0;
-      if (set === void 0 || set.kind === "single" || set.repos.length <= 1) {
+      const repoId = set?.kind === "multi" ? set.repos.find((entry) => repoPathKey(entry.root) === repoPathKey(root))?.id : void 0;
+      if (set?.kind === "multi" && repoId === void 0) {
+        logger.warn("git: cannot bind change request %d: %s is not a repo of %s", created.number, root, workspaceRoot);
+      } else {
         await watcher.track(sessionId, {
           root,
           remote,
           number: created.number,
           url: created.url,
           branch,
-          base
+          base,
+          ...repoId === void 0 ? {} : { repoId }
         });
       }
     }
@@ -6949,19 +7233,95 @@ function mountRoutes(ctx, connection, config, deps) {
     async repos(payload, signal) {
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
       const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal);
-      const set = await repoSetFor(workspaceRoot, signal);
+      const set = await repoSetFor(workspaceRoot, signal, payload.refresh === true);
       if (sessionId.length > 0 && set.kind === "multi") sessionRepoSets.set(sessionId, set);
       const record3 = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] : void 0;
       const context = record3?.kind === "context" ? contextFromRecord(record3) : void 0;
-      const repos = await buildRepoStates(set, context);
+      const repos = await buildRepoStates(set, context, false, sessionId);
+      const folder = context === void 0 ? void 0 : await stat6(context.path).catch(() => void 0);
       return {
         workspaceRoot,
         kind: set.kind,
-        isolation: set.kind === "multi" && config.worktree.enabled !== false && config.checkout.mode !== "off",
+        isolation: set.kind === "multi" && config.worktree.enabled !== false && checkoutModeFor(set) !== "off",
         context: context === void 0 ? null : { path: context.path, name: context.name, createdAt: context.createdAt },
+        contextMissing: context !== void 0 && folder?.isDirectory() !== true,
         repos,
         warnings: set.warnings
       };
+    },
+    /**
+     * A cheap poll for repository states, including the ones an agent is
+     * creating through `checkout_repo` while the panel is open.
+     */
+    async checkoutState(payload, signal) {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal);
+      const set = await repoSetFor(workspaceRoot, signal, payload.refresh === true);
+      const context = (await contextFor(sessionId))?.context;
+      const states = await buildRepoStates(set, context, true, sessionId);
+      const folder = context === void 0 ? void 0 : await stat6(context.path).catch(() => void 0);
+      return {
+        workspaceRoot,
+        contextMissing: context !== void 0 && folder?.isDirectory() !== true,
+        repos: states.map((repo) => ({
+          repo: repo.id,
+          state: repo.state === "single" ? "ready" : repo.state,
+          error: repo.error ?? null
+        }))
+      };
+    },
+    /** Recreate a context directory that disappeared from disk. */
+    async contextRepair(payload, signal) {
+      const sessionId = requiredString(payload.sessionId, "sessionId");
+      const current = await contextFor(sessionId);
+      if (current === void 0) throw new CommandError("context/none", "This chat has no context directory to repair");
+      const workspaceRoot = current.context.workspaceRoot || await workspaceRootFor(sessionId, payload.cwd, signal);
+      await ensureSessionContext(sessionId, workspaceRoot, signal);
+      return await handlers.repos({ sessionId, cwd: workspaceRoot }, signal);
+    },
+    /**
+     * The "All" tab's read-only change set: one group per repository.
+     *
+     * Only repositories with a live checkout are asked for Git facts; one
+     * failing repository is reported in place and never hides the others.
+     */
+    async workspaceChanges(payload, signal) {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+      const workspaceRoot = await workspaceRootFor(sessionId, payload.cwd, signal);
+      const set = await repoSetFor(workspaceRoot, signal);
+      const record3 = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] : void 0;
+      const context = record3?.kind === "context" ? contextFromRecord(record3) : void 0;
+      const states = await buildRepoStates(set, context, true, sessionId);
+      const scope = "working";
+      const repos = await Promise.all(set.repos.map(async (repo) => {
+        const state2 = states.find((entry2) => entry2.id === repo.id);
+        const root = state2?.checkout?.path ?? repo.root;
+        const entry = {
+          id: repo.id,
+          name: repo.name,
+          role: repo.role,
+          root,
+          branch: state2?.checkout?.branch ?? null,
+          state: state2?.state ?? "not-checked-out",
+          files: [],
+          stats: { files: 0, additions: 0, deletions: 0 }
+        };
+        if (entry.state !== "ready") return entry;
+        try {
+          const read = await readOverview(runner, { root, config, signal });
+          entry.files = read.files;
+          entry.branch = read.repo.branch;
+          entry.stats = {
+            files: read.stats.files,
+            additions: read.stats.additions,
+            deletions: read.stats.deletions
+          };
+        } catch (error) {
+          entry.error = failureOf2(error);
+        }
+        return entry;
+      }));
+      return { workspaceRoot, scope, repos, warnings: set.warnings };
     },
     /**
      * Create one repository's checkout for this chat, on demand.
@@ -6977,7 +7337,7 @@ function mountRoutes(ctx, connection, config, deps) {
       if (set.kind !== "multi") {
         throw new CommandError("repo/not-multi", "This workspace has only one repository, so it needs no context checkout");
       }
-      if (config.worktree.enabled === false || config.checkout.mode === "off") {
+      if (config.worktree.enabled === false || checkoutModeFor(set) === "off") {
         throw new CommandError("checkout/disabled", "Lazy checkouts are disabled for this workspace");
       }
       const repo = repoOf(set, requiredString(payload.repo, "repo"));
@@ -7047,6 +7407,7 @@ function mountRoutes(ctx, connection, config, deps) {
         if (value.worktrees !== void 0) delete value.worktrees[sessionId];
       });
       checkouts.delete(sessionId);
+      clearCheckoutFailures(sessionId);
       sessionRepoSets.delete(sessionId);
       return { removed, branchDeleted };
     },
@@ -7054,10 +7415,12 @@ function mountRoutes(ctx, connection, config, deps) {
      * Everything the header and the changes view need.
      */
     async overview(payload, signal) {
-      const { root } = await repository(payload, signal);
+      const { root, repo: selectedRepo } = await repository(payload, signal);
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
       const stored = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] ?? null : null;
       const legacy = stored?.kind === "context" ? null : stored;
+      const repoCheckout = stored?.kind === "context" && selectedRepo !== void 0 ? stored.repos?.[selectedRepo.id] : void 0;
+      const adoptionCheckout = legacy ?? (repoCheckout !== void 0 ? { path: repoCheckout.path, repositoryRoot: repoCheckout.repositoryRoot, branch: repoCheckout.branch } : null);
       if (legacy !== null && typeof legacy.path === "string" && pathKey(legacy.path) === pathKey(root)) {
         await repairInheritedBaseUpstream(runner, {
           path: root,
@@ -7095,7 +7458,7 @@ function mountRoutes(ctx, connection, config, deps) {
             pull: found.pull,
             root,
             branch: read.repo.branch,
-            checkout: legacy
+            checkout: adoptionCheckout
           })) {
             await watcher.track(sessionId, {
               root,
@@ -7103,7 +7466,8 @@ function mountRoutes(ctx, connection, config, deps) {
               number: found.pull.number,
               url: found.pull.url,
               branch: read.repo.branch,
-              base: found.pull.base ?? ""
+              base: found.pull.base ?? "",
+              ...selectedRepo === void 0 ? {} : { repoId: selectedRepo.id }
             });
           }
         } catch (error) {
@@ -7669,12 +8033,14 @@ function mountRoutes(ctx, connection, config, deps) {
           const record3 = sessionId.length > 0 ? (await state()).worktrees?.[sessionId] : void 0;
           const context = record3?.kind === "context" ? contextFromRecord(record3) : void 0;
           const repos = await buildRepoStates(set, context, payload.lite === true);
-          const enabled = config.worktree.enabled !== false && config.checkout.mode !== "off";
+          const effectiveMode = requests.get(sessionId)?.mode ?? checkoutModeFor(set);
+          const enabled = config.worktree.enabled !== false && effectiveMode !== "off";
           if (sessionId.length > 0) sessionRepoSets.set(sessionId, set);
           return {
             ...base,
             enabled,
             supported: enabled,
+            checkoutMode: effectiveMode,
             reason: enabled ? null : "disabled",
             kind: "context",
             workspaceRoot,
@@ -7743,6 +8109,7 @@ function mountRoutes(ctx, connection, config, deps) {
       const enabled = payload.enabled === true;
       const base = typeof payload.base === "string" ? payload.base.trim() : previous?.base ?? "";
       const source = payload.source === "local" || payload.source === "remote" ? payload.source : previous?.source ?? config.worktree.source;
+      const mode = payload.mode === "lazy" || payload.mode === "eager" ? payload.mode : previous?.mode;
       if (creating.has(sessionId)) {
         throw new CommandError("worktree/busy", "A checkout is already being created for this chat");
       }
@@ -7750,6 +8117,7 @@ function mountRoutes(ctx, connection, config, deps) {
         enabled,
         base,
         source,
+        mode,
         explicit: true,
         error: payload.retry === true ? null : previous?.error ?? null,
         createdAt: previous?.createdAt ?? now,
@@ -7925,7 +8293,9 @@ function mountRoutes(ctx, connection, config, deps) {
       if (sessionId.length > 0) {
         const current = sessionDirectory(ctx, sessionId);
         if (current !== void 0 && isInside(match.path, current)) {
-          await setSessionDirectory(sessionId, root, signal);
+          const project = sessionOf(sessionId)?.header?.cwd;
+          const destination = project !== void 0 && project.length > 0 && !isInside(match.path, project) ? project : mainRoot;
+          await setSessionDirectory(sessionId, destination, signal);
         }
       }
       const result = await removeWorktree(runner, {
@@ -8216,7 +8586,17 @@ ${result.stderr ?? ""}`;
   const repoSetCache = /* @__PURE__ */ new Map();
   const sessionRepoSets = /* @__PURE__ */ new Map();
   const materializing = /* @__PURE__ */ new Map();
+  const checkoutFailures = /* @__PURE__ */ new Map();
   const REPO_SET_TTL_MS = 3e4;
+  function checkoutKey(sessionId, repoId) {
+    return `${sessionId}\0${repoId}`;
+  }
+  function clearCheckoutFailures(sessionId) {
+    const prefix = `${sessionId}\0`;
+    for (const key of checkoutFailures.keys()) {
+      if (key.startsWith(prefix)) checkoutFailures.delete(key);
+    }
+  }
   function sessionOf(sessionId) {
     const agent = agentFor(sessionId);
     return agent?.session ?? ctx.get("sessions")?.get(sessionId);
@@ -8245,15 +8625,20 @@ ${result.stderr ?? ""}`;
     throw new CommandError("git/no-directory", "Cannot determine the workspace folder for this Session");
   }
   async function repoSetFor(workspaceRoot, signal, refresh = false) {
-    const key = repoPathKey(workspaceRoot);
+    const directory = resolve7(workspaceRoot);
+    const manifest = await stat6(join7(directory, WORKSPACE_MANIFEST)).catch(() => void 0);
+    const key = `${repoPathKey(directory)}\0${manifest?.mtimeMs ?? 0}\0${manifest?.size ?? 0}`;
     const cached = repoSetCache.get(key);
     if (refresh !== true && cached !== void 0 && Date.now() - cached.at < REPO_SET_TTL_MS) return cached.set;
-    const set = await resolveRepoSet(runner, workspaceRoot, {
+    const set = await resolveRepoSet(runner, directory, {
       scanDepth: config.workspace.scanDepth,
       signal
     });
     repoSetCache.set(key, { at: Date.now(), set });
     return set;
+  }
+  function checkoutModeFor(set) {
+    return set.manifest.checkout?.mode ?? config.checkout.mode;
   }
   function contextFromRecord(record3) {
     const repos = {};
@@ -8318,7 +8703,27 @@ ${result.stderr ?? ""}`;
   }
   async function ensureSessionContext(sessionId, workspaceRoot, signal) {
     const existing = await contextFor(sessionId);
-    if (existing !== void 0) return existing;
+    const set = await repoSetFor(workspaceRoot, signal);
+    if (existing !== void 0) {
+      const folder = await stat6(existing.context.path).catch(() => void 0);
+      if (folder?.isDirectory() === true) {
+        await writeContextInstructions(existing.context, set.repos).catch((error) => {
+          logger.warn("git: cannot refresh the context instructions of %s: %s", sessionId, messageOf8(error));
+        });
+        return existing;
+      }
+      logger.warn("git: context %s is gone; recreating it for %s", existing.context.path, sessionId);
+      await store.update((current) => {
+        if (current.worktrees !== void 0) delete current.worktrees[sessionId];
+      }).catch(() => void 0);
+      checkouts.delete(sessionId);
+      clearCheckoutFailures(sessionId);
+      const workspace = existing.context.workspaceRoot || workspaceRoot;
+      if (agentFor(sessionId) !== void 0) {
+        await setSessionDirectory(sessionId, workspace, signal).catch(() => void 0);
+      }
+      return await ensureSessionContext(sessionId, workspace, signal);
+    }
     const name2 = contextName(sessionId, config.worktree.namePrefix);
     const context = await ensureContext({
       workspaceRoot,
@@ -8327,6 +8732,9 @@ ${result.stderr ?? ""}`;
       directory: config.worktree.directory
     });
     const record3 = recordFromContext(context);
+    await writeContextInstructions(context, set.repos).catch((error) => {
+      logger.warn("git: cannot write the context instructions of %s: %s", sessionId, messageOf8(error));
+    });
     try {
       if (agentFor(sessionId) !== void 0) await setSessionDirectory(sessionId, context.path, signal);
     } catch (error) {
@@ -8338,17 +8746,23 @@ ${result.stderr ?? ""}`;
       current.worktrees[sessionId] = record3;
     });
     checkouts.add(sessionId);
-    sessionRepoSets.set(sessionId, await repoSetFor(workspaceRoot, signal));
+    sessionRepoSets.set(sessionId, set);
     return { record: record3, context };
   }
-  async function buildRepoStates(set, context, light = false) {
-    const isolated = set.kind === "multi" && config.worktree.enabled !== false && config.checkout.mode !== "off";
+  async function buildRepoStates(set, context, light = false, sessionId = "") {
+    const isolated = set.kind === "multi" && config.worktree.enabled !== false && checkoutModeFor(set) !== "off";
     return await Promise.all(set.repos.map(async (repo) => {
       const checkout = context?.repos[repo.id];
       let state2 = "not-checked-out";
+      let error = null;
       let info = null;
       let changedFiles = null;
-      if (checkout !== void 0) {
+      if (sessionId.length > 0 && materializing.has(checkoutKey(sessionId, repo.id))) {
+        state2 = "materializing";
+      } else if (sessionId.length > 0 && checkoutFailures.has(checkoutKey(sessionId, repo.id))) {
+        state2 = "error";
+        error = checkoutFailures.get(checkoutKey(sessionId, repo.id)) ?? null;
+      } else if (checkout !== void 0) {
         const exists = await stat6(checkout.path).catch(() => void 0);
         if (exists?.isDirectory() === true) {
           state2 = "ready";
@@ -8382,12 +8796,12 @@ ${result.stderr ?? ""}`;
         state: state2,
         checkout: info,
         changedFiles,
-        error: null
+        error
       };
     }));
   }
   async function materializeForSession(sessionId, repo, base, signal, ownerId = sessionId) {
-    const key = `${ownerId}\0${repo.id}`;
+    const key = checkoutKey(ownerId, repo.id);
     const running = materializing.get(key);
     if (running !== void 0) return await running;
     const task = (async () => {
@@ -8416,11 +8830,15 @@ ${result.stderr ?? ""}`;
         current.worktrees[ownerId] = recordFromContext(context);
       });
       sessionRepoSets.set(ownerId, set);
+      checkoutFailures.delete(key);
       return result.checkout;
     })();
     materializing.set(key, task);
     try {
       return await task;
+    } catch (error) {
+      checkoutFailures.set(key, messageOf8(error));
+      throw error;
     } finally {
       materializing.delete(key);
     }
@@ -8487,7 +8905,7 @@ ${result.stderr ?? ""}`;
     return error;
   }
   async function guardMainCheckout(target, actor) {
-    if (config.checkout.mode === "off" || config.checkout.enforceIsolation !== true) return;
+    if (config.checkout.enforceIsolation !== true) return;
     const fileSystem = ctx.get("fs");
     if (typeof fileSystem?.processPath !== "function") return;
     const session = actorSession(actor);
@@ -8496,7 +8914,7 @@ ${result.stderr ?? ""}`;
     const current = await contextFor(sessionId);
     if (current === void 0) return;
     const set = await repoSetFor(current.context.workspaceRoot);
-    if (set.kind !== "multi") return;
+    if (set.kind !== "multi" || checkoutModeFor(set) === "off") return;
     let path;
     try {
       path = fileSystem.processPath(target);
@@ -8599,18 +9017,22 @@ ${result.stderr ?? ""}`;
         schema: {
           type: "object",
           additionalProperties: false,
+          required: ["repo", "path", "relative", "branch", "base"],
           properties: {
-            repo: { type: "string", required: true },
-            path: { type: "string", required: true },
-            branch: { type: "string", required: true },
-            base: { type: "string", required: true },
+            repo: { type: "string" },
+            path: { type: "string" },
+            relative: { type: "string" },
+            branch: { type: "string" },
+            base: { type: "string" },
+            dirty: { type: "boolean" },
             warning: { type: "string" }
           }
         },
         render: (_args, value) => [{
           type: "text",
           text: `${String(value.repo ?? "")}: ${String(value.path ?? "")} (branch ${String(value.branch ?? "")} from ${String(value.base ?? "")})${value.warning === void 0 ? "" : `
-${String(value.warning)}`}`
+${String(value.warning)}`}
+The checkout starts from the fetched base; re-read files from the path above before editing.`
         }]
       },
       async execute(args, exec) {
@@ -8622,7 +9044,7 @@ ${String(value.warning)}`}`
         const workspaceRoot = await workspaceRootFor(owner, void 0, exec.signal);
         const set = await repoSetFor(workspaceRoot, exec.signal);
         if (set.kind !== "multi") throw new Error("This workspace has only one repository; it needs no context checkout");
-        if (config.checkout.mode === "off") throw new Error("Lazy checkouts are disabled for this workspace");
+        if (checkoutModeFor(set) === "off") throw new Error("Lazy checkouts are disabled for this workspace");
         const repo = repoOf(set, repoId);
         if (repo === void 0) throw new Error(`Unknown repository: ${repoId}`);
         const checkout = await materializeForSession(
@@ -8631,26 +9053,89 @@ ${String(value.warning)}`}`
           typeof args.base === "string" ? args.base : void 0,
           exec.signal
         );
+        const context = (await contextFor(owner))?.context;
+        const dirty = await runner.run("git", ["status", "--porcelain", "--untracked-files=no"], {
+          cwd: repo.root,
+          signal: exec.signal
+        }).then((result) => result.code === 0 && String(result.stdout ?? "").trim().length > 0).catch(() => false);
         return {
           repo: repo.id,
           path: checkout.path,
+          relative: relative4(context?.path ?? workspaceRoot, checkout.path).split("\\").join("/"),
           branch: checkout.branch,
           base: checkout.base,
+          dirty,
           ...checkout.warning === null || checkout.warning === void 0 ? {} : { warning: checkout.warning }
         };
       }
     };
+    const multiSession = ({ agent }) => {
+      const sessionId = typeof agent?.session?.id === "string" ? agent.session.id : "";
+      if (sessionId.length === 0) return false;
+      if (store.state.worktrees?.[sessionId]?.kind === "context") return true;
+      return sessionRepoSets.get(sessionId)?.kind === "multi";
+    };
     try {
-      disposers.push(toolsService.register(definition, {
-        when: ({ agent }) => {
-          const sessionId = typeof agent?.session?.id === "string" ? agent.session.id : "";
-          if (sessionId.length === 0) return false;
-          if (store.state.worktrees?.[sessionId]?.kind === "context") return true;
-          return sessionRepoSets.get(sessionId)?.kind === "multi";
-        }
-      }));
+      disposers.push(toolsService.register(definition, { when: multiSession }));
     } catch (error) {
       logger.warn("git: cannot register checkout_repo: %s", messageOf8(error));
+    }
+    const listDefinition = {
+      name: "workspace_repos",
+      description: "List the repositories in this multi-repository workspace, their roles and which ones this chat has checked out. Read-only; use checkout_repo before editing a repository.",
+      parameters: {},
+      output: {
+        schema: {
+          type: "object",
+          required: ["workspaceRoot", "kind", "repos"],
+          properties: {
+            workspaceRoot: { type: "string" },
+            kind: { type: "string" },
+            contextMissing: { type: "boolean" },
+            repos: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "name", "state"],
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  role: { type: "string" },
+                  state: { type: "string" },
+                  root: { type: "string" },
+                  checkout: { type: "object" }
+                }
+              }
+            }
+          }
+        },
+        render: (_args, value) => {
+          const repos = Array.isArray(value.repos) ? value.repos : [];
+          return [{
+            type: "text",
+            text: [
+              `Workspace: ${String(value.workspaceRoot ?? "")} (${String(value.kind ?? "")})`,
+              ...repos.map((item) => {
+                const repo = item;
+                const checkout = repo.checkout;
+                return `- ${String(repo.id ?? "")} \u2014 ${String(repo.role ?? repo.name ?? "")} \u2014 ${String(repo.state ?? "")} \u2014 ${String(repo.root ?? "")}${checkout === null || checkout === void 0 ? "" : ` [checkout: ${String(checkout.path ?? "")} (${String(checkout.branch ?? "")})]`}`;
+              })
+            ].join("\n")
+          }];
+        }
+      },
+      async execute(_args, exec) {
+        const sessionId = typeof exec.agent?.session?.id === "string" ? exec.agent.session.id : "";
+        if (sessionId.length === 0) throw new Error("workspace_repos requires an open Session");
+        const owner = (await contextFor(sessionId))?.context.sessionId || sessionId;
+        const value = await handlers.repos({ sessionId: owner, cwd: sessionOf(owner)?.header?.cwd }, exec.signal);
+        return { ...value };
+      }
+    };
+    try {
+      disposers.push(toolsService.register(listDefinition, { when: multiSession }));
+    } catch (error) {
+      logger.warn("git: cannot register workspace_repos: %s", messageOf8(error));
     }
   }
   for (const endpoint of Object.keys(handlers)) {
@@ -8698,6 +9183,16 @@ ${String(value.warning)}`}`
           if (binding === void 0) return;
           binding.archived = void 0;
           binding.archiveError = void 0;
+          if (isPullSet(binding)) {
+            binding.attempts = void 0;
+            binding.cleanedAt = void 0;
+            binding.deferred = void 0;
+            binding.checkedAt = Date.now();
+            for (const repo of Object.values(binding.repos)) {
+              repo.archived = void 0;
+              repo.archiveError = void 0;
+            }
+          }
         }).catch(() => void 0);
       }));
     } catch (error) {

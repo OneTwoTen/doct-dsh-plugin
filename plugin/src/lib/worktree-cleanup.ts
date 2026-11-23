@@ -9,6 +9,7 @@
 import { stat } from 'node:fs/promises'
 
 import type { CleanupSettings, WorktreeRecord } from '../shared/protocol.ts'
+import { writeContext, type ContextRecord } from './context.ts'
 import type { GitRunner } from './worktree.ts'
 import { removeWorktree } from './worktree.ts'
 
@@ -265,6 +266,9 @@ export function createWorktreeCleanup(
                 ;(worktrees as Record<string, unknown>)[sessionId] = record
               }
             })
+            // git.json and the context's own `.dsh/checkout.json` must agree:
+            // the JSON store shrank above, so rewrite the manifest too.
+            await syncContextManifest(record)
           }
           continue
         }
@@ -330,6 +334,30 @@ export function createWorktreeCleanup(
       timer = undefined
     },
   }
+}
+
+/**
+ * Rewrite a context's `.dsh/checkout.json` after a checkout was removed.
+ *
+ * The record in the JSON store is the source of truth for the cleanup pass;
+ * the context directory keeps an identical copy. A context whose directory is
+ * already gone needs no rewrite, and a manifest we cannot write must not fail
+ * the whole pass.
+ */
+async function syncContextManifest(record: CleanupRecord): Promise<void> {
+  if (record.kind !== 'context' || typeof record.path !== 'string' || record.path.length === 0) return
+  const info = await stat(record.path).catch(() => undefined)
+  if (info?.isDirectory() !== true) return
+  const context: ContextRecord = {
+    kind: 'context',
+    sessionId: String(record.sessionId ?? ''),
+    workspaceRoot: String(record.workspaceRoot ?? record.repositoryRoot ?? ''),
+    path: record.path,
+    name: String(record.name ?? ''),
+    createdAt: Number(record.createdAt) || 0,
+    repos: (record.repos ?? {}) as ContextRecord['repos'],
+  }
+  await writeContext(context).catch(() => undefined)
 }
 
 /** The worktrees a store state records, or an empty set. */

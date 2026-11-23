@@ -20,6 +20,7 @@ import { MergeSettingsCard, MergeSettingsForm } from './git/settings.tsx'
 import { AutoArchiveCard, AutoArchiveForm } from './auto-archive.tsx'
 import { WorktreeHero, WorktreeOption, WorktreeDock, WorktreeDockCard } from './worktree.tsx'
 import { GitPanel, GitHeaderButton } from './git/panel.tsx'
+import { ChangeSetView, ChangeSetLoader } from './git/change-set.tsx'
 import { GitActions } from './git/actions.tsx'
 import { DiffFileSection } from './git/diff-view.tsx'
 import { CommitComposer } from './git/commit-composer.tsx'
@@ -65,6 +66,8 @@ export function createClient(): ClientModule {
       WorktreeDockCard,
       GitPanel,
       GitHeaderButton,
+      ChangeSetView,
+      ChangeSetLoader,
       GitActions,
       DiffFileSection,
       CommitComposer,

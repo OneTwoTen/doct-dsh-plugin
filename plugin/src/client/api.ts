@@ -35,6 +35,7 @@ import type {
   WebRemoteApi,
   WebRemoteCardState,
   WebRemoteSettingsView,
+  WorkspaceChangesRequest,
 } from '../shared/protocol.ts'
 
 export type { AutoArchiveApi, GitApi, GitRequest, GitResponse, WebRemoteApi } from '../shared/protocol.ts'
@@ -163,6 +164,9 @@ export function createGitApi(call: RawCall): GitApi {
 
   return {
     repos: route('repos') as (payload: GitTarget) => Promise<GitResponse<'repos'>>,
+    workspaceChanges: route('workspaceChanges') as (payload: WorkspaceChangesRequest) => Promise<GitResponse<'workspaceChanges'>>,
+    checkoutState: route('checkoutState') as (payload: GitTarget) => Promise<GitResponse<'checkoutState'>>,
+    contextRepair: route('contextRepair') as (payload: GitTarget) => Promise<GitResponse<'contextRepair'>>,
     checkoutRepo: route('checkoutRepo') as (payload: import('../shared/protocol.ts').CheckoutRepoRequest) => Promise<GitResponse<'checkoutRepo'>>,
     checkoutRemove: route('checkoutRemove') as (payload: import('../shared/protocol.ts').CheckoutRemoveRequest) => Promise<GitResponse<'checkoutRemove'>>,
     contextRemove: route('contextRemove') as (payload: import('../shared/protocol.ts').ContextRemoveRequest) => Promise<GitResponse<'contextRemove'>>,
